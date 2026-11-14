@@ -4,7 +4,7 @@ export interface AppConfig {
   portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number; ai_enabled?: boolean;
 }
 
-export interface PortalReport { portal: string; name: string; departments: number; listed: number; new_civil: number; errors: string[]; failed: boolean }
+export interface PortalReport { portal: string; name: string; departments: number; listed: number; new_civil: number; errors: string[]; failed: boolean; access?: string }
 export interface Run {
   id: number; trigger: 'manual' | 'scheduled'; status: 'running' | 'ok' | 'failed'; started: string; finished: string | null;
   portals: string[]; send_email: boolean; reports: PortalReport[]; new_civil: number; emailed_count: number; error: string | null; log?: string[];
@@ -41,9 +41,17 @@ export interface Pivot { group_by: string; split_by: string | null; rows: PivotR
 export interface Facet { value: string; count: number; label?: string }
 export interface Facets { portal: Facet[]; category: Facet[]; department: Facet[]; location: Facet[]; work_type: Facet[] }
 
+export type AccessKind = 'ok' | 'captcha' | 'login' | 'otp' | 'blocked' | 'different_software' | 'unreachable' | 'unknown';
+/** One portal and whether the app can read it on its own. `manual` means the person has to check it by hand. */
+export interface PortalStatus {
+  key: string; name: string; state: string; base_url: string; custom: boolean; enabled: boolean;
+  kind: AccessKind; label: string; advice: string; manual: boolean; detail: string; checked: string | null; departments: number; tenders: number;
+}
+export interface NewPortal { name: string; state: string; base_url: string }
+
 export interface Settings {
   recipients: string[]; send_time: string; schedule_enabled: boolean; send_empty: boolean; portals: string[]; min_value: number;
-  extra_keywords: string[]; exclude_words: string[]; company_profile: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[];
+  extra_keywords: string[]; exclude_words: string[]; company_profile: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[];
 }
 
 export type Status = 'open' | 'closing_soon' | 'closed' | 'all';

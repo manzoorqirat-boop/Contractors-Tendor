@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { AiStatus, AppConfig, AskResult, Brief, DocFacts, Facets, Filters, Pivot, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { AiStatus, AppConfig, AskResult, Brief, DocFacts, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -55,5 +55,9 @@ export const api = {
   startRun: (portals: string[], sendEmail: boolean) => call<{ id: number }>('/api/runs', { method: 'POST', body: JSON.stringify({ portals, send_email: sendEmail }) }),
   settings: () => call<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => call<Settings>('/api/settings', { method: 'PUT', body: JSON.stringify(s) }),
+  portals: () => call<{ portals: PortalStatus[]; manual: PortalStatus[] }>('/api/portals'),
+  addPortal: (p: NewPortal) => call<PortalStatus>('/api/portals', { method: 'POST', body: JSON.stringify(p) }),
+  checkPortal: (key: string) => call<PortalStatus>(`/api/portals/${encodeURIComponent(key)}/check`, { method: 'POST' }),
+  removePortal: (key: string) => call<{ removed: string }>(`/api/portals/${encodeURIComponent(key)}`, { method: 'DELETE' }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
 };
