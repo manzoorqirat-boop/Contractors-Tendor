@@ -22,7 +22,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
-from . import appsettings, mailer
+from . import ai, appsettings, mailer
 from .config import Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
@@ -115,6 +115,10 @@ class LoginLimiter:
 
 class LoginBody(BaseModel):
     password: str
+
+
+class SummaryBody(BaseModel):
+    key: str
 
 
 class StarBody(BaseModel):
@@ -250,7 +254,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             "mail_configured": manager.mail_configured, "recipient_count": len(cur["recipients"]),
             "now": now().isoformat(timespec="seconds"), "timezone": config.tz_name,
             "dimensions": [{"key": k, "label": d["label"], "time": isinstance(d["order"], str) and d["order"] in ("first", "last")} for k, d in DIMENSIONS.items()],
-            "soon_days": env.closing_soon_days,
+            "soon_days": env.closing_soon_days, "ai_enabled": ai.configured(),
         }
 
     @app.get("/api/stats", dependencies=auth)
@@ -321,6 +325,26 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if not row:
             raise HTTPException(404, "No such tender")
         return shape(row)
+
+    summaries: dict[str, str] = {}  # kept in memory so reopening a tender costs nothing
+
+    @app.post("/api/tenders/summary", dependencies=auth)
+    def tender_summary(body: SummaryBody) -> dict:
+        row = store.get_tender(body.key)
+        if not row:
+            raise HTTPException(404, "No such tender")
+        if body.key in summaries:
+            return {"summary": summaries[body.key], "cached": True}
+        try:
+            text = ai.summarise(shape(row))
+        except ai.NotConfigured as e:
+            raise HTTPException(503, str(e))
+        except ai.AIError as e:
+            raise HTTPException(502, str(e))
+        if len(summaries) >= 500:
+            summaries.pop(next(iter(summaries)))
+        summaries[body.key] = text
+        return {"summary": text, "cached": False}
 
     @app.post("/api/tenders/star", dependencies=auth)
     def star(body: StarBody) -> dict:
