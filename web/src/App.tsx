@@ -9,6 +9,7 @@ import { Login } from './pages/Login';
 import { RunsPage } from './pages/Runs';
 import { SettingsPage } from './pages/Settings';
 import { TendersPage } from './pages/Tenders';
+import { Logo } from './Brand';
 import { ToastProvider } from './ui';
 import type { Display, Facets, Filters } from './types';
 
@@ -101,9 +102,9 @@ function Main({ onLogout }: { onLogout: () => void }) {
     <div className="shell">
       <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
       <header className="topbar">
-        <div className="brand">
-          <span className="logo" aria-hidden><svg width="16" height="16" viewBox="0 0 32 32"><path d="M9 22V10h14M9 16h10M9 22h14" stroke="#fff" strokeWidth="3" fill="none" strokeLinecap="round" /></svg></span>
-          Tend<span className="brand-ai">AI</span>
+        <div className="brand" aria-label="TendAI by QMSofts">
+          <Logo />
+          Tend<span className="brand-ai">AI</span><span className="brand-by">by QMSofts</span>
         </div>
         <nav className="nav" aria-label="Main">
           {TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'dashboard' || t.id === 'runs' || t.id === 'settings' ? undefined : filters)}>{t.label}</button>)}
