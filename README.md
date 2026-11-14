@@ -53,6 +53,8 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `MAIL_FROM` | For email | A sender address verified in Brevo. |
 | `STATE_PATH` | Yes on Railway | `/data/tender_state.db` (the Dockerfile already defaults to this). |
 | `RECIPIENTS` | Optional | Starting list of email ids (commas or spaces). After you save the list in Settings, the page's list wins. |
+| `ANTHROPIC_API_KEY` | Optional | Turns on the **Summarise with Claude** button in the tender panel. Secret. Unset = feature off. |
+| `ANTHROPIC_MODEL` | Optional | Default `claude-sonnet-5-5`. |
 | `MAIL_FROM_NAME` | Optional | Default `Tender Digest`. |
 | `COOKIE_SECURE` | Optional | Default `true`. Set `false` only for local testing without HTTPS. |
 | `TZ_NAME` | Optional | Default `Asia/Kolkata`. |
