@@ -376,3 +376,88 @@ def test_eligibility_answers_are_cleaned_and_a_gap_beats_an_optimistic_verdict()
     assert ai.clean_eligibility({"verdict": "Maybe?", "checks": []})["verdict"] == "Unclear"
     with pytest.raises(ai.AIError):
         ai.eligibility({}, "", [], [], {"requirements": [], "financial": []})
+
+
+# ---- fetching from the portal ------------------------------------------------------------------------------------
+
+PORTAL_PAIRS = {"Tender Fee in ₹": "590", "Processing Fee in ₹": "500", "EMD Amount in ₹": "8,600", "EMD Fee Type": "fixed", "Tenderer Class": "Class-D", "Bid Validity(Days)": "60",
+                "Clarification End Date": "17-Nov-2026 05:00 PM", "Pre Bid Meeting Date": "NA", "Bid Submission End Date": "19-Nov-2026 05:30 PM"}
+
+
+class PortalFake:
+    search_url = "https://x/s"
+
+    def __init__(self, tenders, file=b"%PDF-1.4 nit", links=None, down=False):
+        self.tenders, self.file, self.down = tenders, file, down
+        self.links = [{"name": "Tendernotice_1.pdf", "href": "/doc"}] if links is None else links
+        self.downloaded = []
+
+    def organisations(self):
+        if self.down:
+            from tender_digest.gepnic import PortalError
+            raise PortalError("down")
+        return [("Other Dept", 1, "X"), ("PWD", len(self.tenders), "L")]
+
+    def tenders_of(self, link, portal):
+        return self.tenders if link == "L" else []
+
+    def detail_full(self, t):
+        return PORTAL_PAIRS, ["Date extension (Corrigendum)"], self.links
+
+    def download(self, href):
+        self.downloaded.append(href)
+        return self.file, "application/pdf"
+
+
+def fetch_ctx(tmp_path, monkeypatch, fake):
+    monkeypatch.setenv("VAULT_DIR", str(tmp_path / "v"))
+    store = SeenStore(":memory:")
+    env = settings()
+    manager = RunManager(env, store, lambda p, s: fake, FakeSender(), background=False)
+    c = TestClient(web.create_app(web.AppConfig(PASSWORD, "s", cookie_secure=False, run_scheduler=False), env, store, manager))
+    key = kept(store).key
+    ctx = type("Ctx", (), {"client": c})
+    login(ctx)
+    return c, c.post("/api/bids", json={"key": key}).json()["id"], store
+
+
+def test_fetch_reads_the_public_fields_and_the_notice_and_fills_the_checklist(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    fake = PortalFake([Tender(portal="maha", tender_id="T1", title="", reference="", organisation="PWD||Division", published=None, closing=None, opening=None)])
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, fake)
+    monkeypatch.setattr(ai, "read_document", lambda t, text, pdf: DOC)
+    r = c.post(f"/api/bids/{bid_id}/fetch").json()
+    assert r["nit"] == "read" and fake.downloaded == ["/doc"] and r["corrigenda"] == ["Date extension (Corrigendum)"]
+    bid = c.get(f"/api/bids/{bid_id}").json()
+    texts = [i["text"] for i in bid["items"]]
+    assert "Pay the tender fee (₹590) online" in texts and "Registration class required: Class-D" in texts and "Copy of GST registration certificate" in texts
+    assert bid["query_deadline"] == "2026-11-17T17:00:00" and bid["prebid_date"] is None  # 'NA' is not a date
+    assert {"label": "Tenderer Class", "value": "Class-D"} in bid["portal_facts"]
+    assert c.post(f"/api/bids/{bid_id}/fetch").json()["added"] == 0  # nothing duplicated
+
+
+def test_fetch_without_ai_still_gives_the_facts_and_a_login_wall_is_reported_not_bypassed(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    t = Tender(portal="maha", tender_id="T1", title="", reference="", organisation="PWD||Division", published=None, closing=None, opening=None)
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, PortalFake([t]))
+    assert c.post(f"/api/bids/{bid_id}/fetch").json()["nit"] == "ai_off"
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, PortalFake([t], file=b"<html>Please enter the captcha</html>"))
+    r = c.post(f"/api/bids/{bid_id}/fetch").json()
+    assert r["nit"] == "login" and "never gets past" in r["message"] and r["facts"]
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, PortalFake([t], links=[]))
+    assert c.post(f"/api/bids/{bid_id}/fetch").json()["nit"] == "no_link"
+
+
+def test_fetch_explains_a_missing_tender_or_a_portal_that_is_down(tmp_path, monkeypatch):
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, PortalFake([]))
+    assert c.post(f"/api/bids/{bid_id}/fetch").status_code == 404
+    t = Tender(portal="maha", tender_id="T1", title="", reference="", organisation="PWD||Division", published=None, closing=None, opening=None)
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, PortalFake([t], down=True))
+    assert c.post(f"/api/bids/{bid_id}/fetch").status_code == 502
+    assert c.post("/api/bids/999/fetch").status_code == 404
+
+
+def test_document_links_are_found_on_a_real_detail_page():
+    from tender_digest.gepnic import parse_doc_links, pick_nit
+    links = parse_doc_links(fixture("tender_detail.html"))
+    assert links and pick_nit(links)["name"] == "Tendernotice_1.pdf" and pick_nit([]) is None
