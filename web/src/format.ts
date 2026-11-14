@@ -58,3 +58,13 @@ export function duration(start: string, end: string | null): string {
 
 export const headline = (t: { description: string; title: string }) => t.description || t.title;
 export const chain = (org: string) => org.split('||').filter(Boolean);
+
+/** Axis-sized rupees: 12500000 -> "1.25 Cr". */
+export function inrShort(v: number): string {
+  if (v >= 1e7) return `${+(v / 1e7).toFixed(2)} Cr`;
+  if (v >= 1e5) return `${+(v / 1e5).toFixed(1)} L`;
+  if (v >= 1e3) return `${+(v / 1e3).toFixed(1)}k`;
+  return String(Math.round(v));
+}
+
+export const plural = (n: number, one: string, many = one + 's') => `${n.toLocaleString('en-IN')} ${n === 1 ? one : many}`;

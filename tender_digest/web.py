@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -25,12 +26,20 @@ from . import appsettings, mailer
 from .config import Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
-from .store import SORTS, SeenStore
+from .store import DIMENSIONS, SORTS, SeenStore
 
 log = logging.getLogger("tender_digest.web")
 COOKIE = "td_session"
 SESSION_SECONDS = 7 * 24 * 3600
 MAX_EXPORT_ROWS = 20_000
+MAX_VIEWS = 30
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?)?$")
+# The settings a saved view may hold: the page's filters and display choices, nothing else.
+VIEW_KEYS = {
+    "portal", "category", "department", "location", "q", "status", "min_value", "max_value", "value_lt", "no_value", "no_closing", "no_published", "starred",
+    "closing_from", "closing_to", "seen_from", "seen_to", "published_from", "published_to", "closing_within", "since_days", "sort",
+    "group_by", "split_by", "measure", "chart", "page",
+}
 
 
 @dataclass
@@ -106,6 +115,21 @@ class LoginLimiter:
 
 class LoginBody(BaseModel):
     password: str
+
+
+class StarBody(BaseModel):
+    key: str
+    starred: bool
+
+
+class ViewItem(BaseModel):
+    id: str
+    name: str
+    filters: dict[str, Any]
+
+
+class ViewsBody(BaseModel):
+    views: list[ViewItem]
 
 
 class RunBody(BaseModel):
@@ -191,6 +215,33 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     # ---- data ------------------------------------------------------------------------------------------------
 
+    def filter_params(
+        portal: list[str] | None = Query(None), category: list[str] | None = Query(None), department: list[str] | None = Query(None),
+        location: list[str] | None = Query(None), q: str | None = Query(None, max_length=100), status: str = "open",
+        min_value: float | None = Query(None, ge=0), max_value: float | None = Query(None, ge=0), value_lt: float | None = Query(None, ge=0),
+        no_value: bool = False, no_closing: bool = False, no_published: bool = False, starred: bool = False,
+        closing_from: str | None = None, closing_to: str | None = None, seen_from: str | None = None, seen_to: str | None = None,
+        published_from: str | None = None, published_to: str | None = None,
+        closing_within: int | None = Query(None, ge=1, le=365), since_days: int | None = Query(None, ge=1, le=365),
+    ) -> dict:
+        if status not in ("open", "closing_soon", "closed", "all"):
+            raise HTTPException(422, "Unknown status")
+        dates = dict(closing_from=closing_from, closing_to=closing_to, seen_from=seen_from, seen_to=seen_to, published_from=published_from, published_to=published_to)
+        for name, value in dates.items():
+            if value and not DATE_RE.match(value):
+                raise HTTPException(422, f"{name} must look like 2026-11-20")
+        lists = {"portal": portal, "category": category, "department": department, "location": location}
+        for name, values in lists.items():
+            if values and (len(values) > 50 or any(len(v) > 200 for v in values)):
+                raise HTTPException(422, f"Too many or too long values for {name}")
+        return {
+            **{k: v for k, v in lists.items() if v}, "q": q, "status": status, "min_value": min_value, "max_value": max_value, "value_lt": value_lt,
+            "no_value": no_value, "no_closing": no_closing, "no_published": no_published, "starred": starred, "closing_within": closing_within, "since_days": since_days,
+            "soon_days": env.closing_soon_days, **{k: v for k, v in dates.items() if v},
+        }
+
+    fparams = Depends(filter_params)
+
     @app.get("/api/config", dependencies=auth)
     def get_config() -> dict:
         cur = appsettings.current(env, store.get_settings())
@@ -198,11 +249,13 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             "portals": [{"key": p.key, "name": p.name, "state": p.state, "search_url": portal_search[p.key]} for p in env.portals],
             "mail_configured": manager.mail_configured, "recipient_count": len(cur["recipients"]),
             "now": now().isoformat(timespec="seconds"), "timezone": config.tz_name,
+            "dimensions": [{"key": k, "label": d["label"], "time": isinstance(d["order"], str) and d["order"] in ("first", "last")} for k, d in DIMENSIONS.items()],
+            "soon_days": env.closing_soon_days,
         }
 
     @app.get("/api/stats", dependencies=auth)
-    def stats() -> dict:
-        data = store.stats(now(), env.closing_soon_days)
+    def stats(f: dict = fparams) -> dict:
+        data = store.stats(now(), env.closing_soon_days, f)
         for row in data["by_portal"]:
             row["name"] = portal_names.get(row["portal"], row["portal"])
             row["short"] = portal_states.get(row["portal"], row["portal"])
@@ -215,37 +268,41 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         data["soon_days"] = env.closing_soon_days
         return data
 
+    @app.get("/api/analytics", dependencies=auth)
+    def analytics(group_by: str, split_by: str | None = None, top: int = Query(12, ge=3, le=40), f: dict = fparams) -> dict:
+        if group_by not in DIMENSIONS or (split_by and split_by not in DIMENSIONS):
+            raise HTTPException(422, "Unknown dimension")
+        if split_by == group_by:
+            split_by = None
+        result = store.pivot(now(), f, group_by, split_by, top)
+        result["labels"] = {k: portal_states.get(k, k) for k in portal_names} if "portal" in (group_by, split_by) else {}
+        return result
+
+    @app.get("/api/facets", dependencies=auth)
+    def facets() -> dict:
+        data = store.facets(now())
+        for row in data["portal"]:
+            row["label"] = portal_names.get(row["value"], row["value"])
+        return data
+
     def shape(row: dict) -> dict:
         row["portal_name"] = portal_names.get(row["portal"], row["portal"])
         row["search_url"] = portal_search.get(row["portal"], "")
         row["value_text"] = format_inr(row["value"])
         return row
 
-    def filters(portal: str | None, q: str | None, category: str | None, status: str, min_value: float | None, max_value: float | None, since_days: int | None) -> dict:
-        if status not in ("open", "closing_soon", "closed", "all"):
-            raise HTTPException(422, "Unknown status")
-        return {"portal": portal, "q": q, "category": category, "status": status, "min_value": min_value, "max_value": max_value,
-                "since_days": since_days, "soon_days": env.closing_soon_days}
-
     @app.get("/api/tenders", dependencies=auth)
-    def tenders(
-        portal: str | None = None, q: str | None = Query(None, max_length=100), category: str | None = None, status: str = "open",
-        min_value: float | None = None, max_value: float | None = None, since_days: int | None = Query(None, ge=1, le=365),
-        sort: str = "closing", page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
-    ) -> dict:
+    def tenders(f: dict = fparams, sort: str = "closing", page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)) -> dict:
         if sort not in SORTS:
             raise HTTPException(422, "Unknown sort")
-        rows, total = store.search(now(), filters(portal, q, category, status, min_value, max_value, since_days), sort, page_size, (page - 1) * page_size)
+        rows, total = store.search(now(), f, sort, page_size, (page - 1) * page_size)
         return {"items": [shape(r) for r in rows], "total": total, "page": page, "page_size": page_size, "categories": store.categories()}
 
     @app.get("/api/tenders/export", dependencies=auth)
-    def export(
-        portal: str | None = None, q: str | None = Query(None, max_length=100), category: str | None = None, status: str = "open",
-        min_value: float | None = None, max_value: float | None = None, since_days: int | None = Query(None, ge=1, le=365), sort: str = "closing",
-    ) -> Response:
+    def export(f: dict = fparams, sort: str = "closing") -> Response:
         if sort not in SORTS:
             raise HTTPException(422, "Unknown sort")
-        rows, _ = store.search(now(), filters(portal, q, category, status, min_value, max_value, since_days), sort, MAX_EXPORT_ROWS, 0)
+        rows, _ = store.search(now(), f, sort, MAX_EXPORT_ROWS, 0)
         out = io.StringIO()
         writer = csv.writer(out)
         writer.writerow(CSV_COLUMNS)
@@ -257,6 +314,38 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             ]])
         return Response("﻿" + out.getvalue(), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="tenders-{now().strftime("%Y-%m-%d")}.csv"'})
+
+    @app.get("/api/tenders/detail", dependencies=auth)
+    def tender_detail(key: str = Query(..., max_length=300)) -> dict:
+        row = store.get_tender(key)
+        if not row:
+            raise HTTPException(404, "No such tender")
+        return shape(row)
+
+    @app.post("/api/tenders/star", dependencies=auth)
+    def star(body: StarBody) -> dict:
+        if not store.set_starred(body.key, body.starred, now()):
+            raise HTTPException(404, "No such tender")
+        return {"key": body.key, "starred": body.starred}
+
+    @app.get("/api/views", dependencies=auth)
+    def get_views() -> dict:
+        return {"views": store.get_settings().get("views", [])}
+
+    @app.put("/api/views", dependencies=auth)
+    def put_views(body: ViewsBody) -> dict:
+        views = []
+        for v in body.views[:MAX_VIEWS]:
+            name = v.name.strip()
+            if not name or len(name) > 40 or len(v.id) > 40:
+                raise HTTPException(422, "A view needs a name of up to 40 characters")
+            if any(k not in VIEW_KEYS for k in v.filters):
+                raise HTTPException(422, "A view contains a setting that is not known")
+            views.append({"id": v.id, "name": name, "filters": v.filters})
+        if len(json.dumps(views)) > 30_000:
+            raise HTTPException(422, "Saved views are too large")
+        store.put_settings({"views": views})
+        return {"views": views}
 
     # ---- runs ------------------------------------------------------------------------------------------------
 
