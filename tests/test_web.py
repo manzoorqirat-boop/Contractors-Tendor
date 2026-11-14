@@ -425,3 +425,13 @@ def test_summary_is_cached_per_tender(ctx, monkeypatch):
     first = ctx.client.post("/api/tenders/summary", json={"key": key}).json()
     second = ctx.client.post("/api/tenders/summary", json={"key": key}).json()
     assert first == {"summary": "What: a road.", "cached": False} and second["cached"] is True and len(calls) == 1
+
+
+def test_username_is_checked_when_set():
+    env = settings()
+    app = web.create_app(web.AppConfig(PASSWORD, "s3cret", username="admin", cookie_secure=False, run_scheduler=False), env, SeenStore(":memory:"),
+                         RunManager(env, SeenStore(":memory:"), lambda p, s: None, FakeSender(), background=False))
+    c = TestClient(app)
+    assert c.post("/api/login", json={"username": "someone", "password": PASSWORD}).status_code == 401
+    assert c.post("/api/login", json={"password": PASSWORD}).status_code == 401
+    assert c.post("/api/login", json={"username": " Admin ", "password": PASSWORD}).status_code == 200
