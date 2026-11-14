@@ -70,6 +70,16 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
         if v < 0 or v > 1e13:
             raise SettingsError("Minimum value is out of range")
         out["min_value"] = v
+    for flag in ("ai_digest_intro", "ai_hide_noncivil"):
+        if flag in payload:
+            if not isinstance(payload[flag], bool):
+                raise SettingsError(f"{flag} must be true or false")
+            out[flag] = payload[flag]
+    if "company_profile" in payload:
+        text = str(payload["company_profile"] or "").strip()
+        if len(text) > 2000:
+            raise SettingsError("Company profile is too long (max 2000 characters)")
+        out["company_profile"] = text
     for key, label in (("extra_keywords", "Extra civil keywords"), ("exclude_words", "Excluded words")):
         if key in payload:
             out[key] = _words(payload[key], label)
@@ -78,7 +88,7 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
 
 DEFAULTS = {
     "send_time": "08:00", "schedule_enabled": True, "send_empty": True, "min_value": 0.0,
-    "extra_keywords": [], "exclude_words": [],
+    "extra_keywords": [], "exclude_words": [], "company_profile": "", "ai_digest_intro": True, "ai_hide_noncivil": False,
 }
 
 
@@ -93,6 +103,9 @@ def current(env: Settings, saved: dict[str, Any]) -> dict[str, Any]:
         "min_value": saved.get("min_value", env.min_value),
         "extra_keywords": saved.get("extra_keywords", DEFAULTS["extra_keywords"]),
         "exclude_words": saved.get("exclude_words", DEFAULTS["exclude_words"]),
+        "company_profile": saved.get("company_profile", DEFAULTS["company_profile"]),
+        "ai_digest_intro": saved.get("ai_digest_intro", DEFAULTS["ai_digest_intro"]),
+        "ai_hide_noncivil": saved.get("ai_hide_noncivil", DEFAULTS["ai_hide_noncivil"]),
     }
 
 

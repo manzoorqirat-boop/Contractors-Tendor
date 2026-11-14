@@ -20,11 +20,14 @@ _DATES = ("published", "closing", "opening")
 _TENDER_COLUMNS = {
     "portal": "TEXT", "tender_id": "TEXT", "published": "TEXT", "value": "REAL", "emd": "REAL", "category": "TEXT",
     "location": "TEXT", "organisation": "TEXT", "title": "TEXT", "description": "TEXT",
+    # Claude's labels and saved answers (empty until the AI features are used)
+    "work_type": "TEXT", "fit": "INTEGER", "fit_reason": "TEXT", "ai_civil": "INTEGER", "ai_profile": "TEXT",
+    "summary": "TEXT", "brief": "TEXT", "doc": "TEXT",
 }
 
 SORTS = {
     "closing": "closing ASC", "closing_desc": "closing DESC", "published": "published DESC",
-    "value": "value DESC", "value_asc": "value ASC", "first_seen": "first_seen DESC",
+    "value": "value DESC", "value_asc": "value ASC", "first_seen": "first_seen DESC", "fit": "fit DESC",
 }
 
 
@@ -42,6 +45,7 @@ DIMENSIONS: dict[str, dict[str, Any]] = {
     "category": {"label": "Category", "order": "size"},
     "department": {"label": "Department", "order": "size"},
     "location": {"label": "Location", "order": "size"},
+    "work_type": {"label": "Work type", "order": "size"},
     "value_band": {"label": "Estimated value", "order": VALUE_BANDS},
     "closes_in": {"label": "Closes in", "order": CLOSES_IN},
     "closing_week": {"label": "Closing week", "order": "first"},
@@ -60,6 +64,8 @@ def _dim_sql(dim: str, now: datetime) -> tuple[str, list[Any]]:
         return DEPT_LABEL_SQL, []
     if dim == "location":
         return LOCATION_SQL, []
+    if dim == "work_type":
+        return "(CASE WHEN work_type IS NULL OR work_type = '' THEN 'Not tagged' ELSE work_type END)", []
     if dim == "value_band":
         return ("CASE WHEN value IS NULL THEN 'Not stated' WHEN value < 1e5 THEN 'Under 1 lakh' WHEN value < 1e6 THEN '1 to 10 lakh' "
                 "WHEN value < 1e7 THEN '10 lakh to 1 crore' WHEN value < 1e8 THEN '1 to 10 crore' ELSE 'Over 10 crore' END"), []
@@ -87,6 +93,8 @@ def drill(dim: str, key: str, now: datetime) -> dict[str, Any]:
         return {"portal": [key]}
     if dim in ("category", "department", "location"):
         return {dim: [NONE if none else key]}
+    if dim == "work_type":
+        return {dim: [NONE if key == "Not tagged" else key]}
     if dim == "value_band":
         lo_hi = {"Under 1 lakh": (None, 1e5), "1 to 10 lakh": (1e5, 1e6), "10 lakh to 1 crore": (1e6, 1e7), "1 to 10 crore": (1e7, 1e8), "Over 10 crore": (1e8, None)}
         if none:
@@ -281,6 +289,10 @@ class SeenStore:
         any_of("category", f.get("category"), "(category IS NULL OR category = '')")
         any_of(DEPT_SQL, f.get("department"), f"({DEPT_SQL} IS NULL OR {DEPT_SQL} = '')")
         any_of("location", f.get("location"), "(location IS NULL OR location = '')")
+        any_of("work_type", f.get("work_type"), "(work_type IS NULL OR work_type = '')")
+        if f.get("min_fit") is not None:
+            where.append("fit >= ?")
+            args.append(int(f["min_fit"]))
 
         if f.get("q"):
             like = cls._like(str(f["q"]))
@@ -339,7 +351,7 @@ class SeenStore:
         with self.lock:
             total = self.db.execute(f"SELECT COUNT(*) FROM seen WHERE {where}", args).fetchone()[0]
             rows = self.db.execute(
-                f"SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, "
+                f"SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, work_type, fit, fit_reason, ai_civil, "
                 f"(key IN (SELECT key FROM starred)) AS starred FROM seen WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
                 [*args, limit, offset],
             ).fetchall()
@@ -351,7 +363,7 @@ class SeenStore:
     def get_tender(self, key: str) -> dict | None:
         with self.lock:
             r = self.db.execute(
-                "SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, payload, "
+                "SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, payload, work_type, fit, fit_reason, ai_civil, summary, brief, doc, "
                 "(key IN (SELECT key FROM starred)) AS starred FROM seen WHERE key = ? AND civil = 1", (key,)).fetchone()
         if not r:
             return None
@@ -369,12 +381,90 @@ class SeenStore:
         where, args = self._where(now, {"status": "open"})
         out: dict[str, list[dict]] = {}
         with self.lock:
-            for name, expr in (("portal", "portal"), ("category", "category"), ("department", DEPT_SQL), ("location", "location")):
+            for name, expr in (("portal", "portal"), ("category", "category"), ("department", DEPT_SQL), ("location", "location"), ("work_type", "work_type")):
                 rows = self.db.execute(
                     f"SELECT {expr} AS value, COUNT(*) AS count FROM seen WHERE {where} AND {expr} IS NOT NULL AND {expr} <> '' "
                     f"GROUP BY 1 ORDER BY count DESC, value LIMIT ?", [*args, limit]).fetchall()
                 out[name] = [dict(r) for r in rows]
         return out
+
+    # ---- Claude's labels and saved answers -------------------------------------------------------------------
+
+    def ai_pending(self, now: datetime, profile_hash: str, limit: int) -> list[dict]:
+        """Open tenders with no label yet, or labelled against an older company profile. Newest first."""
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT key, title, description, organisation, category, location, portal, value, emd, closing, published FROM seen "
+                "WHERE civil = 1 AND (closing IS NULL OR closing >= ?) AND (ai_profile IS NULL OR ai_profile <> ?) ORDER BY first_seen DESC LIMIT ?",
+                (now.isoformat(), profile_hash, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def ai_save(self, labels: list[tuple[str, dict]], profile_hash: str, hide_noncivil: bool) -> None:
+        with self.lock:
+            for key, lab in labels:
+                self.db.execute(
+                    "UPDATE seen SET work_type=?, fit=?, fit_reason=?, ai_civil=?, ai_profile=? WHERE key=?",
+                    (lab["work_type"], lab["fit"], lab["reason"], 1 if lab["civil"] else 0, profile_hash, key))
+                if hide_noncivil and not lab["civil"]:
+                    self.db.execute("UPDATE seen SET civil = 0 WHERE key = ?", (key,))
+            self.db.commit()
+
+    def ai_counts(self, now: datetime) -> dict[str, int]:
+        with self.lock:
+            r = self.db.execute(
+                "SELECT SUM(ai_profile IS NOT NULL), SUM(ai_profile IS NULL) FROM seen WHERE civil = 1 AND (closing IS NULL OR closing >= ?)", (now.isoformat(),)).fetchone()
+        return {"labelled": r[0] or 0, "unlabelled": r[1] or 0}
+
+    def ai_info(self, keys: list[str]) -> dict[str, dict]:
+        if not keys:
+            return {}
+        with self.lock:
+            rows = self.db.execute(f"SELECT key, work_type, fit, fit_reason FROM seen WHERE key IN ({','.join('?' * len(keys))})", keys).fetchall()
+        return {r["key"]: dict(r) for r in rows}
+
+    def set_ai_text(self, key: str, field: str, value: str | None) -> None:
+        if field not in ("summary", "brief", "doc"):
+            raise ValueError(field)
+        with self.lock:
+            self.db.execute(f"UPDATE seen SET {field} = ? WHERE key = ?", (value, key))
+            self.db.commit()
+
+    def related(self, key: str, limit: int = 4) -> list[dict]:
+        """Other tenders that look like the same work: same department, near-identical wording, different tender ID."""
+        import difflib
+        import re
+
+        stop = {"tender", "no", "nit", "rfp", "the", "of", "for", "and", "at", "in", "e"}
+
+        def norm(t: dict) -> str:
+            words = re.sub(r"\d+|[^a-z ]+", " ", (t.get("description") or t.get("title") or "").lower()).split()
+            return " ".join(w for w in words if w not in stop)
+
+        with self.lock:
+            me = self.db.execute("SELECT key, tender_id, title, description, organisation FROM seen WHERE key = ?", (key,)).fetchone()
+            if not me:
+                return []
+            dept = (me["organisation"] or "").split("||")[0]
+            rows = self.db.execute(
+                "SELECT key, tender_id, title, description, closing, first_seen, value, organisation FROM seen "
+                "WHERE civil = 1 AND key <> ? AND organisation LIKE ? ORDER BY first_seen DESC LIMIT 400", (key, dept + "%")).fetchall() if dept else []
+        mine = norm(dict(me))
+        if len(mine) < 20:
+            return []
+        out = []
+        for r in rows:
+            d = dict(r)
+            if d["tender_id"] == me["tender_id"]:
+                continue
+            other = norm(d)
+            if len(other) < 20:
+                continue
+            m = difflib.SequenceMatcher(None, mine, other)
+            if m.real_quick_ratio() >= 0.85 and m.quick_ratio() >= 0.85 and m.ratio() >= 0.88:
+                out.append({"key": d["key"], "tender_id": d["tender_id"], "title": d["description"] or d["title"], "closing": d["closing"],
+                            "first_seen": d["first_seen"], "value": d["value"], "similarity": round(m.ratio(), 2)})
+        out.sort(key=lambda x: -x["similarity"])
+        return out[:limit]
 
     # ---- starred ----------------------------------------------------------------------------------------------
 

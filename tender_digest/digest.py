@@ -47,7 +47,7 @@ STYLE = (
     "h3{font-size:14px;margin:14px 0 4px;color:#374151}table{border-collapse:collapse;width:100%;font-size:13px}"
     "th{text-align:left;color:#6b7280;font-size:12px;padding:6px 8px}td{padding:8px;border-bottom:1px solid #e5e7eb;vertical-align:top}"
     ".n{white-space:nowrap}.o{color:#6b7280;font-size:12px;margin-top:3px}.m{font-size:12px;margin-top:3px}a{color:#2563eb}"
-    ".w{background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;margin:16px 0;font-size:13px}</style>"
+    ".i{background:#eef4ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px 12px;margin:16px 0;font-size:13px;line-height:1.5}.w{background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;margin:16px 0;font-size:13px}</style>"
 )
 
 
@@ -106,6 +106,7 @@ def build(
     prefix: str = "Civil tenders",
     max_new_per_portal: int = 25,
     max_soon_per_portal: int = 10,
+    intro: str = "",
 ) -> Digest:
     by_portal = {r.portal.key: r for r in reports}
     new_keys = {t.key for t in new}
@@ -167,7 +168,8 @@ def build(
         f"<h1>{escape(prefix)}</h1>"
         f"<div class=o>{now.strftime('%A, %d %B %Y')}</div>"
         f"{notes}"
-        f"{section('New since the last digest', new, 'No new civil tenders.', max_new_per_portal)}"
+        + (f"<div class=i><b>Today's highlights</b><br>{escape(intro)}</div>" if intro else "")
+        + f"{section('New since the last digest', new, 'No new civil tenders.', max_new_per_portal)}"
         f"{section('Closing in the next few days', soon, 'Nothing else closes soon.', max_soon_per_portal)}"
         "<p class=o style='margin-top:28px'>Read from the public tender lists of the portals named above. "
         "Always confirm details, eligibility and dates on the portal itself before bidding. "
@@ -175,6 +177,8 @@ def build(
     )
 
     text_lines = [f"{prefix} - {now.strftime('%d %b %Y')}", ""]
+    if intro:
+        text_lines += ["TODAY'S HIGHLIGHTS", intro, ""]
     for title, tenders in (("NEW", new), ("CLOSING SOON", soon)):
         text_lines.append(f"{title} ({len(tenders)})")
         for t in sorted(tenders, key=lambda x: (x.portal, x.closing or datetime.max)):

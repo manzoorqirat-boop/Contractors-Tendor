@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import asdict
 from datetime import datetime
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from . import appsettings, collector, digest, mailer
+from . import ai, appsettings, collector, digest, mailer
 from .config import Settings
 from .store import SeenStore
 
@@ -80,6 +81,10 @@ class RunManager:
                  "new_civil": r.new_civil, "errors": r.errors[:5], "failed": r.failed}
                 for r in reports
             ]
+            intro = ""
+            profile = str(saved.get("company_profile", "") or "")
+            if ai.configured():
+                ai.enrich(self.store, now, profile, bool(saved.get("ai_hide_noncivil", False)), int(os.environ.get("AI_MAX_PER_RUN", "150") or 150), say)
             emailed = 0
             if send_email:
                 pending = self.store.pending(now)
@@ -88,7 +93,16 @@ class RunManager:
                 if quiet and not saved.get("send_empty", True):
                     say("Nothing new, and 'send on empty days' is off: no email sent")
                 else:
-                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal)
+                    if ai.configured() and pending and saved.get("ai_digest_intro", True):
+                        try:
+                            info = self.store.ai_info([t.key for t in pending])
+                            items = sorted(({"tender_id": t.tender_id, "title": t.title, "description": t.description, "location": t.location, "value": t.value,
+                                             "closing": t.closing.date().isoformat() if t.closing else None, "fit": (info.get(t.key) or {}).get("fit")} for t in pending),
+                                           key=lambda x: (-(x["fit"] or 0), -(x["value"] or 0)))
+                            intro = ai.digest_intro(items, profile)
+                        except Exception as e:  # noqa: BLE001 - the email goes out without the intro
+                            say(f"Claude intro skipped: {str(e)[:120]}")
+                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro)
                     say(f"Sending '{built.subject}' to {len(settings.recipients)} recipient(s)")
                     accepted = self.sender(
                         settings.brevo_api_key, settings.mail_from, settings.mail_from_name, settings.recipients, built.subject, built.html, built.text,

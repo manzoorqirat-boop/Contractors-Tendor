@@ -36,10 +36,39 @@ MAX_VIEWS = 30
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?)?$")
 # The settings a saved view may hold: the page's filters and display choices, nothing else.
 VIEW_KEYS = {
-    "portal", "category", "department", "location", "q", "status", "min_value", "max_value", "value_lt", "no_value", "no_closing", "no_published", "starred",
+    "portal", "category", "department", "location", "work_type", "min_fit", "q", "status", "min_value", "max_value", "value_lt", "no_value", "no_closing", "no_published", "starred",
     "closing_from", "closing_to", "seen_from", "seen_to", "published_from", "published_to", "closing_within", "since_days", "sort",
     "group_by", "split_by", "measure", "chart", "page",
 }
+
+
+def clean_ask(raw: dict, portal_keys: set[str]) -> dict:
+    """Claude's guess at filters, reduced to values the filters accept. Anything else is dropped."""
+    f: dict[str, Any] = {}
+    if not isinstance(raw, dict):
+        return {"filters": f, "sort": None, "explanation": ""}
+    if isinstance(raw.get("portal"), list):
+        f["portal"] = [p for p in raw["portal"] if p in portal_keys]
+    for k in ("category", "department", "location", "work_type"):
+        if isinstance(raw.get(k), list):
+            f[k] = [str(v)[:200] for v in raw[k]][:20]
+    if isinstance(raw.get("q"), str) and raw["q"].strip():
+        f["q"] = raw["q"].strip()[:100]
+    if raw.get("status") in ("open", "closing_soon", "closed", "all"):
+        f["status"] = raw["status"]
+    for k in ("min_value", "max_value"):
+        v = raw.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < 1e13:
+            f[k] = v
+    for k in ("closing_within", "since_days"):
+        v = raw.get(k)
+        if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 365:
+            f[k] = v
+    if raw.get("starred") is True:
+        f["starred"] = True
+    f = {k: v for k, v in f.items() if v not in ([], "", None)}
+    sort = raw.get("sort") if raw.get("sort") in SORTS else None
+    return {"filters": f, "sort": sort, "explanation": str(raw.get("explanation") or "")[:200]}
 
 
 @dataclass
@@ -121,6 +150,17 @@ class LoginBody(BaseModel):
 
 class SummaryBody(BaseModel):
     key: str
+    refresh: bool = False
+
+
+class AskBody(BaseModel):
+    question: str
+
+
+class DocBody(BaseModel):
+    key: str
+    text: str = ""
+    pdf_base64: str = ""
 
 
 class StarBody(BaseModel):
@@ -225,7 +265,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def filter_params(
         portal: list[str] | None = Query(None), category: list[str] | None = Query(None), department: list[str] | None = Query(None),
-        location: list[str] | None = Query(None), q: str | None = Query(None, max_length=100), status: str = "open",
+        location: list[str] | None = Query(None), work_type: list[str] | None = Query(None), min_fit: int | None = Query(None, ge=1, le=5), q: str | None = Query(None, max_length=100), status: str = "open",
         min_value: float | None = Query(None, ge=0), max_value: float | None = Query(None, ge=0), value_lt: float | None = Query(None, ge=0),
         no_value: bool = False, no_closing: bool = False, no_published: bool = False, starred: bool = False,
         closing_from: str | None = None, closing_to: str | None = None, seen_from: str | None = None, seen_to: str | None = None,
@@ -238,13 +278,13 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         for name, value in dates.items():
             if value and not DATE_RE.match(value):
                 raise HTTPException(422, f"{name} must look like 2026-11-20")
-        lists = {"portal": portal, "category": category, "department": department, "location": location}
+        lists = {"portal": portal, "category": category, "department": department, "location": location, "work_type": work_type}
         for name, values in lists.items():
             if values and (len(values) > 50 or any(len(v) > 200 for v in values)):
                 raise HTTPException(422, f"Too many or too long values for {name}")
         return {
             **{k: v for k, v in lists.items() if v}, "q": q, "status": status, "min_value": min_value, "max_value": max_value, "value_lt": value_lt,
-            "no_value": no_value, "no_closing": no_closing, "no_published": no_published, "starred": starred, "closing_within": closing_within, "since_days": since_days,
+            "no_value": no_value, "no_closing": no_closing, "no_published": no_published, "starred": starred, "closing_within": closing_within, "since_days": since_days, "min_fit": min_fit,
             "soon_days": env.closing_soon_days, **{k: v for k, v in dates.items() if v},
         }
 
@@ -328,27 +368,82 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         row = store.get_tender(key)
         if not row:
             raise HTTPException(404, "No such tender")
+        for field in ("brief", "doc"):
+            row[field] = json.loads(row[field]) if row.get(field) else None
+        row["related"] = store.related(key)
         return shape(row)
 
-    summaries: dict[str, str] = {}  # kept in memory so reopening a tender costs nothing
+    def ai_call(fn, *args):
+        try:
+            return fn(*args)
+        except ai.NotConfigured as e:
+            raise HTTPException(503, str(e)) from None
+        except ai.AIError as e:
+            raise HTTPException(502, str(e)) from None
+
+    def profile() -> str:
+        return str(store.get_settings().get("company_profile", "") or "")
+
+    def tender_for_ai(key: str) -> dict:
+        row = store.get_tender(key)
+        if not row:
+            raise HTTPException(404, "No such tender")
+        return shape(row)
 
     @app.post("/api/tenders/summary", dependencies=auth)
     def tender_summary(body: SummaryBody) -> dict:
-        row = store.get_tender(body.key)
-        if not row:
-            raise HTTPException(404, "No such tender")
-        if body.key in summaries:
-            return {"summary": summaries[body.key], "cached": True}
-        try:
-            text = ai.summarise(shape(row))
-        except ai.NotConfigured as e:
-            raise HTTPException(503, str(e))
-        except ai.AIError as e:
-            raise HTTPException(502, str(e))
-        if len(summaries) >= 500:
-            summaries.pop(next(iter(summaries)))
-        summaries[body.key] = text
+        row = tender_for_ai(body.key)
+        if row.get("summary") and not body.refresh:
+            return {"summary": row["summary"], "cached": True}
+        text = ai_call(ai.summarise, row)
+        store.set_ai_text(body.key, "summary", text)
         return {"summary": text, "cached": False}
+
+    @app.post("/api/tenders/document", dependencies=auth)
+    def tender_document(body: DocBody) -> dict:
+        row = tender_for_ai(body.key)
+        doc = ai_call(ai.read_document, row, body.text, body.pdf_base64)
+        store.set_ai_text(body.key, "doc", json.dumps(doc))
+        return {"doc": doc}
+
+    @app.post("/api/tenders/brief", dependencies=auth)
+    def tender_brief(body: SummaryBody) -> dict:
+        row = tender_for_ai(body.key)
+        if row.get("brief") and not body.refresh:
+            return {"brief": json.loads(row["brief"]), "cached": True}
+        doc = json.loads(row["doc"]) if row.get("doc") else None
+        out = ai_call(ai.brief, row, profile(), doc)
+        store.set_ai_text(body.key, "brief", json.dumps(out))
+        return {"brief": out, "cached": False}
+
+    @app.post("/api/ask", dependencies=auth)
+    def ask(body: AskBody) -> dict:
+        question = body.question.strip()
+        if not question:
+            raise HTTPException(422, "Type a question first")
+        fac = store.facets(now())
+        raw = ai_call(ai.ask, question, [{"key": k, "name": n} for k, n in portal_names.items()],
+                      {k: [f["value"] for f in fac.get(k, [])] for k in ("category", "department", "location")}, now().date().isoformat())
+        return clean_ask(raw, set(portal_names))
+
+    @app.get("/api/ai/status", dependencies=auth)
+    def ai_status() -> dict:
+        return {"configured": ai.configured(), "model": ai.model(), "fast_model": ai.fast_model(), "profile_set": bool(profile().strip()), **store.ai_counts(now())}
+
+    @app.post("/api/ai/test", dependencies=auth)
+    def ai_test() -> dict:
+        ai_call(ai.ping)
+        return {"ok": True, "model": ai.model(), "fast_model": ai.fast_model()}
+
+    @app.post("/api/ai/score", dependencies=auth)
+    def ai_score() -> dict:
+        if not ai.configured():
+            raise HTTPException(503, "AI features are off. Set ANTHROPIC_API_KEY on the server to turn them on.")
+        saved = store.get_settings()
+        res = ai.enrich(store, now(), profile(), bool(saved.get("ai_hide_noncivil", False)), 45)
+        if res["error"] and not res["scored"]:
+            raise HTTPException(502, res["error"])
+        return {**res, **store.ai_counts(now())}
 
     @app.post("/api/tenders/star", dependencies=auth)
     def star(body: StarBody) -> dict:
