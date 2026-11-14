@@ -150,6 +150,20 @@ def parse_corrigenda(html: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+def parse_doc_links(html: str) -> list[dict[str, str]]:
+    """The downloadable documents on a tender's detail page: [{name, href}]. The links are session-bound and expire within minutes."""
+    out = []
+    for a in BeautifulSoup(html, "lxml").find_all("a", href=True):
+        if re.search(r"docDownoad|docDownload", a["href"], re.I):
+            out.append({"name": _text(a), "href": a["href"]})
+    return out
+
+
+def pick_nit(links: list[dict[str, str]]) -> dict[str, str] | None:
+    """The tender notice (NIT) among the documents: named like a notice, else the first one listed."""
+    return next((x for x in links if re.search(r"notice|nit\b|tender.?doc", x["name"], re.I)), links[0] if links else None)
+
+
 def apply_detail(tender: Tender, pairs: dict[str, str]) -> None:
     def pick(*labels: str) -> str:
         for label in labels:
@@ -259,6 +273,28 @@ class GepnicClient:
 
     def detail(self, tender: Tender) -> dict[str, str]:
         return parse_detail(self._get(tender.detail_path))
+
+    def detail_full(self, tender: Tender) -> tuple[dict[str, str], list[str], list[dict[str, str]]]:
+        """Detail pairs, corrigenda and document links from one fetch."""
+        html = self._get(tender.detail_path)
+        return parse_detail(html), parse_corrigenda(html), parse_doc_links(html)
+
+    def download(self, href: str, max_bytes: int = 10 * 1024 * 1024) -> tuple[bytes, str]:
+        """One document, politely. Returns (bytes, content type); a portal that wants a login or captcha usually answers with an HTML page instead."""
+        wait = self.delay - (time.monotonic() - self._last)
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            r = self.http.get(urljoin(self.base + "/", href.replace("&amp;", "&")), timeout=self.timeout, stream=True)
+            self._last = time.monotonic()
+        except requests.RequestException as e:
+            raise PortalError(str(e)[:200], "unreachable") from None
+        if r.status_code != 200:
+            raise PortalError(f"HTTP {r.status_code} on the document link", "blocked" if r.status_code in (401, 403) else "unreachable")
+        data = r.raw.read(max_bytes + 1, decode_content=True) if hasattr(r, "raw") else r.content[: max_bytes + 1]
+        if len(data) > max_bytes:
+            raise PortalError("the document is over 10 MB", "unreachable")
+        return data, r.headers.get("Content-Type", "")
 
     def detail_page(self, tender: Tender) -> tuple[dict[str, str], list[str]]:
         """One fetch of the detail page: its label/value pairs and its corrigenda. Used to watch tenders you are bidding for."""

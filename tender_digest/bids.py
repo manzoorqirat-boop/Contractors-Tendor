@@ -106,6 +106,67 @@ def _dept(org: str | None) -> str:
     return ((org or "").split("||")[0].strip()) or "Not stated"
 
 
+# Fields on a tender's public detail page that matter when filing, in the order shown. Matched on the start of the portal's label.
+FACT_LABELS = ["Tender Fee in", "Processing Fee in", "EMD Amount", "EMD Fee Type", "EMD Percentage", "Tender Fee Exemption", "EMD Exemption", "Tenderer Class", "Form Of Contract", "No. of Covers",
+               "Bid Validity", "Period Of Work", "NDA/Pre Qualification", "Document Download / Sale End Date", "Bid Submission End Date", "Bid Opening Date", "Clarification End Date",
+               "Pre Bid Meeting Date", "Pre Bid Meeting Place", "Payment Mode"]
+
+
+def portal_facts(pairs: dict[str, str]) -> list[dict[str, str]]:
+    out = []
+    for want in FACT_LABELS:
+        for k, v in pairs.items():
+            if k.lower().startswith(want.lower()) and v and v.strip().upper() not in ("NA", "NIL", "-"):
+                out.append({"label": k, "value": v.strip()[:300]})
+                break
+    return out
+
+
+def tasks_from_facts(facts: list[dict[str, str]]) -> list[tuple[str, str]]:
+    """Checklist lines that follow directly from the portal's own fields. No AI, nothing guessed."""
+    f = {x["label"].lower(): x["value"] for x in facts}
+    pick = lambda start: next((v for k, v in f.items() if k.startswith(start.lower())), "")  # noqa: E731
+    out: list[tuple[str, str]] = []
+    if pick("Tender Fee in"):
+        out.append((f"Pay the tender fee (₹{pick('Tender Fee in')}) online", "task"))
+    if pick("Processing Fee in"):
+        out.append((f"Pay the processing fee (₹{pick('Processing Fee in')}) online", "task"))
+    if pick("EMD Amount"):
+        out.append((f"Arrange the EMD of ₹{pick('EMD Amount')}" + (f" ({pick('EMD Fee Type')})" if pick("EMD Fee Type") else "") + " and keep the proof", "task"))
+    if pick("Tenderer Class"):
+        out.append((f"Registration class required: {pick('Tenderer Class')}", "condition"))
+    if pick("Bid Validity"):
+        out.append((f"Offer must stay valid for {pick('Bid Validity')} days", "condition"))
+    if pick("Period Of Work"):
+        out.append((f"Period of work: {pick('Period Of Work')} days", "condition"))
+    nda = pick("NDA/Pre Qualification")
+    if nda and not re.search(r"refer|tender doc", nda, re.I):
+        out.append((f"Pre-qualification: {nda}", "condition"))
+    if pick("Document Download"):
+        out.append((f"Download the tender documents before {pick('Document Download')}", "task"))
+    if pick("Bid Submission End"):
+        out.append((f"Upload the bid before {pick('Bid Submission End')}", "task"))
+    return out
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def locate_on_portal(client: Any, portal_key: str, organisation: str, tender_id: str) -> Any | None:
+    """Finds a tender again in a fresh portal session (its old links expired). Reads only the departments whose name matches the bid's."""
+    chain = [c for c in (organisation or "").split("||") if c.strip()]
+    first = _compact(chain[0]) if chain else ""
+    whole = _compact(" ".join(chain))
+    orgs = client.organisations()
+    ranked = [o for o in orgs if first and _compact(o[0]) == first] + [o for o in orgs if _compact(o[0]) and _compact(o[0]) in whole and _compact(o[0]) != first]
+    for _name, _count, link in ranked[:4]:
+        for t in client.tenders_of(link, portal_key):
+            if t.tender_id == tender_id:
+                return t
+    return None
+
+
 class BidError(ValueError):
     pass
 
@@ -180,6 +241,8 @@ class BidBook:
                   filename TEXT, stored TEXT, size INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL);
                 """
             )
+            if "portal_facts" not in {r["name"] for r in self.db.execute("PRAGMA table_info(bids)")}:
+                self.db.execute("ALTER TABLE bids ADD COLUMN portal_facts TEXT")  # added after the first release
             self.db.commit()
 
     # ---- bids ------------------------------------------------------------------------------------------------------
@@ -189,7 +252,7 @@ class BidBook:
         if r is None:
             return None
         d = dict(r)
-        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda"):
+        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts"):
             if f in d:
                 try:
                     d[f] = json.loads(d[f]) if d[f] else None
@@ -265,7 +328,7 @@ class BidBook:
         return self.get(bid_id) or bid
 
     def set_json(self, bid_id: int, field: str, value: Any, now: datetime) -> None:
-        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda"):
+        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts"):
             raise ValueError(field)
         with self.lock:
             self.db.execute(f"UPDATE bids SET {field} = ?, updated = ? WHERE id = ?", (json.dumps(value) if value is not None else None, _iso(now), bid_id))
@@ -347,6 +410,7 @@ class BidBook:
         wanted = [(t, "task", "standard") for t in STANDARD_TASKS]
         wanted += [(d, "document", "tender") for d in doc.get("documents", [])]
         wanted += [(r, "condition", "tender") for r in doc.get("requirements", [])]
+        wanted += [(t, k, "portal") for t, k in tasks_from_facts(bid.get("portal_facts") or [])]
         added = 0
         for text, kind, source in wanted:
             if _norm(text) in have or not _norm(text):

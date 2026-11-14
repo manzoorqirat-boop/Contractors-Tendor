@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -23,7 +24,8 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from . import access, ai, appsettings, mailer
-from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir
+from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
+from .gepnic import PortalError, parse_date, pick_nit
 from .config import Portal, Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
@@ -649,6 +651,62 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if store.get_tender(bid["key"]):
             store.set_ai_text(bid["key"], "doc", json.dumps(doc))
         return {"doc": doc, "added": bids.generate_items(bid_id, now())}
+
+    fetch_lock = threading.Lock()
+
+    @app.post("/api/bids/{bid_id}/fetch", dependencies=auth)
+    def bid_fetch(bid_id: int) -> dict:
+        """Looks the tender up again on its portal: the public fee/class/date fields, and the tender notice (NIT) when the portal gives it without a login."""
+        bid = bid_or_404(bid_id)
+        portal = next((p for p in portals_now() if p.key == bid["portal"]), None)
+        if not portal:
+            raise HTTPException(404, "That portal is no longer in your list")
+        if not fetch_lock.acquire(blocking=False):
+            raise HTTPException(409, "Another fetch is in progress. Try again in a moment")
+        try:
+            client = manager.client_factory(portal, env)
+            try:
+                t = locate_on_portal(client, portal.key, bid["organisation"] or "", bid["tender_id"])
+                if t is None:
+                    raise HTTPException(404, "The tender is no longer listed on the portal. It may have closed or been withdrawn")
+                full = getattr(client, "detail_full", None)
+                pairs, corrigenda, links = full(t) if full else (client.detail(t), [], [])
+            except PortalError as e:
+                raise HTTPException(502, f"The portal could not be read: {e}") from None
+            facts = portal_facts(pairs)
+            bids.set_json(bid_id, "portal_facts", facts, now())
+            patch = {}
+            for label, field in (("Clarification End Date", "query_deadline"), ("Pre Bid Meeting Date", "prebid_date")):
+                d = parse_date(pairs.get(label, ""))
+                if d and not bid.get(field):
+                    patch[field] = d.isoformat(timespec="seconds")
+            if patch:
+                bids.update(bid_id, patch, now())
+            state, message = "no_link", "The portal lists no downloadable notice for this tender."
+            nit = pick_nit(links)
+            if nit and hasattr(client, "download"):
+                try:
+                    data, _ctype = client.download(nit["href"])
+                except PortalError as e:
+                    state, message = "failed", f"The portal would not give the notice: {e}"
+                else:
+                    if not data.startswith(b"%PDF"):
+                        state, message = "login", "The portal asks for a login or captcha before it gives documents, which this app never gets past. Download the notice yourself and upload it here."
+                    elif not ai.configured():
+                        state, message = "ai_off", "The notice was available, but the AI assistant is off, so it was not read."
+                    else:
+                        try:
+                            doc = ai.read_document(bid_as_tender(bid), "", base64.b64encode(data).decode())
+                            bids.set_json(bid_id, "doc", doc, now())
+                            if store.get_tender(bid["key"]):
+                                store.set_ai_text(bid["key"], "doc", json.dumps(doc))
+                            state, message = "read", "Read the tender notice from the portal."
+                        except ai.AIError as e:
+                            state, message = "ai_failed", str(e)
+            added = bids.generate_items(bid_id, now())
+            return {"facts": facts, "added": added, "nit": state, "message": message, "corrigenda": corrigenda}
+        finally:
+            fetch_lock.release()
 
     @app.post("/api/bids/{bid_id}/brief", dependencies=auth)
     def bid_brief(bid_id: int, body: SummaryBody) -> dict:
