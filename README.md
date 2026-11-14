@@ -1,4 +1,4 @@
-# Tender dashboard
+# TendAI (tender dashboard)
 
 A web service that reads the public tender lists of Indian government e-procurement portals, keeps the **civil works**
 tenders, and gives you:
