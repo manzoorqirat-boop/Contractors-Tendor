@@ -19,6 +19,19 @@ tenders, and gives you:
 | IREPS (railways) | Indian Railways | Not possible: its tender search needs a mobile-OTP login |
 | Gujarat (nProcure) | Gujarat | Not reachable from the build environment; see below |
 
+## Using the dashboard
+
+- **Filters** (portal, category, department, location, value, closing window, search, starred) are shared by the Dashboard,
+  Explore and Tenders pages. The address bar always holds the current view, so **Share**, bookmarks and the Back button work.
+  **Views** saves a named set of filters and chart choices.
+- **Dashboard**: summary numbers and charts for whatever the filters select. The Tenders/Value switch changes every chart.
+  Click a number or bar to open the tenders behind it.
+- **Explore**: pick a combination (one click) or build your own: *group by* one thing and *split by* another (portal, category,
+  department, location, value band, how soon it closes, closing week or day, day found, day published), measured as number of
+  tenders, total value or average value, shown as stacked bars, grouped bars or a shaded table. Every bar and cell opens exactly
+  the tenders it counts. Tables can be downloaded.
+- **Tenders**: cards or a table, sortable, with a detail panel, stars for a watchlist, and a spreadsheet download.
+
 ## Deploy on Railway (one service)
 
 1. New Railway service from this repo. Railway builds the `Dockerfile` (React page + Python service in one image).
