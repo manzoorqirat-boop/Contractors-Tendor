@@ -1,7 +1,7 @@
 export interface PortalInfo { key: string; name: string; state: string; search_url: string }
 export interface Dimension { key: string; label: string; time: boolean }
 export interface AppConfig {
-  portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number;
+  portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number; ai_enabled?: boolean;
 }
 
 export interface PortalReport { portal: string; name: string; departments: number; listed: number; new_civil: number; errors: string[]; failed: boolean }

@@ -41,6 +41,7 @@ export const api = {
   facets: () => call<Facets>('/api/facets'),
   tender: (key: string) => call<Tender>(`/api/tenders/detail?key=${encodeURIComponent(key)}`),
   star: (key: string, starred: boolean) => call<{ key: string; starred: boolean }>('/api/tenders/star', { method: 'POST', body: JSON.stringify({ key, starred }) }),
+  summary: (key: string) => call<{ summary: string; cached: boolean }>('/api/tenders/summary', { method: 'POST', body: JSON.stringify({ key }) }),
   views: () => call<{ views: SavedView[] }>('/api/views'),
   saveViews: (views: SavedView[]) => call<{ views: SavedView[] }>('/api/views', { method: 'PUT', body: JSON.stringify({ views }) }),
   runs: () => call<{ runs: Run[]; running: number | null }>('/api/runs'),

@@ -23,10 +23,17 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
   const toast = useToast();
   const [t, setT] = useState<Tender | null>(null);
   const [error, setError] = useState('');
+  const [ai, setAi] = useState<{ busy: boolean; text: string; error: string }>({ busy: false, text: '', error: '' });
+
+  async function summarise() {
+    setAi({ busy: true, text: '', error: '' });
+    try { const r = await api.summary(tenderKey); setAi({ busy: false, text: r.summary, error: '' }); }
+    catch (e) { setAi({ busy: false, text: '', error: (e as Error).message }); }
+  }
 
   useEffect(() => {
     let stop = false;
-    setT(null); setError('');
+    setT(null); setError(''); setAi({ busy: false, text: '', error: '' });
     api.tender(tenderKey).then((r) => { if (!stop) setT(r); }, (e: Error) => { if (!stop) setError(e.message); });
     return () => { stop = true; };
   }, [tenderKey]);
@@ -64,6 +71,11 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
           <div className="d-actions">
             <button className="btn" onClick={copy}>Copy Tender ID</button>
             <a className="btn primary" href={t.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>
+          </div>
+          <div className="ai-box">
+            <button className="btn" onClick={summarise} disabled={ai.busy}>{ai.busy ? 'Asking Claude…' : ai.text ? 'Summarise again' : 'Summarise with Claude'}</button>
+            {ai.error && <div className="alert warn" style={{ marginTop: 10 }}>{ai.error}</div>}
+            {ai.text && <div className="ai-text">{ai.text}<div className="muted small">AI summary. It can be wrong, so check the portal.</div></div>}
           </div>
           <p className="muted small-note">Portal links expire within minutes, so paste the Tender ID into the portal's search. Confirm every detail on the portal before bidding.</p>
         </>
