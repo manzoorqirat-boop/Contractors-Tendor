@@ -226,7 +226,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if scheduler:
             scheduler.stop()
 
-    app = FastAPI(title="Tender digest", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app = FastAPI(title="TendAI by QMSofts", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
     @app.middleware("http")
     async def protect(request: Request, call_next):

@@ -174,6 +174,7 @@ def build(
 
     html = (
         f"<html><head><meta charset='utf-8'>{STYLE}</head><body><div class=c>"
+        "<div class=o style='font-weight:600'>TendAI by QMSofts</div>"
         f"<h1>{escape(prefix)}</h1>"
         f"<div class=o>{now.strftime('%A, %d %B %Y')}</div>"
         f"{notes}"
@@ -182,10 +183,10 @@ def build(
         f"{section('Closing in the next few days', soon, 'Nothing else closes soon.', max_soon_per_portal)}"
         "<p class=o style='margin-top:28px'>Read from the public tender lists of the portals named above. "
         "Always confirm details, eligibility and dates on the portal itself before bidding. "
-        "Tender links on these portals expire after a few minutes, so search by Tender ID.</p></div></body></html>"
+        "Tender links on these portals expire after a few minutes, so search by Tender ID.<br>Sent by TendAI by QMSofts.</p></div></body></html>"
     )
 
-    text_lines = [f"{prefix} - {now.strftime('%d %b %Y')}", ""]
+    text_lines = ["TendAI by QMSofts", f"{prefix} - {now.strftime('%d %b %Y')}", ""]
     if intro:
         text_lines += ["TODAY'S HIGHLIGHTS", intro, ""]
     for title, tenders in (("NEW", new), ("CLOSING SOON", soon)):

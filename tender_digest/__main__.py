@@ -14,7 +14,7 @@ from .store import SeenStore
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Daily civil tender digest")
+    parser = argparse.ArgumentParser(description="TendAI by QMSofts: daily civil tender digest")
     parser.add_argument("--dry-run", action="store_true", help="read the portals and build the email, but send nothing and mark nothing as sent")
     parser.add_argument("--preview", metavar="FILE", help="write the email's HTML to this file")
     parser.add_argument("--portals", help="comma-separated portal keys to read (default: all)")
@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.send_test:
         accepted = mailer.send(
             settings.brevo_api_key, settings.mail_from, settings.mail_from_name, settings.recipients,
-            "Tender digest: test email", "<p>This is a test. The daily digest is set up for this address.</p>",
+            "TendAI by QMSofts: test email", "<p>This is a test. The daily digest is set up for this address.</p>",
             "This is a test. The daily digest is set up for this address.",
         )
         log.info("test email accepted for %d recipient(s)", len(accepted))

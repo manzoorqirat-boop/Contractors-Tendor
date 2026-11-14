@@ -132,7 +132,7 @@ class RunManager:
         recipients = appsettings.current(self.env, self.store.get_settings())["recipients"]
         if not recipients:
             raise NotConfigured("There are no recipients: add at least one email address first")
-        accepted = self.sender(self.env.brevo_api_key, self.env.mail_from, self.env.mail_from_name, recipients, "Tender digest: test email",
+        accepted = self.sender(self.env.brevo_api_key, self.env.mail_from, self.env.mail_from_name, recipients, "TendAI by QMSofts: test email",
                                "<p>This is a test. The daily digest is set up for this address.</p>", "This is a test. The daily digest is set up for this address.")
         return len(accepted)
 
