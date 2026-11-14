@@ -61,6 +61,7 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `MAIL_FROM_NAME` | Optional | Default `Tender Digest`. |
 | `COOKIE_SECURE` | Optional | Default `true`. Set `false` only for local testing without HTTPS. |
 | `TZ_NAME` | Optional | Default `Asia/Kolkata`. |
+| `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
 | `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
 
 `PORT` is set by Railway. **The Brevo key and the password are never shown in the page or sent to the browser.**
@@ -109,6 +110,21 @@ portal's search page; paste the ID there.
 
 Portals are HTML pages, not an API. If one redesigns, runs report it as unavailable and the others carry on. The parsing is
 in `tender_digest/gepnic.py`, tested against real saved pages.
+
+### Adding portals from the page
+
+**Settings > Add a portal**: type a name and the portal's https address (it must end in `.gov.in` or `.nic.in`; see `PORTAL_HOST_SUFFIXES`).
+The app checks the address straight away.
+
+- **It can read the portal** (a NIC "GePNIC" portal): the portal is switched on and used by Run now and the daily run.
+- **It cannot**: the portal is still saved, but it is **not** run. It goes on the **Check these by hand** list (Settings, with a notice
+  on the Dashboard and a line in the daily email) with the reason: captcha, login needed, OTP login needed, refuses this server,
+  not a portal type the app can read, or not reachable. Open it in your own browser and look yourself.
+
+The reason is worked out from the portal's answer and the wording of its page, so treat it as a good guess. **Check all portals now**
+asks every portal again. Every run also records what it found. The app never tries to get past a captcha, a login or an OTP.
+Portals added in the page are stored in the database (on the `/data` volume); the built-in ones stay in `tender_digest/portals.json`.
+Removing one keeps the tenders already collected from it.
 
 ### Not covered yet
 
