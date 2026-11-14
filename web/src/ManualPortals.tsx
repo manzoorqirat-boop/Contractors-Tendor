@@ -32,8 +32,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
   const portals = list.data?.portals ?? [];
   const manual = list.data?.manual ?? [];
 
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
+  async function add() {
     setBusy('add');
     setMsg(null);
     try {
@@ -142,7 +141,8 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
         <h2>Add a portal</h2>
         <p className="sub">Paste the portal's address. The app checks it straight away: if it can read it, it is switched on; if not, it goes on the check-by-hand list with the reason.</p>
         {msg && <div className={`alert ${msg.tone}`} role="alert">{msg.text}</div>}
-        <form onSubmit={add}>
+        {/* A div, not a form: this card sits inside the Settings form, and a nested form would also save the settings. */}
+        <div onKeyDown={(e) => { if (e.key === 'Enter' && !disabled) { e.preventDefault(); add(); } }}>
           <label className="field">Name
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Kerala (etenders)" maxLength={80} required />
           </label>
@@ -153,8 +153,8 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
             <span className="hint">Must start with https:// and end in .gov.in or .nic.in. For portals like Maharashtra's, include the part after the site name, such as /nicgep.</span>
             <input value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} placeholder="https://etenders.kerala.gov.in/nicgep" inputMode="url" autoCapitalize="none" autoCorrect="off" required />
           </label>
-          <button className="btn primary" type="submit" disabled={disabled}>{busy === 'add' ? <><span className="spinner" /> Checking the portal…</> : 'Add and check'}</button>
-        </form>
+          <button className="btn primary" type="button" onClick={add} disabled={disabled}>{busy === 'add' ? <><span className="spinner" /> Checking the portal…</> : 'Add and check'}</button>
+        </div>
       </section>
     </>
   );

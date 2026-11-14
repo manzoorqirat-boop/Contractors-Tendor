@@ -9,7 +9,7 @@ import { Login } from './pages/Login';
 import { RunsPage } from './pages/Runs';
 import { SettingsPage } from './pages/Settings';
 import { TendersPage } from './pages/Tenders';
-import { Logo } from './Brand';
+import { loadBranding, Logo } from './Brand';
 import { ToastProvider } from './ui';
 import type { Display, Facets, Filters } from './types';
 
@@ -47,7 +47,7 @@ function parseHash(): { tab: Tab; filters: Filters; display: Display } {
 
 export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
-  useEffect(() => { applyTheme(readTheme()); }, []);
+  useEffect(() => { applyTheme(readTheme()); loadBranding(); }, []);
   useEffect(() => {
     setUnauthorisedHandler(() => setAuthed(false));
     api.me().then((r) => setAuthed(r.authenticated), () => setAuthed(false));

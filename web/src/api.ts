@@ -55,6 +55,7 @@ export const api = {
   startRun: (portals: string[], sendEmail: boolean) => call<{ id: number }>('/api/runs', { method: 'POST', body: JSON.stringify({ portals, send_email: sendEmail }) }),
   settings: () => call<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => call<Settings>('/api/settings', { method: 'PUT', body: JSON.stringify(s) }),
+  branding: () => call<{ logo_text: string }>('/api/branding'),
   portals: () => call<{ portals: PortalStatus[]; manual: PortalStatus[] }>('/api/portals'),
   addPortal: (p: NewPortal) => call<PortalStatus>('/api/portals', { method: 'POST', body: JSON.stringify(p) }),
   checkPortal: (key: string) => call<PortalStatus>(`/api/portals/${encodeURIComponent(key)}/check`, { method: 'POST' }),
