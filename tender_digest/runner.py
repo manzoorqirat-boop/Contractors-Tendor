@@ -78,7 +78,7 @@ class RunManager:
             reports = collector.collect(settings, self.store, now, self.client_factory, say)
             summary = [
                 {"portal": r.portal.key, "name": r.portal.name, "departments": r.organisations_read, "listed": r.listed,
-                 "new_civil": r.new_civil, "errors": r.errors[:5], "failed": r.failed}
+                 "new_civil": r.new_civil, "errors": r.errors[:5], "failed": r.failed, "access": r.access}
                 for r in reports
             ]
             intro = ""

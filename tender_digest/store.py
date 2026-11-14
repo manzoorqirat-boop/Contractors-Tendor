@@ -177,6 +177,9 @@ class SeenStore:
                   error TEXT, log TEXT NOT NULL DEFAULT '[]');
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS starred (key TEXT PRIMARY KEY, created TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS portal_status (
+                  key TEXT PRIMARY KEY, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', checked TEXT NOT NULL,
+                  departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
                 """
             )
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(seen)")}
@@ -676,6 +679,27 @@ class SeenStore:
         with self.lock:
             for k, v in values.items():
                 self.db.execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, json.dumps(v)))
+            self.db.commit()
+
+    # ---- can the app read each portal ---------------------------------------------------------------------------
+
+    def put_portal_status(self, key: str, kind: str, detail: str, checked: datetime, departments: int = 0, tenders: int = 0) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO portal_status (key, kind, detail, checked, departments, tenders) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET kind=excluded.kind, detail=excluded.detail, checked=excluded.checked, "
+                "departments=excluded.departments, tenders=excluded.tenders",
+                (key, kind, detail[:300], _iso(checked), departments, tenders),
+            )
+            self.db.commit()
+
+    def portal_statuses(self) -> dict[str, dict[str, Any]]:
+        with self.lock:
+            return {r["key"]: dict(r) for r in self.db.execute("SELECT key, kind, detail, checked, departments, tenders FROM portal_status")}
+
+    def delete_portal_status(self, key: str) -> None:
+        with self.lock:
+            self.db.execute("DELETE FROM portal_status WHERE key = ?", (key,))
             self.db.commit()
 
     def close(self) -> None:

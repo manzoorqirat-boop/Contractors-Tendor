@@ -16,14 +16,14 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
-from . import ai, appsettings, mailer
-from .config import Settings, load_settings
+from . import access, ai, appsettings, mailer
+from .config import Portal, Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
 from .store import DIMENSIONS, SORTS, SeenStore
@@ -183,13 +183,37 @@ class RunBody(BaseModel):
     send_email: bool = False
 
 
-def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None) -> FastAPI:
+def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None) -> FastAPI:
     manager = manager or RunManager(env, store, tz_name=config.tz_name)
     scheduler = Scheduler(manager) if config.run_scheduler else None
     limiter = LoginLimiter()
-    portal_names = {p.key: p.name for p in env.portals}
-    portal_states = {p.key: p.state for p in env.portals}
-    portal_search = {p.key: p.base_url.rstrip("/") + "/app?page=FrontEndAdvancedSearch&service=page" for p in env.portals}
+    probe = prober or access.probe
+    builtin_keys = {p.key for p in env.portals}
+    # Portals typed into the page are saved in the database, so these lookups are refilled (in place) whenever they change.
+    portal_names: dict[str, str] = {}
+    portal_states: dict[str, str] = {}
+    portal_search: dict[str, str] = {}
+
+    def portals_now() -> list[Portal]:
+        return appsettings.all_portals(env, store.get_settings())
+
+    def refresh_portals() -> None:
+        ps = portals_now()
+        for d, value in ((portal_names, lambda p: p.name), (portal_states, lambda p: p.state),
+                         (portal_search, lambda p: p.base_url.rstrip("/") + "/app?page=FrontEndAdvancedSearch&service=page")):
+            d.clear()
+            d.update({p.key: value(p) for p in ps})
+
+    refresh_portals()
+
+    def portal_entry(p: Portal, saved: dict[str, Any], statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        st = statuses.get(p.key)
+        return {
+            "key": p.key, "name": p.name, "state": p.state, "base_url": p.base_url, "custom": p.key not in builtin_keys,
+            "enabled": p.key in appsettings.current(env, saved)["portals"], **access.describe(st["kind"] if st else "unknown"),
+            "detail": st["detail"] if st else "", "checked": st["checked"] if st else None,
+            "departments": st["departments"] if st else 0, "tenders": st["tenders"] if st else 0,
+        }
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -294,7 +318,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     def get_config() -> dict:
         cur = appsettings.current(env, store.get_settings())
         return {
-            "portals": [{"key": p.key, "name": p.name, "state": p.state, "search_url": portal_search[p.key]} for p in env.portals],
+            "portals": [{"key": p.key, "name": p.name, "state": p.state, "search_url": portal_search[p.key]} for p in portals_now()],
             "mail_configured": manager.mail_configured, "recipient_count": len(cur["recipients"]),
             "now": now().isoformat(timespec="seconds"), "timezone": config.tz_name,
             "dimensions": [{"key": k, "label": d["label"], "time": isinstance(d["order"], str) and d["order"] in ("first", "last")} for k, d in DIMENSIONS.items()],
@@ -502,7 +526,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.get("/api/settings", dependencies=auth)
     def get_settings() -> dict:
         return {**appsettings.current(env, store.get_settings()), "mail_configured": manager.mail_configured, "mail_from": env.mail_from,
-                "available_portals": [{"key": p.key, "name": p.name} for p in env.portals]}
+                "available_portals": [{"key": p.key, "name": p.name} for p in portals_now()]}
 
     @app.put("/api/settings", dependencies=auth)
     def put_settings(body: dict[str, Any]) -> dict:
@@ -511,6 +535,59 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         except appsettings.SettingsError as e:
             raise HTTPException(422, str(e)) from None
         return get_settings()
+
+    # ---- portals: add your own, and see which ones the app cannot read ---------------------------------------
+
+    @app.get("/api/portals", dependencies=auth)
+    def list_portals() -> dict:
+        saved, statuses = store.get_settings(), store.portal_statuses()
+        entries = [portal_entry(p, saved, statuses) for p in portals_now()]
+        return {"portals": entries, "manual": [e for e in entries if e["manual"]]}
+
+    @app.post("/api/portals", dependencies=auth)
+    def add_portal(body: dict[str, Any]) -> dict:
+        saved = store.get_settings()
+        existing = appsettings.all_portals(env, saved)
+        try:
+            new = appsettings.clean_portal(body, {p.key for p in existing})
+        except appsettings.SettingsError as e:
+            raise HTTPException(422, str(e)) from None
+        same = next((p for p in existing if p.base_url.rstrip("/").lower() == new["base_url"].lower()), None)
+        if same:
+            raise HTTPException(422, f"That address is already in the list as '{same.name}'")
+        result = probe(new["base_url"])
+        # Added even when the app cannot read it: it then appears on the "check manually" list with the reason.
+        store.put_settings({"custom_portals": [*saved.get("custom_portals", []), new]})
+        store.put_portal_status(new["key"], result["kind"], result["detail"], now(), result["departments"], result["tenders"])
+        if result["kind"] == "ok":
+            store.put_settings({"portals": [*appsettings.current(env, saved)["portals"], new["key"]]})
+        refresh_portals()
+        return portal_entry(Portal(**new), store.get_settings(), store.portal_statuses())
+
+    @app.post("/api/portals/{key}/check", dependencies=auth)
+    def check_portal(key: str) -> dict:
+        portal = next((p for p in portals_now() if p.key == key), None)
+        if not portal:
+            raise HTTPException(404, "No such portal")
+        result = probe(portal.base_url)
+        store.put_portal_status(key, result["kind"], result["detail"], now(), result["departments"], result["tenders"])
+        return portal_entry(portal, store.get_settings(), store.portal_statuses())
+
+    @app.delete("/api/portals/{key}", dependencies=auth)
+    def remove_portal(key: str) -> dict:
+        if key in builtin_keys:
+            raise HTTPException(422, "Built-in portals cannot be removed. Switch them off in Settings instead")
+        saved = store.get_settings()
+        customs = saved.get("custom_portals", [])
+        if key not in {p.get("key") for p in customs}:
+            raise HTTPException(404, "No such portal")
+        update: dict[str, Any] = {"custom_portals": [p for p in customs if p.get("key") != key]}
+        if "portals" in saved:
+            update["portals"] = [k for k in saved["portals"] if k != key]
+        store.put_settings(update)
+        store.delete_portal_status(key)
+        refresh_portals()
+        return {"removed": key}
 
     @app.post("/api/settings/test-email", dependencies=auth)
     def test_email() -> dict:

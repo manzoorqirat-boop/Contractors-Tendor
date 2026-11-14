@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 
+from . import access
 from .collector import PortalReport
 from .gepnic import Tender
 
@@ -163,6 +164,14 @@ def build(
             f"Some data could not be read today, so this list may be incomplete:<ul style='margin:6px 0 0 18px'>{lines}</ul></div>"
         )
 
+    manual = [r for r in reports if r.access in access.NEEDS_MANUAL and r.access != "unreachable"]
+    if manual:
+        items = "".join(f"<li><b>{escape(r.portal.name)}</b>: {escape(access.describe(r.access)['label'])}</li>" for r in manual)
+        notes += (
+            "<div class=w>Check these portals by hand. The app cannot read them on its own, so nothing from them is in this list:"
+            f"<ul style='margin:6px 0 0 18px'>{items}</ul></div>"
+        )
+
     html = (
         f"<html><head><meta charset='utf-8'>{STYLE}</head><body><div class=c>"
         f"<h1>{escape(prefix)}</h1>"
@@ -190,6 +199,8 @@ def build(
         text_lines.append("")
     for r in problems:
         text_lines.append(f"Note: {r.portal.name}: {r.errors[0]}")
+    for r in manual:
+        text_lines.append(f"CHECK BY HAND: {r.portal.name}: {access.describe(r.access)['label']}")
     names = {k: r.portal.name for k, r in by_portal.items()}
     csv_rows = [("New", t, names.get(t.portal, t.portal)) for t in sorted(new, key=lambda x: (x.portal, -(x.value or 0)))]
     csv_rows += [("Closing soon", t, names.get(t.portal, t.portal)) for t in sorted(soon, key=lambda x: (x.portal, x.closing or datetime.max))]

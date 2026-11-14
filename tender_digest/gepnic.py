@@ -149,7 +149,30 @@ def apply_detail(tender: Tender, pairs: dict[str, str]) -> None:
 
 
 class PortalError(RuntimeError):
-    pass
+    """A portal could not be read. `kind` says why, so the page can tell a captcha or login wall from an outage.
+
+    kinds: unreachable (default, usually temporary), blocked, captcha, login, otp, different_software.
+    """
+
+    def __init__(self, message: str = "", kind: str = "unreachable"):
+        super().__init__(message)
+        self.kind = kind
+
+
+_OTP = re.compile(r"\botp\b|one[\s-]?time[\s-]?(password|pin)|mobile\s+verification", re.I)
+_CAPTCHA = re.compile(r"captcha|enter the (text|characters) (shown|in the image)", re.I)
+_LOGIN = re.compile(r"type=[\"']?password|please (log ?in|sign ?in)|login (is )?required|user ?id.{0,40}password", re.I | re.S)
+
+
+def classify_page(html: str) -> str:
+    """Why a page that loaded fine has no department list. A guess from the page's wording, never a certainty."""
+    if _OTP.search(html):
+        return "otp"
+    if _CAPTCHA.search(html):
+        return "captcha"
+    if _LOGIN.search(html):
+        return "login"
+    return "different_software"
 
 
 class GepnicClient:
@@ -169,7 +192,7 @@ class GepnicClient:
         return f"{self.base}/app?page=FrontEndAdvancedSearch&service=page"
 
     def _get(self, url: str, attempts: int = 3) -> str:
-        last: Exception | None = None
+        last: PortalError | None = None
         for attempt in range(attempts):
             wait = self.delay - (time.monotonic() - self._last)
             if wait > 0:
@@ -177,19 +200,40 @@ class GepnicClient:
             try:
                 response = self.http.get(urljoin(self.base + "/", url.replace("&amp;", "&")), timeout=self.timeout)
                 self._last = time.monotonic()
-                if response.status_code == 200 and "Stale Session" not in response.text[:3000]:
+                status = response.status_code
+                if status == 200 and "Stale Session" not in response.text[:3000]:
+                    final = str(getattr(response, "url", "") or "").lower()
+                    if getattr(response, "history", None) and re.search(r"log-?in|signin|sso", final):
+                        raise PortalError("the portal sent us to a login page: it needs an account", "login")
                     return response.text
-                last = PortalError(f"HTTP {response.status_code} from {url[:80]}")
+                if status == 401:
+                    raise PortalError("the portal asks for a login (HTTP 401)", "login")
+                if status == 403:
+                    raise PortalError("the portal refuses this server (HTTP 403), often because it blocks data-centre addresses", "blocked")
+                if status == 404:
+                    raise PortalError("that page does not exist on this portal (HTTP 404): wrong address or different software", "different_software")
+                last = PortalError(f"HTTP {status} from {url[:80]}", "unreachable")
+            except PortalError as e:
+                if e.kind != "unreachable":
+                    raise  # a permanent answer: retrying only annoys the portal
+                last = e
             except requests.RequestException as e:
                 self._last = time.monotonic()
-                last = e
-            time.sleep(min(2 ** attempt * 2, 10))
-        raise PortalError(str(last))
+                last = PortalError(str(e)[:200], "unreachable")
+            time.sleep(min(2 ** attempt * 2, 10) if attempt + 1 < attempts else 0)
+        raise last or PortalError("no answer", "unreachable")
 
-    def organisations(self) -> list[tuple[str, int, str]]:
-        orgs = parse_organisations(self._get("app?page=FrontEndTendersByOrganisation&service=page"))
+    def organisations(self, attempts: int = 3) -> list[tuple[str, int, str]]:
+        html = self._get("app?page=FrontEndTendersByOrganisation&service=page", attempts)
+        orgs = parse_organisations(html)
         if not orgs:
-            raise PortalError("the department list came back empty")
+            kind = classify_page(html)
+            why = {
+                "otp": "the portal asks for an OTP login",
+                "captcha": "the portal asks for a captcha",
+                "login": "the portal asks for a login",
+            }.get(kind, "the department list came back empty: not a portal this app can read")
+            raise PortalError(why, kind)
         return orgs
 
     def tenders_of(self, link: str, portal: str) -> list[Tender]:

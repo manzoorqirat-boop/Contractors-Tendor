@@ -22,6 +22,8 @@ class PortalReport:
     listed: int = 0
     new_civil: int = 0
     errors: list[str] = field(default_factory=list)
+    access: str = "ok"  # ok, or why the app could not read it: captcha, login, otp, blocked, different_software, unreachable
+    access_detail: str = ""
 
     @property
     def failed(self) -> bool:
@@ -50,8 +52,10 @@ def collect(
             _collect_portal(portal, settings, client, store, now, report, say)
         except PortalError as e:
             report.errors.append(f"could not read the portal: {e}")
+            report.access, report.access_detail = e.kind, str(e)[:300]
             log.warning("%s: %s", portal.key, e)
             say(f"{portal.name}: could not be read ({e})")
+        store.put_portal_status(portal.key, report.access, report.access_detail, now, report.organisations_read, report.listed)
         say(f"{portal.name}: done, {report.listed} listed, {report.new_civil} new civil")
         reports.append(report)
     return reports
@@ -62,6 +66,7 @@ def _collect_portal(
 ) -> None:
     include = portal.org_include or settings.org_include
     fetched = 0
+    dept_error: PortalError | None = None
     for name, count, link in client.organisations():
         if count == 0 or not filters.wants_organisation(name, include):
             continue
@@ -69,6 +74,7 @@ def _collect_portal(
             tenders = client.tenders_of(link, portal.key)
         except PortalError as e:
             report.errors.append(f"{name}: {e}")
+            dept_error = e
             continue
         report.organisations_read += 1
         report.listed += len(tenders)
@@ -100,3 +106,5 @@ def _collect_portal(
                 report.new_civil += 1
             elif detail_known:
                 store.skip(tender.key, now)
+    if report.organisations_read == 0 and dept_error is not None:
+        report.access, report.access_detail = dept_error.kind, str(dept_error)[:300]
