@@ -30,7 +30,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   me: () => call<{ authenticated: boolean }>('/api/me'),
-  login: (password: string) => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ password }) }),
+  login: (username: string, password: string) => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => call<{ ok: boolean }>('/api/logout', { method: 'POST' }),
   config: () => call<AppConfig>('/api/config'),
   stats: (f: Filters) => call<Stats>(`/api/stats?${toParams(f)}`),
