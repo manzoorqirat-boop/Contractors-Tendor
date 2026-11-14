@@ -31,6 +31,16 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
     return () => { stop = true; };
   }, [tenderKey]);
 
+  async function startBid() {
+    if (!t) return;
+    try {
+      const r = await api.createBid(t.key);
+      if (r.created) toast('Added to your bids');
+      onClose();
+      window.dispatchEvent(new CustomEvent('open-bid', { detail: r.id }));
+    } catch (err) { toast((err as Error).message, 'bad'); }
+  }
+
   async function copy() {
     if (!t) return;
     try { await navigator.clipboard.writeText(t.tender_id); toast('Tender ID copied'); } catch { toast('Could not copy', 'bad'); }
@@ -71,8 +81,10 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
           </dl>
           <div className="d-actions">
             <button className="btn" onClick={copy}>Copy Tender ID</button>
-            <a className="btn primary" href={t.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>
+            <a className="btn" href={t.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>
+            <button className="btn primary" onClick={startBid}>{t.bid_id ? 'Open bid workspace' : 'Start a bid'}</button>
           </div>
+          {t.history && t.history.length > 0 && <div className="alert warn" style={{ marginTop: 12 }}>{t.history.map((h) => <div key={h}>{h}</div>)}</div>}
           <AiSections t={t} onChange={(patch) => setT((cur) => (cur ? { ...cur, ...patch } : cur))} />
           <p className="muted small-note">Portal links expire within minutes, so paste the Tender ID into the portal's search. Confirm every detail on the portal before bidding.</p>
         </>

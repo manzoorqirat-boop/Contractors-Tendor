@@ -266,3 +266,35 @@ main:focus { outline: none; }
 .ai-sec ul { margin: 0 0 0 18px; padding: 0; } .ai-text .facts { margin: 0; }
 .brief-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 640px) { .askbar input { font-size: 13px; } }
+
+/* ---- bid workspace ---- */
+.count-pill.alert-pill { background: var(--bad); color: #fff; margin-left: 6px; }
+.chips-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
+.bid-list { display: grid; gap: 10px; }
+.bidcard { cursor: pointer; } .bidcard:hover { border-color: var(--accent); }
+.bidcard-top { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; }
+.bidcard-top .t-title { margin: 0; font-size: 14px; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.stage-select, .mini-select { width: auto; max-width: 150px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12.5px; }
+.progress { height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; flex: 1; }
+.progress > span { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
+.progress-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.nextup { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.nextup li { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nextup .linkish { text-align: left; }
+.ws-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.ws-grid input, .ws-grid select, .fact-row input, .add-item input, .add-item select, .field-inline input { width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+.field-inline .static { color: var(--text); font-weight: 600; font-size: 14px; padding: 7px 0; }
+.checklist { list-style: none; margin: 0; padding: 0; }
+.checklist li { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.checklist li:last-child { border-bottom: 0; }
+.checklist li.done .check span { color: var(--muted); text-decoration: line-through; }
+.checklist label.check { margin: 0; flex: 1; min-width: 0; align-items: flex-start; } .checklist label.check input { margin-top: 3px; flex: none; }
+.check-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; max-width: 55%; }
+.add-item { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; } .add-item input { flex: 1 1 200px; width: auto; } .add-item select { width: auto; }
+.elig { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 8px; }
+.elig li { display: flex; gap: 10px; align-items: flex-start; }
+.elig-icon { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 700; font-size: 13px; }
+.elig .met .elig-icon { background: var(--ok-soft); color: var(--ok); } .elig .gap .elig-icon { background: var(--bad-soft); color: var(--bad); } .elig .unclear .elig-icon { background: var(--warn-soft); color: var(--warn); }
+.draft-box { width: 100%; min-height: 280px; margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: 13px/1.55 ui-monospace, Menlo, Consolas, monospace; }
+.fact-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
+@media (max-width: 640px) { .check-tools { max-width: none; } .checklist li { flex-direction: column; } .fact-row { grid-template-columns: 1fr auto; } .fact-row input:nth-child(2) { grid-column: 1; } }

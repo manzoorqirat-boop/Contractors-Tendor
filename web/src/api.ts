@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { AiStatus, AppConfig, AskResult, Brief, DocFacts, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { AiStatus, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -60,5 +60,27 @@ export const api = {
   addPortal: (p: NewPortal) => call<PortalStatus>('/api/portals', { method: 'POST', body: JSON.stringify(p) }),
   checkPortal: (key: string) => call<PortalStatus>(`/api/portals/${encodeURIComponent(key)}/check`, { method: 'POST' }),
   removePortal: (key: string) => call<{ removed: string }>(`/api/portals/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+  bids: () => call<BidList>('/api/bids'),
+  createBid: (key: string) => call<{ id: number; created: boolean }>('/api/bids', { method: 'POST', body: JSON.stringify({ key }) }),
+  bid: (id: number) => call<BidDetail>(`/api/bids/${id}`),
+  patchBid: (id: number, patch: Record<string, unknown>) => call<BidDetail>(`/api/bids/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteBid: (id: number) => call<{ removed: number }>(`/api/bids/${id}`, { method: 'DELETE' }),
+  addItem: (id: number, text: string, kind: string) => call<BidItem>(`/api/bids/${id}/items`, { method: 'POST', body: JSON.stringify({ text, kind }) }),
+  patchItem: (id: number, item: number, patch: Record<string, unknown>) => call<BidItem>(`/api/bids/${id}/items/${item}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteItem: (id: number, item: number) => call<{ removed: number }>(`/api/bids/${id}/items/${item}`, { method: 'DELETE' }),
+  generateItems: (id: number) => call<{ added: number }>(`/api/bids/${id}/items/generate`, { method: 'POST' }),
+  changesSeen: (id: number) => call<{ ok: boolean }>(`/api/bids/${id}/changes/seen`, { method: 'POST' }),
+  bidDocument: (id: number, key: string, text: string, pdf_base64: string) => call<{ doc: DocFacts; added: number }>(`/api/bids/${id}/document`, { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
+  bidBrief: (id: number, refresh = false) => call<{ brief: Brief; cached: boolean }>(`/api/bids/${id}/brief`, { method: 'POST', body: JSON.stringify({ key: '', refresh }) }),
+  eligibility: (id: number) => call<Eligibility>(`/api/bids/${id}/eligibility`, { method: 'POST' }),
+  draft: (id: number, kind: string, instructions: string, refresh: boolean) => call<{ kind: string; text: string; cached: boolean }>(`/api/bids/${id}/draft`, { method: 'POST', body: JSON.stringify({ kind, instructions, refresh }) }),
+  bidAlerts: (days = 7) => call<{ alerts: BidAlert[]; unseen: number }>(`/api/bids/alerts?days=${days}`),
+  bidStats: () => call<BidStats>('/api/bids/stats'),
+  vault: () => call<VaultData>('/api/vault'),
+  addVault: (doc: { name: string; kind: string; issued: string; expiry: string; notes: string; filename: string; file_base64: string }) => call<VaultDoc>('/api/vault', { method: 'POST', body: JSON.stringify(doc) }),
+  patchVault: (id: number, patch: Record<string, unknown>) => call<VaultDoc>(`/api/vault/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteVault: (id: number) => call<{ removed: number }>(`/api/vault/${id}`, { method: 'DELETE' }),
+  vaultFileUrl: (id: number) => `/api/vault/${id}/file`,
+  saveFacts: (facts: CompanyFact[]) => call<{ facts: CompanyFact[] }>('/api/company-facts', { method: 'PUT', body: JSON.stringify({ facts }) }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
 };

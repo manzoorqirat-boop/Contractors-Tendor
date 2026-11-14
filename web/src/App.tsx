@@ -4,18 +4,20 @@ import { DISPLAY, EMPTY, fromParams, toParams } from './filters';
 import { useLoad } from './hooks';
 import { AskBar } from './ai';
 import { Dashboard } from './pages/Dashboard';
+import { BidsPage } from './pages/Bids';
 import { Explore } from './pages/Explore';
 import { Login } from './pages/Login';
 import { RunsPage } from './pages/Runs';
 import { SettingsPage } from './pages/Settings';
 import { TendersPage } from './pages/Tenders';
+import { VaultPage } from './pages/Vault';
 import { loadBranding, Logo } from './Brand';
 import { ToastProvider } from './ui';
 import type { Display, Facets, Filters } from './types';
 
-export type Tab = 'dashboard' | 'explore' | 'tenders' | 'runs' | 'settings';
+export type Tab = 'dashboard' | 'explore' | 'tenders' | 'bids' | 'vault' | 'runs' | 'settings';
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'dashboard', label: 'Dashboard' }, { id: 'explore', label: 'Explore' }, { id: 'tenders', label: 'Tenders' }, { id: 'runs', label: 'Runs' }, { id: 'settings', label: 'Settings' },
+  { id: 'dashboard', label: 'Dashboard' }, { id: 'explore', label: 'Explore' }, { id: 'tenders', label: 'Tenders' }, { id: 'bids', label: 'Bids' }, { id: 'vault', label: 'Vault' }, { id: 'runs', label: 'Runs' }, { id: 'settings', label: 'Settings' },
 ];
 
 /** What every page that shows tenders needs: the filters, the display choices, and a way to change them or jump elsewhere. */
@@ -38,11 +40,13 @@ function applyTheme(t: Theme) {
   if (t === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t);
 }
 
-function parseHash(): { tab: Tab; filters: Filters; display: Display } {
+function parseHash(): { tab: Tab; bidId: number | null; filters: Filters; display: Display } {
   const raw = location.hash.replace(/^#\/?/, '');
   const [path, query = ''] = raw.split('?');
-  const tab = TABS.find((t) => t.id === path)?.id ?? 'dashboard';
-  return { tab, ...fromParams(new URLSearchParams(query)) };
+  const [head, sub] = path.split('/');  // "#/bids/12" is bid 12's page
+  const tab = TABS.find((t) => t.id === head)?.id ?? 'dashboard';
+  const bidId = tab === 'bids' && /^\d+$/.test(sub ?? '') ? Number(sub) : null;
+  return { tab, bidId, ...fromParams(new URLSearchParams(query)) };
 }
 
 export function App() {
@@ -65,22 +69,23 @@ export function App() {
 function Main({ onLogout }: { onLogout: () => void }) {
   const initial = useRef(parseHash()).current;
   const [tab, setTab] = useState<Tab>(initial.tab);
+  const [bidId, setBidId] = useState<number | null>(initial.bidId);
   const [filters, setFiltersState] = useState<Filters>(initial.filters);
   const [display, setDisplayState] = useState<Display>(initial.display);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const push = useRef(false);
   const config = useLoad(() => api.config(), []);
-  const facets = useLoad(() => api.facets(), [tab === 'runs' || tab === 'settings' ? 'other' : 'data']);
+  const facets = useLoad(() => api.facets(), [tab === 'runs' || tab === 'settings' || tab === 'bids' || tab === 'vault' ? 'other' : 'data']);
 
   // The address bar always describes the current view, so a refresh, a bookmark or a shared link returns to it.
   useEffect(() => {
-    const url = `#/${tab}${(() => { const q = toParams(filters, display).toString(); return q ? `?${q}` : ''; })()}`;
+    const url = `#/${tab}${tab === 'bids' && bidId ? `/${bidId}` : ''}${(() => { const q = toParams(filters, display).toString(); return q ? `?${q}` : ''; })()}`;
     if (url === location.hash) return;
     if (push.current) { history.pushState(null, '', url); push.current = false; } else history.replaceState(null, '', url);
-  }, [tab, filters, display]);
+  }, [tab, bidId, filters, display]);
 
   useEffect(() => {
-    const onPop = () => { const s = parseHash(); setTab(s.tab); setFiltersState(s.filters); setDisplayState(s.display); };
+    const onPop = () => { const s = parseHash(); setTab(s.tab); setBidId(s.bidId); setFiltersState(s.filters); setDisplayState(s.display); };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -90,10 +95,19 @@ function Main({ onLogout }: { onLogout: () => void }) {
   const go = useCallback((t: Tab, f?: Filters, d?: Partial<Display>) => {
     push.current = true;
     setTab(t);
+    setBidId(null);
     if (f) setFiltersState(f);
     if (d) setDisplayState((cur) => ({ ...cur, page: 1, ...d }));
     window.scrollTo(0, 0);
   }, []);
+
+  // The tender panel's "Start a bid" button announces itself here, so no page has to know about bids.
+  useEffect(() => {
+    const open = (e: Event) => { push.current = true; setTab('bids'); setBidId((e as CustomEvent<number>).detail); window.scrollTo(0, 0); };
+    window.addEventListener('open-bid', open);
+    return () => window.removeEventListener('open-bid', open);
+  }, []);
+  const alerts = useLoad(() => api.bidAlerts(), [tab, bidId]);
 
   const nav: Nav = { filters, display, facets: facets.data, setFilters, setDisplay, go };
   const cycleTheme = () => { const next = THEMES[(THEMES.indexOf(theme) + 1) % 3]; setTheme(next); applyTheme(next); try { localStorage.setItem('theme', next); } catch { /* ignore */ } };
@@ -107,7 +121,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
           <span className="brand-name">Tend<span className="brand-ai">AI</span><span className="brand-by">by QMSofts</span></span>
         </div>
         <nav className="nav" aria-label="Main">
-          {TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'dashboard' || t.id === 'runs' || t.id === 'settings' ? undefined : filters)}>{t.label}</button>)}
+          {TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'explore' || t.id === 'tenders' ? filters : undefined)}>{t.label}{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title="Changes on tenders you are bidding for">{alerts.data!.unseen}</span>}</button>)}
         </nav>
         <button className="link-btn" onClick={cycleTheme} title="Change colour theme" aria-label={`Theme: ${theme}. Click to change.`}>Theme: {theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'Auto'}</button>
         <button className="link-btn" onClick={onLogout}>Log out</button>
@@ -121,6 +135,8 @@ function Main({ onLogout }: { onLogout: () => void }) {
             {tab === 'dashboard' && <Dashboard config={config.data} nav={nav} />}
             {tab === 'explore' && <Explore config={config.data} nav={nav} />}
             {tab === 'tenders' && <TendersPage config={config.data} nav={nav} />}
+            {tab === 'bids' && <BidsPage config={config.data} bidId={bidId} onOpen={(id) => { push.current = true; setBidId(id); window.scrollTo(0, 0); }} />}
+            {tab === 'vault' && <VaultPage config={config.data} />}
             {tab === 'runs' && <RunsPage config={config.data} />}
             {tab === 'settings' && <SettingsPage config={config.data} onSaved={config.reload} />}
           </>

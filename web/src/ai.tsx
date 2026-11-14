@@ -74,7 +74,7 @@ function DocView({ doc }: { doc: DocFacts }) {
   );
 }
 
-function BriefView({ b }: { b: Brief }) {
+export function BriefView({ b }: { b: Brief }) {
   const tone = b.recommendation === 'Bid' ? 'ok' : b.recommendation === 'No bid' ? 'bad' : 'warn';
   return (
     <div className="ai-text">
@@ -86,7 +86,7 @@ function BriefView({ b }: { b: Brief }) {
   );
 }
 
-const readBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+export const readBase64 = (file: File) => new Promise<string>((resolve, reject) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result).split(',')[1] ?? '');
   r.onerror = () => reject(new Error('Could not read that file'));

@@ -19,7 +19,7 @@ export interface Tender {
 export interface Brief { recommendation: 'Bid' | 'Maybe' | 'No bid'; headline: string; reasons: string[]; risks: string[]; checks: string[] }
 export interface DocFacts { summary: string; requirements: string[]; financial: { label: string; value: string }[]; dates: { label: string; value: string }[]; documents: string[]; penalties: string[]; red_flags: string[] }
 export interface Related { key: string; tender_id: string; title: string; closing: string | null; first_seen: string; value: number | null; similarity: number }
-export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[] }
+export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[]; bid_id?: number | null; history?: string[] }
 export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number }
 export interface AskResult { filters: Record<string, unknown>; sort: string | null; explanation: string }
 export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[] }
@@ -69,3 +69,33 @@ export interface Filters {
 /** Display choices that are not filters. */
 export interface Display { sort: string; page: number; group_by: string; split_by: string; measure: Measure; chart: ChartKind; layout: 'cards' | 'table' }
 export interface SavedView { id: string; name: string; filters: Record<string, unknown> }
+
+// ---- bid workspace -------------------------------------------------------------------------------------------------
+export type Stage = 'interested' | 'preparing' | 'submitted' | 'opened' | 'won' | 'lost' | 'dropped';
+export interface BidSummary {
+  id: number; key: string; tender_id: string; portal: string; portal_name: string; title: string; description: string; organisation: string; work_type: string | null;
+  value: number | null; value_text: string; emd: number | null; closing: string | null; opening: string | null; stage: Stage; owner: string | null;
+  emd_due: string | null; prebid_date: string | null; query_deadline: string | null; my_value: number | null; l1_value: number | null;
+  items_total: number; items_done: number; unseen: number; has_doc: number; stage_changed: string;
+}
+export interface BidList { bids: BidSummary[]; counts: Record<Stage, number>; stages: { key: Stage; label: string }[]; unseen: number }
+export type MatchStatus = 'ok' | 'expired' | 'expires_before_close' | 'missing' | 'unknown';
+export interface VaultMatch { status: MatchStatus; vault_id: number | null; name: string; expiry: string | null; kind: string; chosen: boolean }
+export interface BidItem { id: number; kind: 'task' | 'document' | 'condition'; text: string; done: boolean; owner: string | null; vault_id: number | null; note: string | null; match: VaultMatch | null }
+export interface BidChange { id: number; at: string; what: string; old: string | null; new: string | null; seen: boolean }
+export interface EligibilityCheck { requirement: string; status: 'met' | 'gap' | 'unclear'; evidence: string; action: string }
+export interface Eligibility { verdict: string; summary: string; checks: EligibilityCheck[]; checked?: string }
+export interface BidDetail extends Omit<BidSummary, 'has_doc'> {
+  published: string | null; category: string; location: string; emd: number | null; notes: string | null; l1_bidder: string | null; result_note: string | null; search_url: string;
+  doc: DocFacts | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null;
+  items: BidItem[]; changes: BidChange[]; unseen: number; history: string[];
+}
+export interface BidAlert { bid_id: number | null; kind: string; label: string; date: string; days_left: number; urgency: 'overdue' | 'today' | 'soon' | 'later'; title: string; tender_id: string; extra: string }
+export interface StatGroup { label: string; won: number; lost: number; won_value: number }
+export interface BidStats {
+  total: number; in_progress: number; submitted: number; dropped: number; won: number; lost: number; win_rate: number | null; won_value: number;
+  avg_gap_to_l1: number | null; gap_samples: number; by_work_type: StatGroup[]; by_department: StatGroup[]; by_size: StatGroup[];
+}
+export interface VaultDoc { id: number; name: string; kind: string; issued: string | null; expiry: string | null; notes: string; filename: string; size: number; created: string; status: 'ok' | 'expired' | 'expires_before_close' }
+export interface CompanyFact { label: string; value: string }
+export interface VaultData { documents: VaultDoc[]; kinds: { key: string; label: string }[]; facts: CompanyFact[] }
