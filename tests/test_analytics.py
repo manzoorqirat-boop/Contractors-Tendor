@@ -237,7 +237,7 @@ def test_api_oversized_filter_lists_are_refused(client):
 def test_api_facets_stats_detail(client, monkeypatch):
     monkeypatch.setattr(web, "local_now", lambda tz="Asia/Kolkata": NOW)
     f = client.get("/api/facets").json()
-    assert {"portal", "category", "department", "location"} == set(f)
+    assert {"portal", "category", "department", "location", "work_type"} == set(f)
     assert all(x["count"] > 0 for x in f["category"]) and f["portal"][0]["label"] in ("Maha", "Delhi", "Up")
     s = client.get("/api/stats?portal=up").json()
     assert {p["portal"] for p in s["by_portal"]} == {"up"} and s["by_portal"][0]["short"] == "UP"
