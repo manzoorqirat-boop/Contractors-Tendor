@@ -1,0 +1,8 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "startCommand": "python -m tender_digest",
+    "cronSchedule": "30 2 * * *",
+    "restartPolicyType": "NEVER"
+  }
+}

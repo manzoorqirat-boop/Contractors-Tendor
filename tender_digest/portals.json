@@ -1,0 +1,6 @@
+[
+  {"key": "maharashtra", "name": "Maharashtra (MahaTenders)", "state": "Maharashtra", "base_url": "https://mahatenders.gov.in/nicgep"},
+  {"key": "delhi", "name": "Delhi (Govt. e-Procurement)", "state": "Delhi", "base_url": "https://govtprocurement.delhi.gov.in/nicgep"},
+  {"key": "up", "name": "Uttar Pradesh (UP eTender)", "state": "Uttar Pradesh", "base_url": "https://etender.up.nic.in/nicgep"},
+  {"key": "central", "name": "Central (CPPP: CPWD and central bodies)", "state": "Central", "base_url": "https://eprocure.gov.in/eprocure"}
+]
