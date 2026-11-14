@@ -9,12 +9,10 @@ from pathlib import Path
 
 DEFAULT_PORTALS = Path(__file__).with_name("portals.json")
 
-# Which departments' tender lists are downloaded at all. Everything else on the portal is ignored.
-DEFAULT_ORG_INCLUDE = (
-    r"public works|\bpwd\b|cpwd|\br\s*&\s*b\b|roads?\b|buildings?\b|irrigation|water resources|water supply|jal\b|"
-    r"municipal|mahanagar|nagar (palika|nigam|parishad)|development authority|housing|urban|rural|panchayat|"
-    r"pmgsy|highway|nhai|construction|engineering|civil|railway|metro|cada\b|command area|nigam|vikas"
-)
+# Which departments' tender lists are downloaded. By default all of them: department names are a poor guide to civil work
+# (a Rural Development office, a university, a power utility and a border force all tender buildings and roads), and
+# the per-tender check below decides. Narrow it with ORG_INCLUDE (a regex) if a portal is too large or noisy.
+DEFAULT_ORG_INCLUDE = r"."
 
 # Departments whose work is civil by nature: their tenders are kept without a keyword match.
 DEFAULT_STRONG_CIVIL_ORG = (
@@ -66,7 +64,7 @@ class Settings:
     lookback_days: int = 2  # on the first run (or for tenders never seen), ignore anything published longer ago
     closing_soon_days: int = 3
     request_delay: float = 0.6  # seconds between requests, to stay polite to government servers
-    max_detail_fetches: int = 400  # per portal per run
+    max_detail_fetches: int = 600  # per portal per run
     subject_prefix: str = "Civil tenders"
     extra: dict = field(default_factory=dict)
 
@@ -114,6 +112,6 @@ def load_settings(require_mail: bool = True) -> Settings:
         lookback_days=int(env("LOOKBACK_DAYS", "2")),
         closing_soon_days=int(env("CLOSING_SOON_DAYS", "3")),
         request_delay=float(env("REQUEST_DELAY", "0.6")),
-        max_detail_fetches=int(env("MAX_DETAIL_FETCHES", "400")),
+        max_detail_fetches=int(env("MAX_DETAIL_FETCHES", "600")),
         subject_prefix=env("SUBJECT_PREFIX", "Civil tenders"),
     )

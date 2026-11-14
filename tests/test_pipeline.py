@@ -136,13 +136,13 @@ def test_collect_keeps_civil_skips_others_and_does_not_repeat():
         {"C1": detail("Civil Works - Others"), "E1": detail("Electrical Works")},
     )
     store = SeenStore(":memory:")
-    [report] = run(fake, store)
+    [report] = run(fake, store, make_settings(org_include=r"public works"))
     assert [t.tender_id for t in store.pending(NOW)] == ["C1"]
-    assert report.organisations_read == 1 and report.new_civil == 1  # Film Board is not a civil department
+    assert report.organisations_read == 1 and report.new_civil == 1  # Film Board is left out by ORG_INCLUDE
     assert fake.detail_calls == 2  # the 30-day-old tender is never fetched
 
     calls = fake.detail_calls
-    run(fake, store)
+    run(fake, store, make_settings(org_include=r"public works"))
     assert fake.detail_calls == calls  # everything already seen: no new requests for it
 
 
@@ -275,3 +275,10 @@ def test_attachment_goes_with_the_mail():
     http = FakeHttp([201])
     mailer.send("k", "f@x.com", "T", ["a@x.com"], "S", "h", "t", http, attachments=[{"name": "t.csv", "content": "QQ=="}])
     assert http.sent[0][2]["attachment"] == [{"name": "t.csv", "content": "QQ=="}]
+
+
+def test_all_departments_are_read_by_default():
+    fake = FakePortal([("Rural Development Office", 1, "L")], {"L": [tender(tender_id="R1", title="Road works")]}, {"R1": detail("Civil Works - Roads")})
+    store = SeenStore(":memory:")
+    run(fake, store)
+    assert [t.tender_id for t in store.pending(NOW)] == ["R1"]

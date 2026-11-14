@@ -8,7 +8,8 @@ tenders, and emails one consolidated digest (with an Excel-friendly spreadsheet 
 | MahaTenders | Maharashtra: PWD, municipal corporations, irrigation, housing | Working |
 | Delhi e-Procurement | Delhi government | Working |
 | UP eTender | Uttar Pradesh | Working |
-| CPPP (eprocure.gov.in) | Central government, CPWD and central bodies | Working |
+| CPPP (eprocure.gov.in) | Central ministries, PSUs, institutes, border forces. **CPWD is not here**, see below | Working |
+| CPWD e-tender | Central PWD | **Not reachable** from the build environment (403); see below |
 | IREPS (railways) | Indian Railways | **Not possible**: its tender search needs a mobile-OTP login |
 | Gujarat (nProcure) | Gujarat | **Not reachable** from where this was built; see "Gujarat" below |
 
@@ -26,7 +27,7 @@ search page; paste the ID there.
 
 ## How "civil" is decided
 
-1. Only departments that do civil work are downloaded (PWD, CPWD, irrigation, municipal, housing, roads, and so on).
+1. Every department's list is read; department names say little about civil work. (`ORG_INCLUDE` can narrow this.)
 2. Each new tender's detail page is read. It is kept if its title, description or category mentions civil work
    (road, bridge, building, drain, canal, plaster, repair...), and dropped if its category is electrical, mechanical,
    supply, services or similar, or it matches an exclude word (manpower, housekeeping, software...).
@@ -62,7 +63,7 @@ python -m tender_digest --dry-run --portals maharashtra --preview preview.html  
 ```
 
 `--dry-run` reads the portals and builds the email without sending or marking anything as sent. **The first real run
-can take 10 to 30 minutes** because every recent tender's detail page is read, with a pause between requests so the
+can take 20 to 40 minutes** because every recent tender's detail page is read, with a pause between requests so the
 government servers are not hammered. Later runs only read what is new.
 
 ## Things to know
@@ -81,6 +82,12 @@ government servers are not hammered. Later runs only read what is new.
 Gujarat's tenders are on nProcure (`tender.nprocure.com`), which is not the same software as the four portals above
 and closed the connection when contacted from the build environment. It may work from Railway or may need a different
 reader; try `curl -I https://tender.nprocure.com` from there. Adding it is a separate small piece of work.
+
+### CPWD
+
+CPWD publishes on its own portal, `etender.cpwd.gov.in`, which refused connections (HTTP 403) from the build environment,
+probably because it blocks data-centre addresses. It may behave differently from Railway; try `curl -I https://etender.cpwd.gov.in`
+from there. If it works it is the same NIC software and needs one line in `tender_digest/portals.json`.
 
 ### Railways
 
