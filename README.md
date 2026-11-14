@@ -55,7 +55,9 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `STATE_PATH` | Yes on Railway | `/data/tender_state.db` (the Dockerfile already defaults to this). |
 | `RECIPIENTS` | Optional | Starting list of email ids (commas or spaces). After you save the list in Settings, the page's list wins. |
 | `ANTHROPIC_API_KEY` | Optional | Turns on the **Summarise with Claude** button in the tender panel. Secret. Unset = feature off. |
-| `ANTHROPIC_MODEL` | Optional | Default `claude-sonnet-5-5`. |
+| `ANTHROPIC_MODEL` | Optional | Default `claude-sonnet-5-5`. Used for summaries, bid briefs and reading documents. |
+| `ANTHROPIC_FAST_MODEL` | Optional | Default `claude-haiku-5-5`. Used to label many tenders at once. |
+| `AI_MAX_PER_RUN` | Optional | Default `150`. The most tenders Claude labels in one run, which caps the cost. |
 | `MAIL_FROM_NAME` | Optional | Default `Tender Digest`. |
 | `COOKIE_SECURE` | Optional | Default `true`. Set `false` only for local testing without HTTPS. |
 | `TZ_NAME` | Optional | Default `Asia/Kolkata`. |
@@ -68,6 +70,20 @@ the scheduler and the "one run at a time" lock live inside the process.
 - Create an API key and verify the sender address or domain (Brevo, Senders).
 - If Brevo's *authorised IP* restriction is on, Railway's outgoing addresses change and sends are refused with an
   "unrecognised IP" error. Turn the restriction off for this key. The page shows Brevo's reason if a send is refused.
+
+## AI features (optional)
+
+Set `ANTHROPIC_API_KEY` and these appear. Fill in **Settings > AI assistant > About your company** for fit scores and bid briefs.
+
+- **Work type and fit score** on every open tender (1 to 5 against your company profile). Sort by *Best fit*, filter by *Work type*.
+- **May not be civil** tag on tenders Claude doubts (an option hides them instead).
+- **Ask bar**: type a question in plain words and it becomes filters.
+- **Tender panel**: summary, bid / no-bid brief, and *Read tender document* (upload a PDF up to 10 MB, or paste text).
+- **Same work tendered again** warning, found by comparing wording within a department (no AI cost).
+- **Daily email** opens with a short "worth a look today" paragraph.
+
+Labelling runs after each collection, newest tenders first, up to `AI_MAX_PER_RUN`. **Label tenders now** in Settings does 45 at a time.
+AI can be wrong: check every figure and date on the portal before bidding.
 
 ## Security
 
