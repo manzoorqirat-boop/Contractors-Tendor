@@ -32,6 +32,21 @@ tenders, and gives you:
   the tenders it counts. Tables can be downloaded.
 - **Tenders**: cards or a table, sortable, with a detail panel, stars for a watchlist, and a spreadsheet download.
 
+## Bid workspace (tender filing support)
+
+TendAI does not submit bids: portals need your DSC and their own login, and the app never goes around those. It prepares everything around the filing.
+
+- **Start a bid** from any tender's panel. The **Bids** page is your pipeline (Interested, Preparing, Submitted, Bid opened, Won, Lost, Dropped) with a "Coming up" list of closing dates, EMD due, pre-bid meetings and query deadlines.
+- **Checklist** per bid: standard steps plus, after *Read tender document*, the required documents and conditions. Each required document is matched to the **Vault** and flagged *Not in vault*, *Expired* or *Expires before closing*.
+- **Vault**: reusable papers (optionally with the file, up to 10 MB) with expiry dates, and **Company facts** (turnover, class, similar work) that the AI uses and never guesses.
+- **Eligibility check** (AI): each condition marked met, gap or unclear, with what to do.
+- **Change watch**: every run looks again at tenders you are bidding for and records moved closing/opening dates, new corrigenda and the pre-bid meeting date. The tender list and daily email follow the new date. Corrigenda are read from the tender's detail page, so a portal that words them differently may show none: still check the portal.
+- **Draft letters** (AI): covering letter, declaration/undertaking, pre-bid query, or your own instruction. Unknown details are left in [brackets].
+- **Results**: record your price, the winning price and the outcome. Win rate, gap to L1 and your record by work type, department and size appear under Bids > Results, and on similar tenders.
+- The **daily email** gains a "Your bids" section (deadlines in the next days, new changes).
+
+Uploaded vault files are stored in a `vault` folder next to the database (so on the `/data` volume), or in `VAULT_DIR` if set. Back it up with the database.
+
 ## Deploy on Railway (one service)
 
 1. New Railway service from this repo. Railway builds the `Dockerfile` (React page + Python service in one image).
