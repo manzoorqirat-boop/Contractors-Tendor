@@ -1,3 +1,4 @@
+import { Logo } from '../Brand';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 
@@ -71,8 +72,8 @@ export function Login({ onDone }: { onDone: () => void }) {
       <div className="login-shell">
         <aside className="login-hero">
           <div className="login-brand">
-            <span className="logo" aria-hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg></span>
-            <span className="login-brand-name">Tend<b>AI</b></span>
+            <Logo size={18} />
+            <span className="login-brand-name">Tend<b>AI</b><span className="brand-by">by QMSofts</span></span>
           </div>
           <h2>Tender intelligence for civil contractors</h2>
           <p>Every new civil tender, sorted, analysed and in your inbox before you start your day.</p>
@@ -81,7 +82,7 @@ export function Login({ onDone }: { onDone: () => void }) {
 
         <main className="login-card">
           <h1>Welcome back</h1>
-          <p className="login-sub">{greeting()}. Sign in to your TendAI workspace.</p>
+          <p className="login-sub">{greeting()}. Sign in to TendAI by QMSofts.</p>
 
           <form onSubmit={submit} noValidate>
             {error && <div className="alert bad" role="alert">{error}</div>}
@@ -118,7 +119,7 @@ export function Login({ onDone }: { onDone: () => void }) {
           </p>
         </main>
       </div>
-      <footer className="login-foot">© {new Date().getFullYear()} TendAI</footer>
+      <footer className="login-foot">© {new Date().getFullYear()} TendAI by QMSofts</footer>
     </div>
   );
 }
