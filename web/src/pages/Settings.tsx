@@ -3,6 +3,7 @@ import { api } from '../api';
 import { inr } from '../format';
 import { useLoad } from '../hooks';
 import { resetAiStatus } from '../ai';
+import { PortalsManager } from '../ManualPortals';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
 const lines = (s: string) => s.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
@@ -35,6 +36,14 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
   if (!form) return <div className="empty"><span className="spinner" /> Loading…</div>;
 
   const patch = (p: Partial<Settings>) => setForm({ ...form, ...p });
+  const refreshPortals = async () => {
+    // A portal was added or removed on the server: show it in the switches below without losing switches changed but not yet saved.
+    const s = await api.settings();
+    const had = new Set(form.available_portals.map((p) => p.key));
+    const keys = new Set(s.available_portals.map((p) => p.key));
+    setForm((f) => f && { ...f, available_portals: s.available_portals, portals: [...f.portals.filter((k) => keys.has(k)), ...s.portals.filter((k) => !had.has(k))] });
+    onSaved();
+  };
   const togglePortal = (key: string) => patch({ portals: form.portals.includes(key) ? form.portals.filter((x) => x !== key) : [...form.portals, key] });
 
   async function save(e: React.FormEvent) {
@@ -119,6 +128,8 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
             <label key={p.key} className="check"><input type="checkbox" checked={form.portals.includes(p.key)} onChange={() => togglePortal(p.key)} />{p.name}</label>
           ))}
         </section>
+
+        <PortalsManager onChange={refreshPortals} />
 
         <section className="card" style={{ marginBottom: 14 }}>
           <h2>What counts as a civil tender</h2>

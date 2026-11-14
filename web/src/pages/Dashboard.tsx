@@ -6,6 +6,7 @@ import { fmtDate, fmtDay, headline, inr, plural } from '../format';
 import { useLoad } from '../hooks';
 import type { Nav } from '../App';
 import { ChartSkeleton, Skeleton } from '../ui';
+import { ManualBanner } from '../ManualPortals';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
 import { BarBlock, labelFor, metricOf, MEASURES } from './Charts';
 
@@ -64,6 +65,8 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
           <button className="btn primary" onClick={() => go('runs')}>Run now</button>
         </div>
       </div>
+
+      <ManualBanner onOpen={() => go('settings')} />
 
       <FilterBar filters={filters} display={display} config={config} facets={nav.facets} onChange={nav.setFilters} onApplyView={(f, d) => go('dashboard', f, d)} hideStatus />
 
