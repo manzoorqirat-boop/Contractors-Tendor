@@ -104,7 +104,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       <header className="topbar">
         <div className="brand" aria-label="TendAI by QMSofts">
           <Logo />
-          Tend<span className="brand-ai">AI</span><span className="brand-by">by QMSofts</span>
+          <span className="brand-name">Tend<span className="brand-ai">AI</span><span className="brand-by">by QMSofts</span></span>
         </div>
         <nav className="nav" aria-label="Main">
           {TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'dashboard' || t.id === 'runs' || t.id === 'settings' ? undefined : filters)}>{t.label}</button>)}
