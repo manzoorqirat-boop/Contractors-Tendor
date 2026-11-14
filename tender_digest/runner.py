@@ -10,6 +10,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from . import ai, appsettings, collector, digest, mailer
+from .bids import BidBook
 from .config import Settings
 from .store import SeenStore
 
@@ -31,8 +32,10 @@ def local_now(tz_name: str = "Asia/Kolkata") -> datetime:
 
 class RunManager:
     def __init__(self, env: Settings, store: SeenStore, client_factory: collector.ClientFactory = collector.default_client,
-                 sender: Callable[..., list[str]] = mailer.send, tz_name: str = "Asia/Kolkata", background: bool = True):
+                 sender: Callable[..., list[str]] = mailer.send, tz_name: str = "Asia/Kolkata", background: bool = True,
+                 bids: BidBook | None = None):
         self.env, self.store, self.client_factory, self.sender, self.tz_name = env, store, client_factory, sender, tz_name
+        self.bids = bids or BidBook(store)
         self.background = background  # tests run inline
         self._guard = threading.Lock()
         self._lines: list[str] = []
@@ -75,7 +78,20 @@ class RunManager:
         try:
             now = local_now(self.tz_name)
             say(f"Started ({', '.join(p.name for p in settings.portals)})")
-            reports = collector.collect(settings, self.store, now, self.client_factory, say)
+            tracked = self.bids.watch_keys()
+            watched = {"changes": 0}
+
+            def watch(t, client) -> None:
+                bid_id = tracked.get(t.key)
+                if bid_id:
+                    n = self.bids.watch(t, client, now, bid_id)
+                    if n:
+                        watched["changes"] += n
+                        say(f"Bid watch: {n} change{'s' if n != 1 else ''} on {t.tender_id}")
+
+            reports = collector.collect(settings, self.store, now, self.client_factory, say, watch if tracked else None)
+            if tracked:
+                say(f"Bid watch: looked again at tenders you are bidding for ({watched['changes']} change{'s' if watched['changes'] != 1 else ''} found)")
             summary = [
                 {"portal": r.portal.key, "name": r.portal.name, "departments": r.organisations_read, "listed": r.listed,
                  "new_civil": r.new_civil, "errors": r.errors[:5], "failed": r.failed, "access": r.access}
@@ -89,7 +105,12 @@ class RunManager:
             if send_email:
                 pending = self.store.pending(now)
                 soon = self.store.closing_soon(now, settings.closing_soon_days)
-                quiet = not pending and not soon and not any(r.errors for r in reports)
+                try:
+                    bid_block = self.bids.digest_block(now)
+                except Exception:  # noqa: BLE001 - the email goes out without the bid section
+                    log.exception("bid section of the digest failed")
+                    bid_block = {"alerts": [], "changes": []}
+                quiet = not pending and not soon and not any(r.errors for r in reports) and not bid_block["alerts"] and not bid_block["changes"]
                 if quiet and not saved.get("send_empty", True):
                     say("Nothing new, and 'send on empty days' is off: no email sent")
                 else:
@@ -102,13 +123,14 @@ class RunManager:
                             intro = ai.digest_intro(items, profile)
                         except Exception as e:  # noqa: BLE001 - the email goes out without the intro
                             say(f"Claude intro skipped: {str(e)[:120]}")
-                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro)
+                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro, bid_block)
                     say(f"Sending '{built.subject}' to {len(settings.recipients)} recipient(s)")
                     accepted = self.sender(
                         settings.brevo_api_key, settings.mail_from, settings.mail_from_name, settings.recipients, built.subject, built.html, built.text,
                         attachments=[{"name": built.csv_name, "content": built.csv_base64}] if built.csv_base64 else None,
                     )
                     self.store.mark_emailed([t.key for t in pending])
+                    self.bids.mark_notified([c["id"] for c in bid_block["changes"]])
                     emailed = len(accepted)
                     say(f"Email accepted for {emailed} of {len(settings.recipients)} recipient(s)")
             failed = reports and all(r.failed for r in reports)

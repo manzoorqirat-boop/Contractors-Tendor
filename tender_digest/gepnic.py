@@ -132,6 +132,24 @@ def parse_detail(html: str) -> dict[str, str]:
     return pairs
 
 
+def parse_corrigenda(html: str) -> list[str]:
+    """'Title (type)' for every corrigendum or addendum listed on a tender's detail page. Empty when there are none."""
+    soup = BeautifulSoup(html, "lxml")
+    out: list[str] = []
+    for table in soup.find_all("table"):
+        header = table.find("tr", class_="list_header")
+        if header is None or header.find_parent("table") is not table or "corrigendum title" not in _text(header).lower():
+            continue
+        for row in table.find_all("tr"):
+            cells = row.find_all("td")
+            if row is header or row.find_parent("table") is not table or len(cells) < 3:
+                continue
+            title, kind = _text(cells[1]), _text(cells[2])
+            if title:
+                out.append(f"{title} ({kind})" if kind else title)
+    return list(dict.fromkeys(out))
+
+
 def apply_detail(tender: Tender, pairs: dict[str, str]) -> None:
     def pick(*labels: str) -> str:
         for label in labels:
@@ -241,3 +259,8 @@ class GepnicClient:
 
     def detail(self, tender: Tender) -> dict[str, str]:
         return parse_detail(self._get(tender.detail_path))
+
+    def detail_page(self, tender: Tender) -> tuple[dict[str, str], list[str]]:
+        """One fetch of the detail page: its label/value pairs and its corrigenda. Used to watch tenders you are bidding for."""
+        html = self._get(tender.detail_path)
+        return parse_detail(html), parse_corrigenda(html)

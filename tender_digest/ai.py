@@ -281,10 +281,82 @@ def clean_brief(raw: Any) -> dict:
             "reasons": strs(raw.get("reasons"), 4), "risks": strs(raw.get("risks"), 4), "checks": strs(raw.get("checks"), 4)}
 
 
-def brief(tender: dict, profile: str, doc: dict | None) -> dict:
+def brief(tender: dict, profile: str, doc: dict | None, history: list[str] | None = None) -> dict:
     extra = f"<document_facts>\n{json.dumps(doc, ensure_ascii=False)[:6000]}\n</document_facts>\n" if doc else ""
+    if history:
+        extra += "<your_past_results>\n" + "\n".join(history[:4]) + "\n</your_past_results>\n"
     return clean_brief(_json(_call(BRIEF_SYSTEM, f"{_profile_block(profile)}<tender>\n{_facts(tender)}\n</tender>\n{extra}", max_tokens=3000)))
 
 
 def ping() -> str:
     return _call("Reply with the single word OK.", "ping", max_tokens=200, use="fast")
+
+
+# ---- eligibility check ---------------------------------------------------------------------------------------------
+
+ELIGIBILITY_SYSTEM = (
+    "You check whether an Indian civil contractor meets a government tender's eligibility conditions. " + DATA_RULE + " "
+    "You are given the conditions extracted from the tender document, the company profile, the company's own facts (turnover, registration and so on) "
+    "and a list of the papers held in its document vault (names, kinds, expiry dates only). "
+    "For every condition decide: 'met' (the profile, facts or vault clearly show it), 'gap' (they clearly show it is NOT met, or a required paper is missing or expired), "
+    "or 'unclear' (not enough information). Never assume a figure that is not given. "
+    "Return ONLY a JSON object: verdict (exactly 'Eligible', 'Likely eligible', 'Gaps' or 'Unclear'), summary (one sentence), "
+    "checks (list of {requirement, status, evidence, action}); evidence and action each under 20 words, action empty when met."
+)
+ELIGIBILITY_VERDICTS = ("Eligible", "Likely eligible", "Gaps", "Unclear")
+
+
+def clean_eligibility(raw: Any) -> dict:
+    if not isinstance(raw, dict):
+        raise AIError("Claude's answer was not in the expected form. Try again.")
+    checks = []
+    for c in raw.get("checks", []) if isinstance(raw.get("checks"), list) else []:
+        if not isinstance(c, dict) or not str(c.get("requirement") or "").strip():
+            continue
+        st = c.get("status")
+        checks.append({"requirement": str(c["requirement"])[:300], "status": st if st in ("met", "gap", "unclear") else "unclear",
+                       "evidence": str(c.get("evidence") or "")[:200], "action": str(c.get("action") or "")[:200]})
+    verdict = raw.get("verdict")
+    if any(c["status"] == "gap" for c in checks):
+        verdict = "Gaps"  # a named gap always outranks an optimistic headline
+    return {"verdict": verdict if verdict in ELIGIBILITY_VERDICTS else "Unclear", "summary": str(raw.get("summary") or "")[:300], "checks": checks[:40]}
+
+
+def _facts_block(facts: list[dict]) -> str:
+    lines = [f"{str(f.get('label', ''))[:60]}: {str(f.get('value', ''))[:160]}" for f in facts if str(f.get("label", "")).strip() and str(f.get("value", "")).strip()]
+    return "<company_facts>\n" + "\n".join(lines[:40]) + "\n</company_facts>\n" if lines else ""
+
+
+def eligibility(tender: dict, profile: str, facts: list[dict], vault: list[dict], doc: dict) -> dict:
+    if not (doc.get("requirements") or doc.get("financial")):
+        raise AIError("The tender document has no eligibility conditions yet. Read the tender document first.")
+    held = "\n".join(f"- {v['name']} ({v['kind']})" + (f", expires {v['expiry']}" if v.get("expiry") else "") for v in vault[:80])
+    body = (f"{_profile_block(profile)}{_facts_block(facts)}<vault>\n{held or 'empty'}\n</vault>\n<tender>\n{_facts(tender, 600)}\n</tender>\n"
+            f"<conditions>\n{json.dumps({k: doc.get(k) for k in ('requirements', 'financial')}, ensure_ascii=False)[:6000]}\n</conditions>")
+    return clean_eligibility(_json(_call(ELIGIBILITY_SYSTEM, body, max_tokens=3500)))
+
+
+# ---- drafts: covering letter, declaration, pre-bid query ------------------------------------------------------------
+
+DRAFT_KINDS = {
+    "cover_letter": "a covering letter submitting the bid for this tender, addressed to the tendering authority, listing the enclosures",
+    "declaration": "a declaration / undertaking by the bidder: information given is true, no blacklisting or debarment, acceptance of the tender conditions, validity of the offer",
+    "prebid_query": "a pre-bid query letter asking for clarification on the points the contractor lists (use the conditions given and the instructions; do not invent queries)",
+    "custom": "the letter or statement described in the instructions",
+}
+DRAFT_SYSTEM = (
+    "You draft letters for an Indian civil contractor bidding on a government tender. " + DATA_RULE + " "
+    "Write plain text only, no markdown. Use only facts given: the tender, the company profile and the company facts. "
+    "Wherever a detail is not given (registration number, signatory name, address, date, amounts) write a placeholder in square brackets such as [Authorised signatory name]. "
+    "Never invent numbers, certificates or experience. Keep it formal, short and ready to put on letterhead."
+)
+
+
+def draft(kind: str, tender: dict, profile: str, facts: list[dict], doc: dict | None, instructions: str = "") -> str:
+    if kind not in DRAFT_KINDS:
+        raise AIError("Unknown kind of draft")
+    extra = f"<conditions>\n{json.dumps(doc, ensure_ascii=False)[:5000]}\n</conditions>\n" if doc and kind in ("prebid_query", "custom") else ""
+    ask = f"Write {DRAFT_KINDS[kind]}."
+    if instructions.strip():
+        ask += f"\nExtra instructions from the contractor:\n<instructions>\n{instructions.strip()[:800]}\n</instructions>"
+    return _call(DRAFT_SYSTEM, f"{_profile_block(profile)}{_facts_block(facts)}<tender>\n{_facts(tender, 800)}\n</tender>\n{extra}{ask}", max_tokens=2500)

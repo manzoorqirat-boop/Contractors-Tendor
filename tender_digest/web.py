@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from . import access, ai, appsettings, mailer
+from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir
 from .config import Portal, Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
@@ -178,13 +179,40 @@ class ViewsBody(BaseModel):
     views: list[ViewItem]
 
 
+class BidCreate(BaseModel):
+    key: str
+
+
+class ItemBody(BaseModel):
+    text: str
+    kind: str = "task"
+
+
+class DraftBody(BaseModel):
+    kind: str
+    instructions: str = ""
+    refresh: bool = False
+
+
+class VaultBody(BaseModel):
+    name: str = ""
+    kind: str = "other"
+    issued: str = ""
+    expiry: str = ""
+    notes: str = ""
+    filename: str = ""
+    file_base64: str = ""
+
+
 class RunBody(BaseModel):
     portals: list[str] | None = None
     send_email: bool = False
 
 
 def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None) -> FastAPI:
-    manager = manager or RunManager(env, store, tz_name=config.tz_name)
+    vault_dir = default_vault_dir(env.state_path)
+    bids = BidBook(store, vault_dir)
+    manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     scheduler = Scheduler(manager) if config.run_scheduler else None
     limiter = LoginLimiter()
     probe = prober or access.probe
@@ -400,6 +428,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         for field in ("brief", "doc"):
             row[field] = json.loads(row[field]) if row.get(field) else None
         row["related"] = store.related(key)
+        row["bid_id"] = bids.id_for_key(key)
+        row["history"] = bids.history_notes(row.get("work_type"), row.get("organisation"), row.get("value"))
         return shape(row)
 
     def ai_call(fn, *args):
@@ -441,7 +471,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if row.get("brief") and not body.refresh:
             return {"brief": json.loads(row["brief"]), "cached": True}
         doc = json.loads(row["doc"]) if row.get("doc") else None
-        out = ai_call(ai.brief, row, profile(), doc)
+        hist = bids.history_notes(row.get("work_type"), row.get("organisation"), row.get("value"))
+        out = ai_call(ai.brief, row, profile(), doc, *([hist] if hist else []))  # history is passed only when there is some
         store.set_ai_text(body.key, "brief", json.dumps(out))
         return {"brief": out, "cached": False}
 
@@ -498,6 +529,220 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             raise HTTPException(422, "Saved views are too large")
         store.put_settings({"views": views})
         return {"views": views}
+
+    # ---- bid workspace: pipeline, checklist, eligibility, drafts, changes, results ---------------------------------
+
+    def company_facts() -> list[dict]:
+        raw = store.get_settings().get("company_facts", [])
+        return [f for f in raw if isinstance(f, dict)] if isinstance(raw, list) else []
+
+    def bid_or_404(bid_id: int) -> dict:
+        bid = bids.get(bid_id)
+        if not bid:
+            raise HTTPException(404, "No such bid")
+        return bid
+
+    def bid_as_tender(bid: dict) -> dict:
+        return {k: bid.get(k) for k in ("title", "description", "organisation", "category", "location", "value", "emd", "published", "closing", "opening", "tender_id", "portal")} | {
+            "portal_name": portal_names.get(bid.get("portal") or "", bid.get("portal"))}
+
+    def bid_error(e: BidError) -> HTTPException:
+        return HTTPException(422, str(e))
+
+    def bid_full(bid: dict) -> dict:
+        items = bids.with_matches(bid, now())
+        changes = bids.changes(bid["id"])
+        return {
+            **bid, "portal_name": portal_names.get(bid["portal"] or "", bid["portal"]), "search_url": portal_search.get(bid["portal"] or "", ""),
+            "value_text": format_inr(bid["value"]), "items": items, "changes": changes, "unseen": sum(1 for c in changes if not c["seen"]),
+            "history": bids.history_notes(bid.get("work_type"), bid.get("organisation"), bid.get("value")),
+        }
+
+    @app.get("/api/bids", dependencies=auth)
+    def list_bids(stage: str | None = None) -> dict:
+        if stage and stage not in STAGES:
+            raise HTTPException(422, "Unknown stage")
+        rows = bids.list(stage)
+        for r in rows:
+            r["portal_name"] = portal_names.get(r["portal"] or "", r["portal"])
+            r["value_text"] = format_inr(r["value"])
+        counts = {s: 0 for s in STAGES}
+        for r in bids.list():
+            counts[r["stage"]] += 1
+        return {"bids": rows, "counts": counts, "stages": [{"key": k, "label": STAGE_LABELS[k]} for k in STAGES], "unseen": bids.unseen_total()}
+
+    @app.post("/api/bids", dependencies=auth)
+    def create_bid(body: BidCreate) -> dict:
+        try:
+            bid, created = bids.create_from_tender(body.key, now())
+        except BidError as e:
+            raise HTTPException(404, str(e)) from None
+        if created:
+            bids.generate_items(bid["id"], now())
+        return {"id": bid["id"], "created": created}
+
+    @app.get("/api/bids/alerts", dependencies=auth)
+    def bid_alerts(days: int = Query(7, ge=1, le=60)) -> dict:
+        return {"alerts": bids.alerts(now(), days), "unseen": bids.unseen_total()}
+
+    @app.get("/api/bids/stats", dependencies=auth)
+    def bid_stats() -> dict:
+        return bids.stats()
+
+    @app.get("/api/bids/{bid_id}", dependencies=auth)
+    def get_bid(bid_id: int) -> dict:
+        return bid_full(bid_or_404(bid_id))
+
+    @app.patch("/api/bids/{bid_id}", dependencies=auth)
+    def patch_bid(bid_id: int, body: dict[str, Any]) -> dict:
+        bid_or_404(bid_id)
+        try:
+            bids.update(bid_id, clean_patch(body), now())
+        except BidError as e:
+            raise bid_error(e) from None
+        return bid_full(bid_or_404(bid_id))
+
+    @app.delete("/api/bids/{bid_id}", dependencies=auth)
+    def delete_bid(bid_id: int) -> dict:
+        if not bids.delete(bid_id):
+            raise HTTPException(404, "No such bid")
+        return {"removed": bid_id}
+
+    @app.post("/api/bids/{bid_id}/items", dependencies=auth)
+    def add_bid_item(bid_id: int, body: ItemBody) -> dict:
+        bid_or_404(bid_id)
+        try:
+            return bids.add_item(bid_id, body.text, body.kind, now())
+        except BidError as e:
+            raise bid_error(e) from None
+
+    @app.post("/api/bids/{bid_id}/items/generate", dependencies=auth)
+    def generate_bid_items(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        return {"added": bids.generate_items(bid_id, now())}
+
+    @app.patch("/api/bids/{bid_id}/items/{item_id}", dependencies=auth)
+    def patch_bid_item(bid_id: int, item_id: int, body: dict[str, Any]) -> dict:
+        bid_or_404(bid_id)
+        try:
+            return bids.update_item(bid_id, item_id, body)
+        except BidError as e:
+            raise bid_error(e) from None
+
+    @app.delete("/api/bids/{bid_id}/items/{item_id}", dependencies=auth)
+    def delete_bid_item(bid_id: int, item_id: int) -> dict:
+        if not bids.delete_item(bid_id, item_id):
+            raise HTTPException(404, "No such item")
+        return {"removed": item_id}
+
+    @app.post("/api/bids/{bid_id}/changes/seen", dependencies=auth)
+    def bid_changes_seen(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        bids.mark_seen(bid_id)
+        return {"ok": True}
+
+    @app.post("/api/bids/{bid_id}/document", dependencies=auth)
+    def bid_document(bid_id: int, body: DocBody) -> dict:
+        bid = bid_or_404(bid_id)
+        doc = ai_call(ai.read_document, bid_as_tender(bid), body.text, body.pdf_base64)
+        bids.set_json(bid_id, "doc", doc, now())
+        if store.get_tender(bid["key"]):
+            store.set_ai_text(bid["key"], "doc", json.dumps(doc))
+        return {"doc": doc, "added": bids.generate_items(bid_id, now())}
+
+    @app.post("/api/bids/{bid_id}/brief", dependencies=auth)
+    def bid_brief(bid_id: int, body: SummaryBody) -> dict:
+        bid = bid_or_404(bid_id)
+        if bid.get("brief") and not body.refresh:
+            return {"brief": bid["brief"], "cached": True}
+        hist = bids.history_notes(bid.get("work_type"), bid.get("organisation"), bid.get("value"))
+        out = ai_call(ai.brief, bid_as_tender(bid), profile(), bid.get("doc"), *([hist] if hist else []))
+        bids.set_json(bid_id, "brief", out, now())
+        return {"brief": out, "cached": False}
+
+    @app.post("/api/bids/{bid_id}/eligibility", dependencies=auth)
+    def bid_eligibility(bid_id: int) -> dict:
+        bid = bid_or_404(bid_id)
+        if not ai.configured():
+            raise HTTPException(503, "AI features are off. Set ANTHROPIC_API_KEY on the server to turn them on.")
+        doc = bid.get("doc") or {}
+        if not (doc.get("requirements") or doc.get("financial")):
+            raise HTTPException(422, "The tender document has no eligibility conditions yet. Read the tender document first.")
+        vault = [{**d, "kind": VAULT_KINDS.get(d["kind"], ("Other",))[0]} for d in bids.vault_list()]
+        out = ai_call(ai.eligibility, bid_as_tender(bid), profile(), company_facts(), vault, bid.get("doc") or {})
+        out["checked"] = now().isoformat(timespec="seconds")
+        bids.set_json(bid_id, "eligibility", out, now())
+        return out
+
+    @app.post("/api/bids/{bid_id}/draft", dependencies=auth)
+    def bid_draft(bid_id: int, body: DraftBody) -> dict:
+        bid = bid_or_404(bid_id)
+        if body.kind not in ai.DRAFT_KINDS:
+            raise HTTPException(422, "Unknown kind of draft")
+        if body.kind == "custom" and not body.instructions.strip():
+            raise HTTPException(422, "Say what to write")
+        drafts = bid.get("drafts") or {}
+        if drafts.get(body.kind) and not body.refresh and body.kind != "custom":
+            return {"kind": body.kind, "text": drafts[body.kind], "cached": True}
+        text = ai_call(ai.draft, body.kind, bid_as_tender(bid), profile(), company_facts(), bid.get("doc"), body.instructions)
+        drafts[body.kind] = text
+        bids.set_json(bid_id, "drafts", drafts, now())
+        return {"kind": body.kind, "text": text, "cached": False}
+
+    # ---- vault: reusable company papers and the facts about your company ---------------------------------------------
+
+    @app.get("/api/vault", dependencies=auth)
+    def vault_list() -> dict:
+        today = now()
+        docs = [{**d, "status": bids.doc_status(d, today)} for d in bids.vault_list()]
+        return {"documents": docs, "kinds": [{"key": k, "label": v[0]} for k, v in VAULT_KINDS.items()], "facts": company_facts()}
+
+    @app.post("/api/vault", dependencies=auth)
+    def vault_add(body: VaultBody) -> dict:
+        data = None
+        if body.file_base64:
+            try:
+                data = base64.b64decode(body.file_base64, validate=True)
+            except ValueError:
+                raise HTTPException(422, "That file could not be read") from None
+        try:
+            return bids.vault_add(body.model_dump(), data, body.filename, now())
+        except BidError as e:
+            raise bid_error(e) from None
+
+    @app.patch("/api/vault/{doc_id}", dependencies=auth)
+    def vault_update(doc_id: int, body: dict[str, Any]) -> dict:
+        try:
+            return bids.vault_update(doc_id, body)
+        except BidError as e:
+            raise HTTPException(404 if "No such" in str(e) else 422, str(e)) from None
+
+    @app.delete("/api/vault/{doc_id}", dependencies=auth)
+    def vault_delete(doc_id: int) -> dict:
+        if not bids.vault_delete(doc_id):
+            raise HTTPException(404, "No such document")
+        return {"removed": doc_id}
+
+    @app.get("/api/vault/{doc_id}/file", dependencies=auth)
+    def vault_file(doc_id: int):
+        found = bids.vault_file(doc_id)
+        if not found:
+            raise HTTPException(404, "No file is stored for that document")
+        path, name = found
+        return FileResponse(path, media_type="application/octet-stream", filename=name)
+
+    @app.put("/api/company-facts", dependencies=auth)
+    def put_company_facts(body: dict[str, Any]) -> dict:
+        raw = body.get("facts")
+        if not isinstance(raw, list) or len(raw) > 40:
+            raise HTTPException(422, "Facts must be a list of up to 40 items")
+        facts = []
+        for f in raw:
+            label, value = str((f or {}).get("label", "")).strip()[:60], str((f or {}).get("value", "")).strip()[:160]
+            if label and value:
+                facts.append({"label": label, "value": value})
+        store.put_settings({"company_facts": facts})
+        return {"facts": facts}
 
     # ---- runs ------------------------------------------------------------------------------------------------
 

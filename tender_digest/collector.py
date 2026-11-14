@@ -32,6 +32,8 @@ class PortalReport:
 
 ClientFactory = Callable[[Portal, Settings], GepnicClient]
 Progress = Callable[[str], None]
+# Called with (tender, client) for a tender already known, so the bid workspace can look again at tenders being bid for.
+Watcher = Callable[[Tender, GepnicClient], None]
 
 
 def default_client(portal: Portal, settings: Settings) -> GepnicClient:
@@ -39,7 +41,8 @@ def default_client(portal: Portal, settings: Settings) -> GepnicClient:
 
 
 def collect(
-    settings: Settings, store: SeenStore, now: datetime, client_factory: ClientFactory = default_client, progress: Progress | None = None
+    settings: Settings, store: SeenStore, now: datetime, client_factory: ClientFactory = default_client, progress: Progress | None = None,
+    watcher: Watcher | None = None,
 ) -> list[PortalReport]:
     say = progress or (lambda _m: None)
     reports = []
@@ -49,7 +52,7 @@ def collect(
         client = client_factory(portal, settings)
         report.search_url = client.search_url
         try:
-            _collect_portal(portal, settings, client, store, now, report, say)
+            _collect_portal(portal, settings, client, store, now, report, say, watcher)
         except PortalError as e:
             report.errors.append(f"could not read the portal: {e}")
             report.access, report.access_detail = e.kind, str(e)[:300]
@@ -62,7 +65,8 @@ def collect(
 
 
 def _collect_portal(
-    portal: Portal, settings: Settings, client: GepnicClient, store: SeenStore, now: datetime, report: PortalReport, say: Progress
+    portal: Portal, settings: Settings, client: GepnicClient, store: SeenStore, now: datetime, report: PortalReport, say: Progress,
+    watcher: Watcher | None = None,
 ) -> None:
     include = portal.org_include or settings.org_include
     fetched = 0
@@ -82,6 +86,11 @@ def _collect_portal(
 
         for tender in tenders:
             if store.is_seen(tender.key):
+                if watcher:
+                    try:
+                        watcher(tender, client)
+                    except Exception:  # noqa: BLE001 - watching a bid must never stop the collection
+                        log.exception("bid watch failed for %s", tender.key)
                 continue
             if not filters.is_recent(tender, now, settings.lookback_days):
                 store.skip(tender.key, now)
