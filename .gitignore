@@ -6,3 +6,7 @@ __pycache__/
 .env
 probe/
 preview*.html
+web/node_modules/
+web/dist/
+*.zip
+web/tsconfig.tsbuildinfo

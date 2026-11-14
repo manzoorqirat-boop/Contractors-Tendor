@@ -71,17 +71,24 @@ class Digest:
 CSV_COLUMNS = ["Status", "Portal", "Tender ID", "Work", "Department", "Category", "Location", "Estimated value (INR)", "EMD (INR)", "Published", "Closes"]
 
 
+def safe_cell(value):
+    """Spreadsheet programs run cells that start with = + - @ as formulas. Tender text comes from outside: defuse it."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def build_csv(rows: list[tuple[str, Tender, str]]) -> str:
     """rows are (status, tender, portal name). utf-8 with a BOM so Excel opens the rupee sign and Hindi/Marathi text correctly."""
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(CSV_COLUMNS)
     for status, t, portal in rows:
-        writer.writerow([
+        writer.writerow([safe_cell(c) for c in [
             status, portal, t.tender_id, t.description or t.title, t.organisation.replace("||", " > "), t.category, t.location,
             "" if t.value is None else int(t.value), "" if t.emd is None else int(t.emd),
             _date(t.published, True), _date(t.closing, True),
-        ])
+        ]])
     return base64.b64encode(("\ufeff" + out.getvalue()).encode("utf-8")).decode("ascii")
 
 

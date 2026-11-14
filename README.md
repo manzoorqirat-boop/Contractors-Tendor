@@ -1,95 +1,103 @@
-# Tender digest
+# Tender dashboard
 
-Reads the public tender lists of Indian government e-procurement portals every morning, keeps the **civil works**
-tenders, and emails one consolidated digest (with an Excel-friendly spreadsheet attached) to a list of addresses.
+A web service that reads the public tender lists of Indian government e-procurement portals, keeps the **civil works**
+tenders, and gives you:
+
+- a **dashboard** with analytics (new tenders per day, closing soon, by portal, category, value band, top departments);
+- a searchable **tenders** list with filters and a spreadsheet download;
+- a **Run now** button, with a live log, for collecting on demand;
+- a **daily email digest** to a list of addresses you edit in the page;
+- **settings** for recipients, send time, portals, minimum value and keywords.
 
 | Portal | Covers | Status |
 |---|---|---|
-| MahaTenders | Maharashtra: PWD, municipal corporations, irrigation, housing | Working |
+| MahaTenders | Maharashtra: PWD, municipal corporations, Zilla Parishads, irrigation, housing | Working |
 | Delhi e-Procurement | Delhi government | Working |
 | UP eTender | Uttar Pradesh | Working |
-| CPPP (eprocure.gov.in) | Central ministries, PSUs, institutes, border forces. **CPWD is not here**, see below | Working |
-| CPWD e-tender | Central PWD | **Not reachable** from the build environment (403); see below |
-| IREPS (railways) | Indian Railways | **Not possible**: its tender search needs a mobile-OTP login |
-| Gujarat (nProcure) | Gujarat | **Not reachable** from where this was built; see "Gujarat" below |
+| CPPP (eprocure.gov.in) | Central ministries, PSUs, institutes, border forces | Working |
+| CPWD e-tender | Central PWD | Not reachable from the build environment (403); see below |
+| IREPS (railways) | Indian Railways | Not possible: its tender search needs a mobile-OTP login |
+| Gujarat (nProcure) | Gujarat | Not reachable from the build environment; see below |
 
-## What the email contains
+## Deploy on Railway (one service)
 
-- **New since the last digest**: each civil tender once, grouped by portal, biggest estimated value first, with the
-  work, department, Tender ID, category, estimated value and closing date.
-- **Closing in the next few days**: civil tenders already sent that are about to close.
-- A note when a portal could not be read, so a quiet day is never mistaken for a broken one.
-- The full list as `tenders-YYYY-MM-DD.csv` (opens in Excel). The email body shows the top 25 per portal so it stays
-  small enough for Gmail.
+1. New Railway service from this repo. Railway builds the `Dockerfile` (React page + Python service in one image).
+2. Add a **Volume** mounted at `/data`. This is where everything is kept. Without it, a redeploy loses all tenders and history.
+3. Set the variables below.
+4. Open the service URL, log in with `APP_PASSWORD`, go to **Settings**, add recipients and press *Send a test email*,
+   then go to **Runs** and press *Run now*. **The first run reads every recent tender and takes 20 to 40 minutes.**
 
-Tender links on these portals expire within minutes, so the email gives the **Tender ID** and a link to the portal's
-search page; paste the ID there.
+The service runs the daily schedule itself (default 8:00 AM India time, changeable in Settings). Keep it at **one replica**:
+the scheduler and the "one run at a time" lock live inside the process.
 
-## How "civil" is decided
+### Environment variables
 
-1. Every department's list is read; department names say little about civil work. (`ORG_INCLUDE` can narrow this.)
-2. Each new tender's detail page is read. It is kept if its title, description or category mentions civil work
-   (road, bridge, building, drain, canal, plaster, repair...), and dropped if its category is electrical, mechanical,
-   supply, services or similar, or it matches an exclude word (manpower, housekeeping, software...).
-3. Tenders with no stated value are kept, never silently dropped.
+| Variable | Required | Purpose |
+|---|---|---|
+| `APP_PASSWORD` | **Yes** | Login password for the page (at least 8 characters). The service will not start without it. Secret. |
+| `SECRET_KEY` | Recommended | Long random string that signs login cookies. Without it everyone is logged out on every restart. Secret. |
+| `BREVO_API_KEY` | For email | Brevo API key. Secret. |
+| `MAIL_FROM` | For email | A sender address verified in Brevo. |
+| `STATE_PATH` | Yes on Railway | `/data/tender_state.db` (the Dockerfile already defaults to this). |
+| `RECIPIENTS` | Optional | Starting list of email ids (commas or spaces). After you save the list in Settings, the page's list wins. |
+| `MAIL_FROM_NAME` | Optional | Default `Tender Digest`. |
+| `COOKIE_SECURE` | Optional | Default `true`. Set `false` only for local testing without HTTPS. |
+| `TZ_NAME` | Optional | Default `Asia/Kolkata`. |
+| `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
 
-All of this is configurable with environment variables (see `.env.example`).
-
-## Deploy on Railway
-
-1. Put this folder in its own GitHub repository and create a **new Railway service** from it.
-2. Add a **Volume** to the service, mounted at `/data`. Without it the "already sent" memory is lost between runs and
-   the same tenders are emailed again.
-3. Set the variables from `.env.example` (`RECIPIENTS`, `BREVO_API_KEY` as a secret, `MAIL_FROM`, `STATE_PATH=/data/tender_state.db`).
-4. `railway.json` already sets the schedule: `30 2 * * *` (UTC), which is **8:00 AM India time**. Edit it to change the time.
-   Railway runs the job once a day and stops it when it finishes.
-
-To change who gets the email, edit `RECIPIENTS` in Railway. No code change.
+`PORT` is set by Railway. **The Brevo key and the password are never shown in the page or sent to the browser.**
 
 ### Brevo
 
-- Create an API key and verify the sender address or domain (Brevo > Senders).
-- If Brevo's *authorised IP* restriction is on, Railway's outgoing addresses change and sends will be refused
-  with an "unrecognised IP" error. Turn the restriction off for this key.
-- Check it works before the first real run: `python -m tender_digest --send-test` sends a short test email.
+- Create an API key and verify the sender address or domain (Brevo, Senders).
+- If Brevo's *authorised IP* restriction is on, Railway's outgoing addresses change and sends are refused with an
+  "unrecognised IP" error. Turn the restriction off for this key. The page shows Brevo's reason if a send is refused.
 
-## Run it yourself
+## Security
+
+- Everything except the login and a health check needs the password. Cookies are `HttpOnly`, `SameSite=Strict`, signed, 7 days.
+- Wrong-password attempts are rate limited. Writes from other sites are refused.
+- Spreadsheet downloads neutralise cells that start with `=`, `+`, `-` or `@`, since tender text comes from outside.
+- Words typed in Settings are escaped, never used as patterns.
+- It is a single shared password, not per-user accounts. Do not put it in chat; set it only as a Railway variable.
+
+## How "civil" is decided
+
+1. Every department's list is read (department names say little: Zilla Parishads, universities and power utilities all tender civil work).
+2. Each new tender's detail page is read. It is kept if its title, description or category mentions civil work, and dropped
+   if its category is electrical, mechanical, supply, services or similar, or it matches an excluded word.
+3. Tenders with no stated value are kept, never silently dropped.
+
+## How it reads the portals
+
+These portals ask for a captcha on their "Active Tenders" search, which this **never tries to get around**. It reads the
+public department-wise lists instead. It waits 0.6 s between requests and identifies itself; do not shorten that.
+Tender links on these portals expire within minutes, so the page and the email give the **Tender ID** and a link to the
+portal's search page; paste the ID there.
+
+Portals are HTML pages, not an API. If one redesigns, runs report it as unavailable and the others carry on. The parsing is
+in `tender_digest/gepnic.py`, tested against real saved pages.
+
+### Not covered yet
+
+- **CPWD** (`etender.cpwd.gov.in`) refused connections (403) from the build environment, probably blocking data-centre
+  addresses. Try `curl -I https://etender.cpwd.gov.in` from Railway. If it works it is the same NIC software and needs
+  one line in `tender_digest/portals.json`.
+- **Gujarat** (`tender.nprocure.com`) is different software and closed the connection when contacted. Needs its own reader.
+- **Railways**: IREPS needs a mobile-OTP login. Some railway units also publish on CPPP, which is covered.
+
+## Develop
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
-pytest                                   # 29 tests, no network needed
-python -m tender_digest --dry-run --portals maharashtra --preview preview.html   # reads live, sends nothing
+pytest                                  # no network needed
+
+APP_PASSWORD=choose-a-password COOKIE_SECURE=false STATE_PATH=./local.db python -m tender_digest.web   # API on :8000
+
+cd web && npm ci && npm run dev         # page on :5173, forwards /api to :8000
+npm run build                           # then the Python service serves web/dist itself
 ```
 
-`--dry-run` reads the portals and builds the email without sending or marking anything as sent. **The first real run
-can take 20 to 40 minutes** because every recent tender's detail page is read, with a pause between requests so the
-government servers are not hammered. Later runs only read what is new.
-
-## Things to know
-
-- **Be a good neighbour.** The program waits 0.6 s between requests and identifies itself. Do not shorten that.
-- **Captchas are never bypassed.** The portals' main "Active Tenders" search is behind a captcha; this reads the
-  public department-wise lists instead. If a portal later puts those behind a captcha too, it is reported in the
-  email as unavailable and the other portals continue.
-- **Portals change.** These are HTML pages, not an API. If a portal redesigns, the day's email says it could not read
-  that portal. The parsing code is in `tender_digest/gepnic.py`, with tests against real saved pages.
-- **Confirm on the portal.** The digest is an aid for finding tenders. Eligibility, dates and documents must be checked
-  on the portal before bidding.
-
-### Gujarat
-
-Gujarat's tenders are on nProcure (`tender.nprocure.com`), which is not the same software as the four portals above
-and closed the connection when contacted from the build environment. It may work from Railway or may need a different
-reader; try `curl -I https://tender.nprocure.com` from there. Adding it is a separate small piece of work.
-
-### CPWD
-
-CPWD publishes on its own portal, `etender.cpwd.gov.in`, which refused connections (HTTP 403) from the build environment,
-probably because it blocks data-centre addresses. It may behave differently from Railway; try `curl -I https://etender.cpwd.gov.in`
-from there. If it works it is the same NIC software and needs one line in `tender_digest/portals.json`.
-
-### Railways
-
-IREPS requires a mobile-OTP login before its tender search will list anything, so it cannot be read unattended.
-Individual railway zones and units also publish on the central portal (CPPP), which is covered above.
+A command-line mode still exists for headless use: `python -m tender_digest --dry-run --portals delhi --preview out.html`
+reads live and builds the email without sending; `--send-test` sends a test email.
