@@ -129,6 +129,11 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
             if not isinstance(payload[flag], bool):
                 raise SettingsError(f"{flag} must be true or false")
             out[flag] = payload[flag]
+    if "logo_text" in payload:
+        text = str(payload["logo_text"] or "").strip()
+        if not re.fullmatch(r"[^\W_]{1,3}", text):
+            raise SettingsError("Logo letters must be 1 to 3 letters or numbers")
+        out["logo_text"] = text
     if "company_profile" in payload:
         text = str(payload["company_profile"] or "").strip()
         if len(text) > 2000:
@@ -142,7 +147,7 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
 
 DEFAULTS = {
     "send_time": "08:00", "schedule_enabled": True, "send_empty": True, "min_value": 0.0,
-    "extra_keywords": [], "exclude_words": [], "company_profile": "", "ai_digest_intro": True, "ai_hide_noncivil": False,
+    "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "ai_digest_intro": True, "ai_hide_noncivil": False,
 }
 
 
@@ -159,6 +164,7 @@ def current(env: Settings, saved: dict[str, Any]) -> dict[str, Any]:
         "extra_keywords": saved.get("extra_keywords", DEFAULTS["extra_keywords"]),
         "exclude_words": saved.get("exclude_words", DEFAULTS["exclude_words"]),
         "company_profile": saved.get("company_profile", DEFAULTS["company_profile"]),
+        "logo_text": saved.get("logo_text", DEFAULTS["logo_text"]),
         "ai_digest_intro": saved.get("ai_digest_intro", DEFAULTS["ai_digest_intro"]),
         "ai_hide_noncivil": saved.get("ai_hide_noncivil", DEFAULTS["ai_hide_noncivil"]),
     }

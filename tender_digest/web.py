@@ -281,6 +281,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         response.delete_cookie(COOKIE, path="/")
         return {"ok": True}
 
+    @app.get("/api/branding")
+    def branding() -> dict:
+        # Public on purpose: the login screen shows the logo before anyone has signed in. Nothing secret is in it.
+        return {"logo_text": appsettings.current(env, store.get_settings())["logo_text"]}
+
     @app.get("/api/me")
     def me(request: Request) -> dict:
         return {"authenticated": valid_token(config.secret_key, request.cookies.get(COOKIE))}
