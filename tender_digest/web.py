@@ -50,6 +50,7 @@ class AppConfig:
     tz_name: str = "Asia/Kolkata"
     static_dir: Path | None = None
     run_scheduler: bool = True
+    username: str = ""  # empty = any username accepted (tests); config_from_env defaults it to "admin"
 
 
 def config_from_env() -> AppConfig:
@@ -61,7 +62,7 @@ def config_from_env() -> AppConfig:
         key = secrets.token_hex(32)
         log.warning("SECRET_KEY is not set: a temporary one is used, so everyone is logged out whenever the service restarts. Set SECRET_KEY.")
     return AppConfig(
-        password=password, secret_key=key, cookie_secure=os.environ.get("COOKIE_SECURE", "true").lower() not in ("0", "false", "no"),
+        password=password, secret_key=key, username=os.environ.get("APP_USERNAME", "admin").strip(), cookie_secure=os.environ.get("COOKIE_SECURE", "true").lower() not in ("0", "false", "no"),
         tz_name=os.environ.get("TZ_NAME", "Asia/Kolkata"),
         static_dir=Path(os.environ.get("STATIC_DIR") or Path(__file__).resolve().parent.parent / "web" / "dist"),
     )
@@ -114,6 +115,7 @@ class LoginLimiter:
 
 
 class LoginBody(BaseModel):
+    username: str = ""
     password: str
 
 
@@ -201,9 +203,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         client = client_of(request)
         if limiter.blocked(client):
             raise HTTPException(429, "Too many wrong attempts. Wait a few minutes and try again.")
-        if not hmac.compare_digest(body.password.encode(), config.password.encode()):
+        user_ok = not config.username or hmac.compare_digest(body.username.strip().lower().encode(), config.username.lower().encode())
+        pass_ok = hmac.compare_digest(body.password.encode(), config.password.encode())
+        if not (user_ok and pass_ok):
             limiter.failed(client)
-            raise HTTPException(401, "Wrong password")
+            raise HTTPException(401, "Wrong username or password")
         limiter.succeeded(client)
         response.set_cookie(COOKIE, make_token(config.secret_key), max_age=SESSION_SECONDS, httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
         return {"ok": True}
