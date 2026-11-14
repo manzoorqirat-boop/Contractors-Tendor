@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, setUnauthorisedHandler } from './api';
 import { DISPLAY, EMPTY, fromParams, toParams } from './filters';
 import { useLoad } from './hooks';
+import { AskBar } from './ai';
 import { Dashboard } from './pages/Dashboard';
 import { Explore } from './pages/Explore';
 import { Login } from './pages/Login';
@@ -112,6 +113,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       </header>
 
       {config.error && <div className="alert bad">{config.error}</div>}
+      {config.data?.ai_enabled && (tab === 'dashboard' || tab === 'explore' || tab === 'tenders') && <div className="askwrap"><AskBar nav={nav} /></div>}
       <main id="main" tabIndex={-1}>
         {config.data && (
           <>

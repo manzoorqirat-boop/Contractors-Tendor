@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { AppConfig, Facets, Filters, Pivot, Run, SavedView, Settings, Stats, Tender, TenderPage } from './types';
+import type { AiStatus, AppConfig, AskResult, Brief, DocFacts, Facets, Filters, Pivot, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -39,9 +39,15 @@ export const api = {
   pivot: (f: Filters, groupBy: string, splitBy: string, top = 12) =>
     call<Pivot>(`/api/analytics?${toParams(f)}&group_by=${groupBy}${splitBy ? `&split_by=${splitBy}` : ''}&top=${top}`),
   facets: () => call<Facets>('/api/facets'),
-  tender: (key: string) => call<Tender>(`/api/tenders/detail?key=${encodeURIComponent(key)}`),
+  tender: (key: string) => call<TenderDetail>(`/api/tenders/detail?key=${encodeURIComponent(key)}`),
   star: (key: string, starred: boolean) => call<{ key: string; starred: boolean }>('/api/tenders/star', { method: 'POST', body: JSON.stringify({ key, starred }) }),
-  summary: (key: string) => call<{ summary: string; cached: boolean }>('/api/tenders/summary', { method: 'POST', body: JSON.stringify({ key }) }),
+  summary: (key: string, refresh = false) => call<{ summary: string; cached: boolean }>('/api/tenders/summary', { method: 'POST', body: JSON.stringify({ key, refresh }) }),
+  brief: (key: string, refresh = false) => call<{ brief: Brief; cached: boolean }>('/api/tenders/brief', { method: 'POST', body: JSON.stringify({ key, refresh }) }),
+  document: (key: string, text: string, pdf_base64: string) => call<{ doc: DocFacts }>('/api/tenders/document', { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
+  ask: (question: string) => call<AskResult>('/api/ask', { method: 'POST', body: JSON.stringify({ question }) }),
+  aiStatus: () => call<AiStatus>('/api/ai/status'),
+  aiTest: () => call<{ ok: boolean; model: string; fast_model: string }>('/api/ai/test', { method: 'POST' }),
+  aiScore: () => call<{ scored: number; labelled: number; unlabelled: number }>('/api/ai/score', { method: 'POST' }),
   views: () => call<{ views: SavedView[] }>('/api/views'),
   saveViews: (views: SavedView[]) => call<{ views: SavedView[] }>('/api/views', { method: 'PUT', body: JSON.stringify({ views }) }),
   runs: () => call<{ runs: Run[]; running: number | null }>('/api/runs'),

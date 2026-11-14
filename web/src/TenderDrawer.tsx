@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { chain, fmtDate, headline, inr, relative } from './format';
+import { AiSections, FitBadge, RelatedNote } from './ai';
 import { Drawer, Skeleton, useToast } from './ui';
-import type { Tender } from './types';
+import type { Tender, TenderDetail } from './types';
 
 export function StarButton({ t, onChange }: { t: Pick<Tender, 'key' | 'starred'>; onChange: (starred: boolean) => void }) {
   const toast = useToast();
@@ -21,19 +22,11 @@ export function StarButton({ t, onChange }: { t: Pick<Tender, 'key' | 'starred'>
 
 export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: string; now: string; onClose: () => void; onStar: (key: string, starred: boolean) => void }) {
   const toast = useToast();
-  const [t, setT] = useState<Tender | null>(null);
+  const [t, setT] = useState<TenderDetail | null>(null);
   const [error, setError] = useState('');
-  const [ai, setAi] = useState<{ busy: boolean; text: string; error: string }>({ busy: false, text: '', error: '' });
-
-  async function summarise() {
-    setAi({ busy: true, text: '', error: '' });
-    try { const r = await api.summary(tenderKey); setAi({ busy: false, text: r.summary, error: '' }); }
-    catch (e) { setAi({ busy: false, text: '', error: (e as Error).message }); }
-  }
-
   useEffect(() => {
     let stop = false;
-    setT(null); setError(''); setAi({ busy: false, text: '', error: '' });
+    setT(null); setError('');
     api.tender(tenderKey).then((r) => { if (!stop) setT(r); }, (e: Error) => { if (!stop) setError(e.message); });
     return () => { stop = true; };
   }, [tenderKey]);
@@ -56,6 +49,14 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
           </div>
           <p className="muted" style={{ margin: '6px 0 14px' }}>{chain(t.organisation).join(' › ')}</p>
           {rel?.text && <div className={`when-banner ${rel.tone}`}>{rel.text}</div>}
+          {(t.work_type || t.fit || t.ai_civil === 0) && (
+            <div className="chips" style={{ margin: '0 0 12px' }}>
+              {t.work_type && <span className="badge accent">{t.work_type}</span>}
+              <FitBadge fit={t.fit} notCivil={t.ai_civil} />
+              {t.fit_reason && <span className="muted small">{t.fit_reason}</span>}
+            </div>
+          )}
+          <RelatedNote t={t} />
           <dl className="facts">
             <dt>Estimated value</dt><dd><strong>{t.value === null ? 'Not stated' : inr(t.value, false)}</strong>{t.value !== null && t.value >= 1e5 && <span className="muted"> ({inr(t.value)})</span>}</dd>
             <dt>EMD</dt><dd>{t.emd ? inr(t.emd, false) : '-'}</dd>
@@ -72,11 +73,7 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
             <button className="btn" onClick={copy}>Copy Tender ID</button>
             <a className="btn primary" href={t.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>
           </div>
-          <div className="ai-box">
-            <button className="btn" onClick={summarise} disabled={ai.busy}>{ai.busy ? 'Asking Claude…' : ai.text ? 'Summarise again' : 'Summarise with Claude'}</button>
-            {ai.error && <div className="alert warn" style={{ marginTop: 10 }}>{ai.error}</div>}
-            {ai.text && <div className="ai-text">{ai.text}<div className="muted small">AI summary. It can be wrong, so check the portal.</div></div>}
-          </div>
+          <AiSections t={t} onChange={(patch) => setT((cur) => (cur ? { ...cur, ...patch } : cur))} />
           <p className="muted small-note">Portal links expire within minutes, so paste the Tender ID into the portal's search. Confirm every detail on the portal before bidding.</p>
         </>
       )}
