@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { AiStatus, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { AiStatus, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -71,6 +71,7 @@ export const api = {
   generateItems: (id: number) => call<{ added: number }>(`/api/bids/${id}/items/generate`, { method: 'POST' }),
   changesSeen: (id: number) => call<{ ok: boolean }>(`/api/bids/${id}/changes/seen`, { method: 'POST' }),
   bidDocument: (id: number, key: string, text: string, pdf_base64: string) => call<{ doc: DocFacts; added: number }>(`/api/bids/${id}/document`, { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
+  fetchPortal: (id: number) => call<FetchResult>(`/api/bids/${id}/fetch`, { method: 'POST' }),
   bidBrief: (id: number, refresh = false) => call<{ brief: Brief; cached: boolean }>(`/api/bids/${id}/brief`, { method: 'POST', body: JSON.stringify({ key: '', refresh }) }),
   eligibility: (id: number) => call<Eligibility>(`/api/bids/${id}/eligibility`, { method: 'POST' }),
   draft: (id: number, kind: string, instructions: string, refresh: boolean) => call<{ kind: string; text: string; cached: boolean }>(`/api/bids/${id}/draft`, { method: 'POST', body: JSON.stringify({ kind, instructions, refresh }) }),

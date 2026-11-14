@@ -87,7 +87,7 @@ export interface EligibilityCheck { requirement: string; status: 'met' | 'gap' |
 export interface Eligibility { verdict: string; summary: string; checks: EligibilityCheck[]; checked?: string }
 export interface BidDetail extends Omit<BidSummary, 'has_doc'> {
   published: string | null; category: string; location: string; emd: number | null; notes: string | null; l1_bidder: string | null; result_note: string | null; search_url: string;
-  doc: DocFacts | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null;
+  doc: DocFacts | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null;
   items: BidItem[]; changes: BidChange[]; unseen: number; history: string[];
 }
 export interface BidAlert { bid_id: number | null; kind: string; label: string; date: string; days_left: number; urgency: 'overdue' | 'today' | 'soon' | 'later'; title: string; tender_id: string; extra: string }
@@ -99,3 +99,4 @@ export interface BidStats {
 export interface VaultDoc { id: number; name: string; kind: string; issued: string | null; expiry: string | null; notes: string; filename: string; size: number; created: string; status: 'ok' | 'expired' | 'expires_before_close' }
 export interface CompanyFact { label: string; value: string }
 export interface VaultData { documents: VaultDoc[]; kinds: { key: string; label: string }[]; facts: CompanyFact[] }
+export interface FetchResult { facts: { label: string; value: string }[]; added: number; nit: 'read' | 'ai_off' | 'ai_failed' | 'login' | 'failed' | 'no_link'; message: string; corrigenda: string[] }
