@@ -1,4 +1,4 @@
-# TendAI (tender dashboard)
+# TendAI by QMSofts (tender dashboard)
 
 A web service that reads the public tender lists of Indian government e-procurement portals, keeps the **civil works**
 tenders, and gives you:
@@ -58,7 +58,7 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `ANTHROPIC_MODEL` | Optional | Default `claude-sonnet-5-5`. Used for summaries, bid briefs and reading documents. |
 | `ANTHROPIC_FAST_MODEL` | Optional | Default `claude-haiku-5-5`. Used to label many tenders at once. |
 | `AI_MAX_PER_RUN` | Optional | Default `150`. The most tenders Claude labels in one run, which caps the cost. |
-| `MAIL_FROM_NAME` | Optional | Default `Tender Digest`. |
+| `MAIL_FROM_NAME` | Optional | Default `TendAI by QMSofts`. |
 | `COOKIE_SECURE` | Optional | Default `true`. Set `false` only for local testing without HTTPS. |
 | `TZ_NAME` | Optional | Default `Asia/Kolkata`. |
 | `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
