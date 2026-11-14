@@ -295,6 +295,8 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
   const [file, setFile] = useState<File | null>(null);
   const [paste, setPaste] = useState('');
   const [busy, setBusy] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [note, setNote] = useState('');
   useEffect(() => setItems(bid.items), [bid.items]);
 
   const done = items.filter((i) => i.done).length;
@@ -320,6 +322,14 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
   async function fromDoc() {
     try { const r = await api.generateItems(bid.id); toast(r.added ? `Added ${plural(r.added, 'item')}` : 'Nothing new to add'); onChange(); } catch (e) { toast((e as Error).message, 'bad'); }
   }
+  async function fetchPortal() {
+    setFetching(true); setNote('');
+    try {
+      const r = await api.fetchPortal(bid.id);
+      setNote(`${r.message}${r.added ? ` Added ${plural(r.added, 'item')}.` : ''}${r.corrigenda.length ? ` Corrigenda on the portal: ${r.corrigenda.join('; ')}.` : ''}`);
+      onChange();
+    } catch (e) { setNote((e as Error).message); } finally { setFetching(false); }
+  }
   async function readDoc() {
     setBusy(true);
     try {
@@ -334,12 +344,19 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
       <div className="card-head">
         <div><h2>Checklist</h2><p className="sub">{done} of {items.length} done{problems > 0 && <> · <span style={{ color: 'var(--warn)' }}>{plural(problems, 'paper')} need attention</span></>}</p></div>
         <div className="head-actions">
-          {bid.doc && <button className="btn small" onClick={fromDoc}>Add missing items from document</button>}
+          <button className="btn small primary" onClick={fetchPortal} disabled={fetching}>{fetching ? 'Fetching…' : 'Fetch from portal'}</button>
+          <button className="btn small" onClick={fromDoc}>Add standard steps</button>
           {aiOn && <button className="btn small" onClick={() => setShowDoc((v) => !v)} aria-expanded={showDoc}>{bid.doc ? 'Read another document' : 'Read tender document'}</button>}
         </div>
       </div>
       <div className="progress" style={{ marginBottom: 12 }} aria-hidden><span style={{ width: `${pct}%` }} /></div>
-      {!bid.doc && <p className="muted small">The document list and conditions come from the tender document. {aiOn ? 'Press Read tender document and upload the NIT.' : 'Turn on the AI assistant to read it, or add items by hand.'}</p>}
+      {note && <div className="alert warn">{note}</div>}
+      {bid.portal_facts && bid.portal_facts.length > 0 && (
+        <details open style={{ marginBottom: 10 }}><summary className="muted small">From the portal's tender page</summary>
+          <dl className="facts">{bid.portal_facts.map((f) => <Fragment key={f.label}><dt>{f.label}</dt><dd>{f.value}</dd></Fragment>)}</dl>
+        </details>
+      )}
+      {!bid.doc && <p className="muted small">Fetch from portal reads the fees, class and dates, and the tender notice when the portal gives it without a login. Otherwise: the document list and conditions come from the tender document. {aiOn ? 'Press Read tender document and upload the NIT.' : 'Turn on the AI assistant to read it, or add items by hand.'}</p>}
       {showDoc && (
         <div className="ai-doc">
           <label className="field">Upload the tender PDF (up to 10 MB)<input type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
