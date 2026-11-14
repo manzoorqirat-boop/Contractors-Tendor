@@ -48,6 +48,7 @@ the scheduler and the "one run at a time" lock live inside the process.
 | Variable | Required | Purpose |
 |---|---|---|
 | `APP_PASSWORD` | **Yes** | Login password for the page (at least 8 characters). The service will not start without it. Secret. |
+| `APP_USERNAME` | Optional | Login username (default `admin`, not case-sensitive). |
 | `SECRET_KEY` | Recommended | Long random string that signs login cookies. Without it everyone is logged out on every restart. Secret. |
 | `BREVO_API_KEY` | For email | Brevo API key. Secret. |
 | `MAIL_FROM` | For email | A sender address verified in Brevo. |
