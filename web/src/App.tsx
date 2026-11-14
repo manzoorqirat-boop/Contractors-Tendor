@@ -102,7 +102,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       <header className="topbar">
         <div className="brand">
           <span className="logo" aria-hidden><svg width="16" height="16" viewBox="0 0 32 32"><path d="M9 22V10h14M9 16h10M9 22h14" stroke="#fff" strokeWidth="3" fill="none" strokeLinecap="round" /></svg></span>
-          Tender Dashboard
+          Tend<span className="brand-ai">AI</span>
         </div>
         <nav className="nav" aria-label="Main">
           {TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'dashboard' || t.id === 'runs' || t.id === 'settings' ? undefined : filters)}>{t.label}</button>)}
