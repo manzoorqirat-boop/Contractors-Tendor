@@ -72,7 +72,7 @@ export function Login({ onDone }: { onDone: () => void }) {
       <div className="login-shell">
         <aside className="login-hero">
           <div className="login-brand">
-            <Logo size={18} />
+            <Logo />
             <span className="login-brand-name">Tend<b>AI</b><span className="brand-by">by QMSofts</span></span>
           </div>
           <h2>Tender intelligence for civil contractors</h2>

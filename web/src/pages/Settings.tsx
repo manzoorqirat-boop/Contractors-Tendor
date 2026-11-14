@@ -4,6 +4,7 @@ import { inr } from '../format';
 import { useLoad } from '../hooks';
 import { resetAiStatus } from '../ai';
 import { PortalsManager } from '../ManualPortals';
+import { setLogoText } from '../Brand';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
 const lines = (s: string) => s.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
@@ -18,6 +19,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
   const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [busy, setBusy] = useState<'save' | 'test' | 'aitest' | 'score' | null>(null);
   const [profile, setProfile] = useState('');
+  const [logoText, setLogoTextField] = useState('QM');
   const [ai, setAi] = useState<AiStatus | null>(null);
   const loadAi = () => api.aiStatus().then(setAi, () => setAi(null));
   useEffect(() => { loadAi(); }, []);
@@ -29,6 +31,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
     setExclude(s.exclude_words.join('\n'));
     setMinValue(String(s.min_value || 0));
     setProfile(s.company_profile || '');
+    setLogoTextField(s.logo_text || 'QM');
   };
   useEffect(() => { if (data) load(data); }, [data]);
 
@@ -55,10 +58,11 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
       const saved = await api.saveSettings({
         recipients: lines(recipients), send_time: form.send_time, schedule_enabled: form.schedule_enabled, send_empty: form.send_empty,
         portals: form.portals, min_value: Number(minValue) || 0, extra_keywords: lines(extra), exclude_words: lines(exclude),
-        company_profile: profile, ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil,
+        company_profile: profile, logo_text: logoText, ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil,
       });
       loadAi();
       load(saved);
+      setLogoText(saved.logo_text);
       onSaved();
       setMsg({ tone: 'ok', text: 'Saved. Changes apply from the next run.' });
     } catch (err) {
@@ -101,6 +105,19 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
       <div className="page-head"><div><h1>Settings</h1><p className="sub">Who gets the digest, when, and what counts as a civil tender.</p></div></div>
       <form onSubmit={save}>
         {msg && <div className={`alert ${msg.tone}`} role="status">{msg.text}</div>}
+
+        <section className="card" style={{ marginBottom: 14 }}>
+          <h2>Logo</h2>
+          <p className="sub">The letters in the blue tile at the top left, on the sign-in screen and in the browser tab. Applies after you press Save.</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <label className="field" style={{ margin: 0 }}>
+              Letters
+              <span className="hint">1 to 3 letters or numbers</span>
+              <input value={logoText} onChange={(e) => setLogoTextField(e.target.value.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 3))} maxLength={3} style={{ maxWidth: 120 }} aria-label="Logo letters" />
+            </label>
+            <PreviewLogo text={logoText} />
+          </div>
+        </section>
 
         <section className="card" style={{ marginBottom: 14 }}>
           <h2>Daily email</h2>
@@ -171,4 +188,10 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
       </form>
     </>
   );
+}
+
+/** What the tile will look like with the letters typed so far, before saving. */
+function PreviewLogo({ text }: { text: string }) {
+  const t = text.trim() || 'QM';
+  return <span className={`logo len${Math.min(t.length, 3)}`} aria-label={`Preview: ${t}`} style={{ width: 40, height: 40, borderRadius: 10, fontSize: t.length === 1 ? 22 : t.length === 2 ? 17 : 13 }}>{t}</span>;
 }
