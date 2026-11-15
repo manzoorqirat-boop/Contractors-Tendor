@@ -20,7 +20,9 @@ h2 { font-size: 15px; letter-spacing: -.01em; font-weight: 650; }
 .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; background: var(--surface); border-right: 1px solid var(--border); }
 .sidebar .brand { padding: 4px 8px 16px; margin: 0; }
 .sidebar .brand-name { display: grid; line-height: 1.15; font-size: 17px; letter-spacing: -.02em; }
-.sidebar .brand-by { margin: 2px 0 0; font-size: 11px; }
+.sidebar .brand-word { display: inline; white-space: nowrap; font-weight: 700; color: var(--text); }
+.sidebar .brand-ai { color: var(--accent); font-weight: 800; }
+.sidebar .brand-by { display: block; margin: 2px 0 0; font-size: 11px; }
 .sidebar .nav { display: grid; gap: 2px; flex: 1; align-content: start; }
 .sidebar button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; position: relative; border: 0; background: none; padding: 8px 10px; border-radius: var(--r-sm); color: var(--muted); font-weight: 550; cursor: pointer; transition: background .15s, color .15s; }
 .sidebar button:hover { background: var(--surface-2); color: var(--text); }
@@ -129,3 +131,25 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
 .pager { padding-top: 14px; margin-top: 6px; }
 .empty h2 { margin-bottom: 4px; } .empty .sub { margin: 0 0 14px; }
 @media (max-width: 860px) { .list-tools { margin: -18px -16px 6px; padding: 10px 16px; } .tender .side { text-align: left; } }
+
+/* ---- bids pipeline ---- */
+.chips-row { gap: 4px; padding: 4px; margin-bottom: 16px; background: var(--surface-2); border-radius: var(--r-md); overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+.chips-row::-webkit-scrollbar { display: none; }
+.chip.pick { display: inline-flex; align-items: center; gap: 8px; flex: none; border: 0; border-radius: 7px; background: transparent; padding: 6px 12px; font-weight: 550; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
+.chip.pick:hover { color: var(--text); }
+.chip.pick.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.chip-n { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--border); color: var(--muted); font-size: 11.5px; font-weight: 650; text-align: center; font-variant-numeric: tabular-nums; }
+.chip.pick.on .chip-n { background: var(--accent); color: var(--accent-text); }
+.bid-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 14px; }
+.bidcard { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 18px 16px 22px; transition: border-color .15s, box-shadow .2s var(--ease), transform .2s var(--ease); }
+.bidcard:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+.bidcard::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 4px; border-radius: 0 4px 4px 0; background: var(--border); }
+.bidcard.urg-urgent::before { background: var(--bad); } .bidcard.urg-soon::before { background: var(--warn); } .bidcard.urg-ok::before { background: var(--ok); }
+.bidcard .chips { margin-top: 10px; }
+.progress-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.progress { flex: 1; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .4s var(--ease); }
+.stage-select { border-radius: 999px; padding: 4px 10px; font-weight: 600; background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.nextup { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 2px; }
+.nextup li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; margin: 0 -10px; border-radius: var(--r-sm); transition: background .15s; }
+.nextup li:hover { background: var(--surface-2); }
