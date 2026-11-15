@@ -262,6 +262,65 @@ def read_document(tender: dict, text: str = "", pdf_base64: str = "") -> dict:
     return clean_doc(_json(_call(DOC_SYSTEM, content, max_tokens=6000)))
 
 
+# ---- a tender added by hand: the listing fields, read from the notice ---------------------------------------------------
+
+LISTING_SYSTEM = (
+    "You read an Indian government tender notice (NIT) and copy out its listing details. " + DATA_RULE + " "
+    "Use only what the document says; use null for anything it does not state. Never guess. "
+    "Return ONLY a JSON object: tender_id (the tender / NIT / bid number exactly as written), reference (the notice or estimate number, if different), "
+    "title (a short name, under 120 characters), description (the name or description of the work, under 400 characters), "
+    "organisation (the department and office inviting bids, as one string), location (place or district of the work), "
+    "value (estimated cost in rupees as a number: convert lakh and crore), emd (earnest money in rupees as a number), "
+    "published, closing, opening (bid submission end date and bid opening date as local time 'YYYY-MM-DDTHH:MM', or 'YYYY-MM-DD' if no time), "
+    "portal_name (where the notice says it was published, e.g. a portal name), form_of_contract ('item rate', 'percentage', 'lump sum' or null)."
+)
+_LISTING_TEXT = ("tender_id", "reference", "title", "description", "organisation", "location", "portal_name", "form_of_contract")
+
+
+def clean_listing(raw: Any) -> dict:
+    from datetime import datetime
+
+    if not isinstance(raw, dict):
+        raise AIError("Claude's answer was not in the expected form. Try again.")
+    out: dict[str, Any] = {}
+    caps = {"tender_id": 80, "reference": 120, "title": 160, "description": 500, "organisation": 300, "location": 120, "portal_name": 80, "form_of_contract": 20}
+    for k in _LISTING_TEXT:
+        v = raw.get(k)
+        out[k] = str(v).strip()[: caps[k]] if isinstance(v, (str, int)) and not isinstance(v, bool) and str(v).strip() else ""
+    for k in ("value", "emd"):
+        v = raw.get(k)
+        out[k] = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 1e13 else None
+    for k in ("published", "closing", "opening"):
+        v = raw.get(k)
+        try:
+            d = datetime.fromisoformat(v) if isinstance(v, str) and v.strip() else None
+        except ValueError:
+            d = None
+        out[k] = d.isoformat(timespec="minutes") if d and 2000 <= d.year <= 2100 else ""
+    return out
+
+
+def read_listing(text: str = "", pdf_base64: str = "") -> dict:
+    content = _source_content_plain(text, pdf_base64, "Copy out the listing details of this tender.")
+    return clean_listing(_json(_call(LISTING_SYSTEM, content, max_tokens=1500)))
+
+
+def _source_content_plain(text: str, pdf_base64: str, tail: str) -> Any:
+    if pdf_base64:
+        try:
+            raw = base64.b64decode(pdf_base64, validate=True)
+        except ValueError:
+            raise AIError("That file could not be read as a PDF.") from None
+        if len(raw) > MAX_PDF_BYTES:
+            raise AIError("That PDF is over 10 MB. Upload a smaller file or paste the key pages as text.")
+        if not raw.startswith(b"%PDF"):
+            raise AIError("That file is not a PDF.")
+        return [{"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_base64}}, {"type": "text", "text": tail}]
+    if not text.strip():
+        raise AIError("Paste the tender text or choose a PDF first.")
+    return f"<document>\n{text[:MAX_TEXT]}\n</document>\n\n{tail}"
+
+
 # ---- bid / no-bid brief -------------------------------------------------------------------------------------------
 
 BRIEF_SYSTEM = (
