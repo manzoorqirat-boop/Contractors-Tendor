@@ -20,6 +20,11 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' }, { id: 'explore', label: 'Explore' }, { id: 'tenders', label: 'Tenders' }, { id: 'bids', label: 'Bids' }, { id: 'vault', label: 'Vault' }, { id: 'runs', label: 'Runs' }, { id: 'settings', label: 'Settings' },
 ];
 
+// Daily work stays in the main bar; Runs and Settings are set-up pages, so they sit with the account links.
+const UTILITY: Tab[] = ['runs', 'settings'];
+const MAIN_TABS = TABS.filter((t) => !UTILITY.includes(t.id));
+const UTILITY_TABS = TABS.filter((t) => UTILITY.includes(t.id));
+
 /** What every page that shows tenders needs: the filters, the display choices, and a way to change them or jump elsewhere. */
 export interface Nav {
   filters: Filters; display: Display; facets: Facets | null;
@@ -121,8 +126,9 @@ function Main({ onLogout }: { onLogout: () => void }) {
           <span className="brand-name">Tend<span className="brand-ai">AI</span><span className="brand-by">by QMSofts</span></span>
         </div>
         <nav className="nav" aria-label="Main">
-          {TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'explore' || t.id === 'tenders' ? filters : undefined)}>{t.label}{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title="Changes on tenders you are bidding for">{alerts.data!.unseen}</span>}</button>)}
+          {MAIN_TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'explore' || t.id === 'tenders' ? filters : undefined)}>{t.label}{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title="Changes on tenders you are bidding for">{alerts.data!.unseen}</span>}</button>)}
         </nav>
+        {UTILITY_TABS.map((t) => <button key={t.id} className="link-btn" aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id)}>{t.label}</button>)}
         <button className="link-btn" onClick={cycleTheme} title="Change colour theme" aria-label={`Theme: ${theme}. Click to change.`}>Theme: {theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'Auto'}</button>
         <button className="link-btn" onClick={onLogout}>Log out</button>
       </header>
