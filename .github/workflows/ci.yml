@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"            # same as the Dockerfile
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install
+        run: pip install -r requirements-dev.txt
+      - name: Test
+        env:
+          ANTHROPIC_API_KEY: ""             # tests use fakes; make sure a real key can never be used
+        run: python -m pytest -q
+
+  web:
+    name: Web type-check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22                  # same as the Dockerfile
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Type-check and build
+        run: npm run build
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend, web]                   # only once the cheaper checks pass
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t tender-digest:ci .
+      - name: Smoke test the running container
+        run: |
+          docker run -d --name app -p 8080:8080 \
+            -e PORT=8080 -e STATE_PATH=/tmp/state.db \
+            -e APP_PASSWORD=ci-smoke-password -e SECRET_KEY=ci-smoke-secret -e COOKIE_SECURE=false \
+            tender-digest:ci
+          for i in $(seq 1 40); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/health || true)" = "200" ] && break
+            sleep 1
+          done
+          fail() { echo "SMOKE TEST FAILED: $1"; docker logs app; exit 1; }
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/health)" = "200" ] || fail "app did not answer /api/health"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)" = "200" ] || fail "web page is not served at /"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/boq/catalogue)" = "401" ] || fail "BOQ catalogue is reachable without logging in"
+          curl -sf -c jar -H 'Content-Type: application/json' -d '{"username":"admin","password":"ci-smoke-password"}' http://localhost:8080/api/login > /dev/null || fail "login failed"
+          out=$(curl -sf -b jar http://localhost:8080/api/boq/catalogue) || fail "GET /api/boq/catalogue failed"
+          echo "$out" | grep -q '"item_master":0' || fail "unexpected catalogue response: $out"
+          out=$(curl -sf -b jar -H 'Content-Type: application/json' \
+            -d '{"kind":"items","csv_text":"erp_item_code,item_name,primary_uom,standard_base_rate\nX1,Test item,Cum,100\n"}' \
+            http://localhost:8080/api/boq/catalogue) || fail "catalogue import failed"
+          echo "$out" | grep -q '"added":1' || fail "catalogue import did not add the item: $out"
+          echo "Smoke test passed"

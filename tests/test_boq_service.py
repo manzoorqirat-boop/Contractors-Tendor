@@ -84,10 +84,12 @@ def test_upload_problems_are_explained(svc):
         svc.analyse(KEY, "x.csv", b64(b"a" * (10 * 1024 * 1024 + 1)))
     with pytest.raises(BoqError, match="No BOQ table"):
         svc.analyse(KEY, "x.csv", b64(b"just,a,notice\nnothing,here,\n"))
-    with pytest.raises(BoqError, match="xlsx"):
-        svc.analyse(KEY, "old.xls", b64(b"whatever"))
+    with pytest.raises(BoqError, match="Use .xlsx"):
+        svc.analyse(KEY, "scan.pdf", b64(b"%PDF-1.4 whatever"))               # a PDF BOQ is not read
+    with pytest.raises(BoqError, match="No BOQ table"):
+        svc.analyse(KEY, "old.xls", b64(b"whatever"))                         # .xls is opened, but this one holds no table
     with pytest.raises(BoqError, match="valid .xlsx"):
-        svc.analyse(KEY, "bad.xlsx", b64(b"this is not a zip file"))
+        svc.analyse(KEY, "bad.xlsx", b64(b"PK\x03\x04 truncated, not a real workbook"))
     assert svc.view(KEY)["boq"] is None          # a failed upload leaves nothing behind
 
 
