@@ -260,9 +260,15 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         {bid.history.length > 0 && <div className="alert warn" style={{ marginTop: 10, marginBottom: 0 }}>{bid.history.map((h) => <div key={h}>{h}</div>)}</div>}
       </section>
 
-      <div className="ws-tabs" role="tablist" aria-label="Bid sections">
+      <div className="ws-tabs" role="tablist" aria-label="Bid sections" onKeyDown={(e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        const order: WsTab[] = ['decide', 'checklist', 'price', 'letters', 'result'];
+        const next = order[(order.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length];
+        setTabSel(next); e.preventDefault();
+        setTimeout(() => (e.currentTarget.querySelector('[aria-selected="true"]') as HTMLElement | null)?.focus(), 0);
+      }}>
         {([['decide', 'Decide'], ['checklist', 'Checklist'], ['price', 'Price'], ['letters', 'Letters'], ['result', 'Result & notes']] as [WsTab, string][]).map(([k, l]) => (
-          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTabSel(k)}>
+          <button key={k} type="button" role="tab" aria-selected={tab === k} tabIndex={tab === k ? 0 : -1} className={tab === k ? 'on' : ''} onClick={() => setTabSel(k)}>
             {l}{k === 'checklist' && docProblems > 0 && <span className="count-pill alert-pill" title="Required papers not ready">{docProblems}</span>}
           </button>
         ))}
