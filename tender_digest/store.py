@@ -226,6 +226,23 @@ class SeenStore:
             )
             self.db.commit()
 
+    def tender_object(self, key: str) -> Tender | None:
+        with self.lock:
+            r = self.db.execute("SELECT payload FROM seen WHERE key = ?", (key,)).fetchone()
+        return _from_json(r[0]) if r and r[0] else None
+
+    def find_by_tender_id(self, tender_id: str) -> list[dict]:
+        """Tenders already held under this Tender ID, from any portal (used to stop a hand-added tender duplicating a collected one)."""
+        with self.lock:
+            rows = self.db.execute("SELECT key, portal, organisation FROM seen WHERE civil = 1 AND lower(tender_id) = lower(?)", (tender_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_tender(self, key: str) -> None:
+        with self.lock:
+            self.db.execute("DELETE FROM starred WHERE key = ?", (key,))
+            self.db.execute("DELETE FROM seen WHERE key = ?", (key,))
+            self.db.commit()
+
     def pending(self, now: datetime) -> list[Tender]:
         """Civil tenders not yet emailed and still open. Anything that failed to send is picked up again next run."""
         with self.lock:
