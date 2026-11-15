@@ -82,3 +82,63 @@ def test_risks_need_the_ai_key_then_simulate(app_ctx, monkeypatch):
     assert sim["risk_high"] > sim["risk_low"] > 0 and any("12% below" in w for w in sim["warnings"])
     monkeypatch.setattr(ai, "_call", lambda *a, **k: (_ for _ in ()).throw(ai.AIError("busy")))
     assert c.post(f"/api/bids/{bid}/risks", json={"text": "x"}).status_code == 502
+
+
+# ---- Fetch from portal: notice, BOQ and risks in one go ------------------------------------------------------------
+
+from tender_digest.gepnic import Tender  # noqa: E402
+from tests.test_bids import DOC, PortalFake, fetch_ctx  # noqa: E402
+
+CSV_BYTES = (FIX / "boq_sample.csv").read_bytes()
+
+
+class DocsFake(PortalFake):
+    """A portal whose tender page lists several documents, each with its own content."""
+
+    def __init__(self, tenders, docs):
+        super().__init__(tenders, links=[{"name": n, "href": f"/{i}"} for i, (n, _) in enumerate(docs)])
+        self.docs = {f"/{i}": c for i, (_, c) in enumerate(docs)}
+
+    def download(self, href):
+        self.downloaded.append(href)
+        return self.docs[href], "application/octet-stream"
+
+
+def one_tender():
+    return Tender(portal="maha", tender_id="T1", title="", reference="", organisation="PWD||Division", published=None, closing=None, opening=None)
+
+
+def test_fetch_brings_in_the_boq_and_the_risks_and_keeps_your_work(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(ai, "read_document", lambda t, text, pdf: DOC)
+    monkeypatch.setattr(ai, "_call", lambda *a, **k: json.dumps(FINDINGS))
+    fake = DocsFake([one_tender()], [("Tendernotice_1.pdf", b"%PDF-1.4 nit"), ("BOQ_Road.csv", CSV_BYTES)])
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, fake)
+    c.post("/api/boq/catalogue", json={"kind": "items", "csv_text": (FIX / "erp_items.csv").read_text()})
+    r = c.post(f"/api/bids/{bid_id}/fetch").json()
+    assert r["nit"] == "read" and r["boq"]["state"] == "read" and r["boq"]["lines"] == 26 and r["risks"]["state"] == "read"
+    assert fake.downloaded == ["/0", "/1"]
+    boq = c.get(f"/api/bids/{bid_id}/boq").json()["boq"]
+    assert len(boq["lines"]) == 26 and boq["source_name"] == "BOQ_Road.csv"
+    assert c.get(f"/api/bids/{bid_id}/risks").json()["findings"]["risks"]["lab_testing"]["present"] == "yes"
+    again = c.post(f"/api/bids/{bid_id}/fetch").json()                         # a second fetch must not redo or undo anything
+    assert again["boq"]["state"] == "kept" and again["risks"]["state"] == "kept" and fake.downloaded == ["/0", "/1", "/0"]
+    # the notice was kept, so the risks can be read again without uploading anything
+    assert c.post(f"/api/bids/{bid_id}/risks", json={}).status_code == 200
+
+
+def test_fetch_without_ai_still_brings_in_the_boq(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake = DocsFake([one_tender()], [("Tendernotice_1.pdf", b"%PDF-1.4 nit"), ("BOQ_Road.csv", CSV_BYTES)])
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, fake)
+    r = c.post(f"/api/bids/{bid_id}/fetch").json()
+    assert r["nit"] == "ai_off" and r["boq"]["state"] == "read" and r["risks"]["state"] == "ai_off"
+
+
+def test_a_login_wall_on_the_boq_is_reported_and_the_rest_still_works(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake = DocsFake([one_tender()], [("Tendernotice_1.pdf", b"%PDF-1.4 nit"), ("BOQ_Road.xls", b"<html>Please enter the captcha</html>")])
+    c, bid_id, _ = fetch_ctx(tmp_path, monkeypatch, fake)
+    r = c.post(f"/api/bids/{bid_id}/fetch").json()
+    assert r["boq"]["state"] == "login" and "never gets past" in r["boq"]["message"] and r["facts"]
+    assert c.get(f"/api/bids/{bid_id}/boq").json()["boq"] is None
