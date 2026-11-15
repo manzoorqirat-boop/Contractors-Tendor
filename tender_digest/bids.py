@@ -172,11 +172,11 @@ class BidError(ValueError):
 
 
 EDITABLE = {
-    "stage": "stage", "owner": 60, "notes": 4000, "emd_due": "date", "prebid_date": "date", "query_deadline": "date", "closing": "date", "opening": "date",
+    "stage": "stage", "owner": 60, "notes": 4000, "emd_due": "date", "prebid_date": "date", "query_deadline": "date", "portal_checked": "date", "closing": "date", "opening": "date",
     "my_value": "money", "l1_value": "money", "l1_bidder": 120, "result_note": 1000,
 }
 _BID_LIST_COLUMNS = ("id, key, tender_id, portal, title, description, organisation, category, location, work_type, value, emd, closing, opening, stage, owner, "
-                     "emd_due, prebid_date, query_deadline, my_value, l1_value, created, updated, stage_changed, (doc IS NOT NULL AND doc <> '') AS has_doc")
+                     "emd_due, prebid_date, query_deadline, portal_checked, my_value, l1_value, created, updated, stage_changed, (doc IS NOT NULL AND doc <> '') AS has_doc")
 
 
 def clean_patch(raw: Any) -> dict[str, Any]:
@@ -241,8 +241,10 @@ class BidBook:
                   filename TEXT, stored TEXT, size INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL);
                 """
             )
-            if "portal_facts" not in {r["name"] for r in self.db.execute("PRAGMA table_info(bids)")}:
-                self.db.execute("ALTER TABLE bids ADD COLUMN portal_facts TEXT")  # added after the first release
+            have = {r["name"] for r in self.db.execute("PRAGMA table_info(bids)")}
+            for col in ("portal_facts", "portal_checked"):
+                if col not in have:
+                    self.db.execute(f"ALTER TABLE bids ADD COLUMN {col} TEXT")  # added after the first release
             self.db.commit()
 
     # ---- bids ------------------------------------------------------------------------------------------------------
@@ -332,6 +334,52 @@ class BidBook:
             raise ValueError(field)
         with self.lock:
             self.db.execute(f"UPDATE bids SET {field} = ?, updated = ? WHERE id = ?", (json.dumps(value) if value is not None else None, _iso(now), bid_id))
+            self.db.commit()
+
+    # ---- the tender notice itself, kept against the tender so risk and BOQ steps never need it uploaded twice ----------
+
+    def _source_path(self, key: str, kind: str) -> Path | None:
+        import hashlib
+
+        return self.vault_dir / "sources" / f"{hashlib.sha1(key.encode()).hexdigest()}.{kind}" if self.vault_dir else None
+
+    def save_source(self, key: str, data: bytes | str) -> None:
+        """Keeps the notice (a PDF, or pasted text) for this tender, replacing any earlier one."""
+        if not self.vault_dir or not data:
+            return
+        self.delete_source(key)
+        kind = "pdf" if isinstance(data, bytes) else "txt"
+        path = self._source_path(key, kind)
+        path.parent.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
+        path.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))  # type: ignore[union-attr]
+
+    def load_source(self, key: str) -> tuple[str, str]:
+        """(text, pdf_base64): whichever was kept, else two empty strings."""
+        import base64
+
+        pdf, txt = self._source_path(key, "pdf"), self._source_path(key, "txt")
+        if pdf and pdf.is_file():
+            return "", base64.b64encode(pdf.read_bytes()).decode("ascii")
+        if txt and txt.is_file():
+            return txt.read_text(encoding="utf-8", errors="ignore"), ""
+        return "", ""
+
+    def has_source(self, key: str) -> bool:
+        return any(p and p.is_file() for p in (self._source_path(key, "pdf"), self._source_path(key, "txt")))
+
+    def delete_source(self, key: str) -> None:
+        for k in ("pdf", "txt"):
+            p = self._source_path(key, k)
+            if p:
+                p.unlink(missing_ok=True)
+
+    def sync_listing(self, key: str, fields: dict[str, Any]) -> None:
+        """A tender added by hand was corrected: carry the correction into its bid's own copy."""
+        cols = {k: v for k, v in fields.items() if k in ("title", "description", "organisation", "location", "value", "emd", "closing", "opening", "tender_id")}
+        if not cols:
+            return
+        with self.lock:
+            self.db.execute(f"UPDATE bids SET {', '.join(f'{c} = ?' for c in cols)} WHERE key = ?", [*cols.values(), key])
             self.db.commit()
 
     def delete(self, bid_id: int) -> bool:
@@ -574,6 +622,11 @@ class BidBook:
                 add(b, "emd", "EMD due", _when(b["emd_due"]))
                 add(b, "prebid", "Pre-bid meeting", _when(b["prebid_date"], False))
                 add(b, "query", "Last date for queries", _when(b["query_deadline"]))
+                c0 = _when(b["closing"], False)
+                if b["portal"] == "manual" and c0 and 0 <= (c0.date() - today).days <= 5:
+                    seen_on = _when(b.get("portal_checked"))
+                    if not seen_on or (today - seen_on.date()).days >= 2:
+                        add(b, "recheck", "Check the portal for corrigenda", c0, "Added by hand, so the app cannot watch it")
                 left = b["items_total"] - b["items_done"]
                 c = _when(b["closing"], False)
                 if left and c and 0 <= (c.date() - today).days <= 3:
