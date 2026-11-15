@@ -100,3 +100,35 @@ export interface VaultDoc { id: number; name: string; kind: string; issued: stri
 export interface CompanyFact { label: string; value: string }
 export interface VaultData { documents: VaultDoc[]; kinds: { key: string; label: string }[]; facts: CompanyFact[] }
 export interface FetchResult { facts: { label: string; value: string }[]; added: number; nit: 'read' | 'ai_off' | 'ai_failed' | 'login' | 'failed' | 'no_link'; message: string; corrigenda: string[] }
+
+// ---- BOQ engine ----------------------------------------------------------------------------------------------------
+export type BoqStatus = 'AUTO_MATCHED' | 'NEEDS_REVIEW' | 'NEW_NON_SOR_ITEM';
+export interface BoqCost { basis: string; unit_cost: number | null; variance_pct: number | null; complete: boolean; cost_amount: number | null; note: string }
+export interface BoqCandidate { code: string; name: string; spec: string; uom: string; rate: number | null; score: number; conflicts: string[] }
+export interface BoqLine {
+  line_no: number; sr: string | null; section: string | null; description: string; uom: string | null; uom_raw: string | null; qty: number | null;
+  est_rate: number | null; est_amount: number | null; status: BoqStatus; tier: string | null; confidence: number | null; item_code: string | null; item_name: string;
+  candidates: BoqCandidate[]; reason: string | null; cost: BoqCost | null;
+}
+export interface BoqPricing {
+  estimate_total: number; priced_lines: number; total_lines: number; coverage_pct: number; priced_estimate: number; priced_cost: number;
+  projected_cost: number; break_even_pct: number | null; assumption: string; include_review: boolean;
+}
+export interface BoqDoc { id: number; source_name: string; rate_type: 'item_rate' | 'percentage_rate' | 'unknown'; estimated_total: number | null; warnings: string[]; parsed_at: string; counts: Record<string, number>; lines: BoqLine[] }
+export interface BoqView { catalogue: Record<string, number>; ai: boolean; boq: BoqDoc | null; pricing: BoqPricing | null }
+export interface CatalogueItem { code: string; name: string; uom: string; rate: number | null; composite: boolean }
+export interface CatalogueData { counts: Record<string, number>; items: CatalogueItem[] }
+export interface CatalogueImport { result: { added: number; updated: number; errors: string[] }; counts: Record<string, number> }
+export interface RiskFinding { present: 'yes' | 'no_mention' | 'unclear'; detail: string; clause: string }
+export interface RiskData {
+  findings: { risks: Record<string, RiskFinding>; facts: Record<string, string | number | null>; updated_at: string } | null;
+  tags: { tag: string; label: string }[];
+}
+export interface SimAdjustment { tag: string; label: string; low: number; high: number; basis: string; detail: string; clause: string }
+export interface Simulation {
+  base_cost: number; adjustments: SimAdjustment[]; unpriced: { tag: string; label: string; why: string; detail: string; clause: string }[]; unclear: string[];
+  cash_flow: { label: string; detail: string }[]; exposures: { tag: string; label: string; amount: number; detail: string }[]; warnings: string[];
+  risk_low: number; risk_high: number; cost_low: number; cost_high: number; estimate?: number; break_even_pct_low?: number; break_even_pct_high?: number;
+  l1_price?: number; margin_at_l1_low?: number; margin_at_l1_high?: number; coverage_pct: number; priced_lines: number; total_lines: number;
+}
+export interface SimInput { l1_price: number | null; quoted_pct: number | null; exposure: Record<string, number>; include_review: boolean }

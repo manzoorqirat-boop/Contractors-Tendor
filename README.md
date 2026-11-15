@@ -47,6 +47,15 @@ TendAI does not submit bids: portals need your DSC and their own login, and the 
 
 Uploaded vault files are stored in a `vault` folder next to the database (so on the `/data` volume), or in `VAULT_DIR` if set. Back it up with the database.
 
+## BOQ and risk (price-bid support)
+
+On a bid's page, below the checklist:
+
+- **Bill of quantities**: load your **item catalogue** once (CSV exported from your ERP: items and rates, optionally composite activity rates, a schedule of rates such as DSR, and a location cost index). Then upload the tender's BOQ (`.xlsx` or `.csv`). Each line is matched to your catalogue by unit, schedule code and wording, with Claude checking technical specs (concrete grade, pipe class and so on) when `ANTHROPIC_API_KEY` is set. Lines marked **Check** need your confirmation; confirming teaches the app, so the same wording matches instantly next time. The page shows your cost for the lines it could price, how much of the BOQ value that covers, and the break-even quote. Anything it cannot price is carried at the buyer's estimate and says so.
+- **Risk and margin**: Claude reads the NIT and special conditions for 12 hidden cost drivers (escalation, approved makes, retention, site lab, statutory deductions and so on) and the simulator adds them to your BOQ cost as a range, with a margin check against an expected L1 price. The percentages are planning allowances, not rules.
+
+The BOQ data is stored in `boq.db` next to the main database (set `BOQ_DB_PATH` to change it). Lump-sum lines and PDF BOQs are not priced or read.
+
 ## Deploy on Railway (one service)
 
 1. New Railway service from this repo. Railway builds the `Dockerfile` (React page + Python service in one image).
@@ -70,6 +79,7 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `STATE_PATH` | Yes on Railway | `/data/tender_state.db` (the Dockerfile already defaults to this). |
 | `RECIPIENTS` | Optional | Starting list of email ids (commas or spaces). After you save the list in Settings, the page's list wins. |
 | `ANTHROPIC_API_KEY` | Optional | Turns on the **Summarise with Claude** button in the tender panel. Secret. Unset = feature off. |
+| `BOQ_DB_PATH` | Optional | Where the BOQ catalogue and parsed BOQs are kept. Default: `boq.db` next to `STATE_PATH`. |
 | `ANTHROPIC_MODEL` | Optional | Default `claude-sonnet-5-5`. Used for summaries, bid briefs and reading documents. |
 | `ANTHROPIC_FAST_MODEL` | Optional | Default `claude-haiku-5-5`. Used to label many tenders at once. |
 | `AI_MAX_PER_RUN` | Optional | Default `150`. The most tenders Claude labels in one run, which caps the cost. |

@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS boq_document (
     boq_id INTEGER PRIMARY KEY AUTOINCREMENT, company_id TEXT, tender_key TEXT NOT NULL, source_name TEXT, rate_type TEXT NOT NULL,
     estimated_total REAL, warnings TEXT NOT NULL DEFAULT '[]', parsed_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS boq_document_tender ON boq_document (tender_key);
+CREATE TABLE IF NOT EXISTS bid_risk (tender_key TEXT PRIMARY KEY, findings TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS boq_line (
     boq_id INTEGER NOT NULL, line_no INTEGER NOT NULL, sr TEXT, section TEXT, description TEXT NOT NULL, uom_raw TEXT, uom TEXT,
     qty REAL, est_rate REAL, est_amount REAL, sor_code TEXT, match_status TEXT, match_tier TEXT, confidence REAL, erp_item_code TEXT,
@@ -276,6 +277,46 @@ class MasterStore:
         out["warnings"] = json.loads(out["warnings"] or "[]")
         out["lines"] = lines
         return out
+
+    def latest_boq_id(self, tender_key: str) -> int | None:
+        with self.lock:
+            r = self.db.execute("SELECT boq_id FROM boq_document WHERE company_id=? AND tender_key=? ORDER BY boq_id DESC LIMIT 1",
+                                (self.company, tender_key)).fetchone()
+        return int(r["boq_id"]) if r else None
+
+    def delete_boqs(self, tender_key: str) -> None:
+        """Drop every saved BOQ of a tender (a new upload replaces the old one)."""
+        with self.lock:
+            ids = [r["boq_id"] for r in self.db.execute("SELECT boq_id FROM boq_document WHERE company_id=? AND tender_key=?", (self.company, tender_key))]
+            for i in ids:
+                self.db.execute("DELETE FROM boq_line WHERE boq_id=?", (i,))
+                self.db.execute("DELETE FROM boq_document WHERE boq_id=?", (i,))
+            self.db.commit()
+
+    def update_line_match(self, boq_id: int, line_no: int, status: str, tier: str, confidence: float, item_code: str | None, reason: str) -> bool:
+        with self.lock:
+            cur = self.db.execute("UPDATE boq_line SET match_status=?, match_tier=?, confidence=?, erp_item_code=?, reason=? WHERE boq_id=? AND line_no=?",
+                                  (status, tier, confidence, item_code, reason, boq_id, line_no))
+            self.db.commit()
+            return cur.rowcount == 1
+
+    def item(self, erp_item_code: str) -> dict | None:
+        with self.lock:
+            r = self.db.execute("SELECT * FROM item_master WHERE company_id=? AND erp_item_code=?", (self.company, erp_item_code)).fetchone()
+        return dict(r) if r else None
+
+    # ---- risk findings saved per tender -------------------------------------------------------------------------------
+
+    def save_risk(self, tender_key: str, findings: dict) -> None:
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO bid_risk (tender_key, findings, updated_at) VALUES (?,?,?)",
+                            (tender_key, json.dumps(findings), datetime.now().isoformat(timespec="seconds")))
+            self.db.commit()
+
+    def get_risk(self, tender_key: str) -> dict | None:
+        with self.lock:
+            r = self.db.execute("SELECT findings, updated_at FROM bid_risk WHERE tender_key=?", (tender_key,)).fetchone()
+        return {**json.loads(r["findings"]), "updated_at": r["updated_at"]} if r else None
 
     def close(self) -> None:
         with self.lock:
