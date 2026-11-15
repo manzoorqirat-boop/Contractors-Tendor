@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 import { BriefView, readBase64, useAiStatus } from '../ai';
 import { BoqCard, RiskCard } from '../Boq';
+import { PriceAdvisor } from '../PriceAdvisor';
 import { chain, fmtDate, headline, inr, plural, relative } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
@@ -283,7 +284,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       </div>
 
       {tab === 'checklist' && <Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} />}
-      {tab === 'price' && <><BoqCard bidId={bid.id} /><RiskCard bidId={bid.id} aiOn={!!ai?.configured} hasSource={!!bid.has_source} /></>}
+      {tab === 'price' && <><BoqCard bidId={bid.id} /><RiskCard bidId={bid.id} aiOn={!!ai?.configured} hasSource={!!bid.has_source} /><PriceAdvisor bidId={bid.id} onUse={(p) => save({ my_value: p })} /></>}
       {tab === 'decide' && (
         <>
           <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
