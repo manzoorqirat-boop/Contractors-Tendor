@@ -74,7 +74,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
     setBusy(kind);
     setMsg(null);
     try {
-      if (kind === 'aitest') { const r = await api.aiTest(); setMsg({ tone: 'ok', text: `Claude answered. Main model: ${r.model}. Bulk model: ${r.fast_model}.` }); }
+      if (kind === 'aitest') { await api.aiTest(); setMsg({ tone: 'ok', text: 'The AI assistant answered. The connection works.' }); }
       else { const r = await api.aiScore(); setMsg({ tone: 'ok', text: `Labelled ${r.scored} tenders. ${r.unlabelled} open tenders still to do.` }); }
       resetAiStatus();
       loadAi();
@@ -166,15 +166,15 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
           </label>
         </section>
 
-        <section className="card" style={{ marginBottom: 14 }}>
+        <section className="card ai-card" style={{ marginBottom: 14 }}>
           <h2>AI assistant {ai && <span className={`badge ${ai.configured ? 'ok' : 'plain'}`} style={{ marginLeft: 6 }}>{ai.configured ? 'On' : 'Off'}</span>}</h2>
-          <p className="sub">{ai?.configured ? <>Connected. Main model <strong>{ai.model}</strong>, bulk model <strong>{ai.fast_model}</strong>. {ai.labelled} open tenders labelled, {ai.unlabelled} waiting.</> : 'Off. Add ANTHROPIC_API_KEY to the server variables to turn on summaries, fit scores, work types, the ask bar, the document reader and bid briefs.'}</p>
+          <p className="sub">{ai?.configured ? <>Connected. {ai.labelled} open tenders labelled, {ai.unlabelled} waiting.</> : 'Off. Ask your administrator to switch it on in the server settings to get summaries, fit scores, work types, the ask bar, the document reader and bid briefs.'}</p>
           <p className="muted small">Your company profile now lives in the Vault, together with your company facts and item catalogue.</p>
           <label className="check"><input type="checkbox" checked={form.ai_digest_intro} onChange={(e) => patch({ ai_digest_intro: e.target.checked })} />Start the daily email with a short "worth a look today" paragraph</label>
-          <label className="check"><input type="checkbox" checked={form.ai_hide_noncivil} onChange={(e) => patch({ ai_hide_noncivil: e.target.checked })} />Hide tenders Claude judges not to be civil work (off: they stay visible with a "May not be civil" tag)</label>
+          <label className="check"><input type="checkbox" checked={form.ai_hide_noncivil} onChange={(e) => patch({ ai_hide_noncivil: e.target.checked })} />Hide tenders the AI judges not to be civil work (off: they stay visible with a "May not be civil" tag)</label>
           <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn" onClick={() => aiAction('aitest')} disabled={busy !== null || !ai?.configured}>{busy === 'aitest' ? 'Testing…' : 'Test AI connection'}</button>
-            <button type="button" className="btn" onClick={() => aiAction('score')} disabled={busy !== null || !ai?.configured}>{busy === 'score' ? 'Labelling…' : 'Label tenders now'}</button>
+            <button type="button" className="btn ai" onClick={() => aiAction('aitest')} disabled={busy !== null || !ai?.configured}>{busy === 'aitest' ? 'Testing…' : 'Test AI connection'}</button>
+            <button type="button" className="btn ai" onClick={() => aiAction('score')} disabled={busy !== null || !ai?.configured}>{busy === 'score' ? 'Labelling…' : 'Label tenders now'}</button>
           </div>
         </section>
 
