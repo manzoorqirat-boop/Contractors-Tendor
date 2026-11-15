@@ -99,7 +99,8 @@ export interface BidStats {
 export interface VaultDoc { id: number; name: string; kind: string; issued: string | null; expiry: string | null; notes: string; filename: string; size: number; created: string; status: 'ok' | 'expired' | 'expires_before_close' }
 export interface CompanyFact { label: string; value: string }
 export interface VaultData { documents: VaultDoc[]; kinds: { key: string; label: string }[]; facts: CompanyFact[] }
-export interface FetchResult { facts: { label: string; value: string }[]; added: number; nit: 'read' | 'ai_off' | 'ai_failed' | 'login' | 'failed' | 'no_link'; message: string; corrigenda: string[] }
+export interface FetchResult { facts: { label: string; value: string }[]; added: number; nit: 'read' | 'ai_off' | 'ai_failed' | 'login' | 'failed' | 'no_link'; message: string; corrigenda: string[]; boq?: FetchStep; risks?: FetchStep }
+export interface FetchStep { state: string; message: string; lines?: number | null }
 
 // ---- BOQ engine ----------------------------------------------------------------------------------------------------
 export type BoqStatus = 'AUTO_MATCHED' | 'NEEDS_REVIEW' | 'NEW_NON_SOR_ITEM';

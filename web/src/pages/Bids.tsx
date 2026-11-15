@@ -393,7 +393,8 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
     setFetching(true); setNote('');
     try {
       const r = await api.fetchPortal(bid.id);
-      setNote(`${r.message}${r.added ? ` Added ${plural(r.added, 'item')}.` : ''}${r.corrigenda.length ? ` Corrigenda on the portal: ${r.corrigenda.join('; ')}.` : ''}`);
+      const more = [r.boq, r.risks].filter((x) => x && x.state !== 'kept').map((x) => x?.message).filter(Boolean);
+      setNote(`${r.message}${r.added ? ` Added ${plural(r.added, 'item')}.` : ''}${r.corrigenda.length ? ` Corrigenda on the portal: ${r.corrigenda.join('; ')}.` : ''}${more.length ? ` ${more.join(' ')}` : ''}${r.boq?.state === 'read' ? ' See the Price tab.' : ''}`);
       onChange();
     } catch (e) { setNote((e as Error).message); } finally { setFetching(false); }
   }

@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from . import access, ai, appsettings, mailer
 from .boq import advisor
 from .boq.match import ClaudeVerifier
+from .boq.portal import fetch_boq, fetch_risks
 from .boq.service import BoqError, BoqService
 from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
 from .gepnic import PortalError, Tender, parse_date, pick_nit
@@ -882,6 +883,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             if patch:
                 bids.update(bid_id, patch, now())
             state, message = "no_link", "The portal lists no downloadable notice for this tender."
+            nit_pdf: bytes | None = None
             nit = pick_nit(links)
             if nit and hasattr(client, "download"):
                 try:
@@ -889,6 +891,12 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 except PortalError as e:
                     state, message = "failed", f"The portal would not give the notice: {e}"
                 else:
+                    nit_pdf = data if data.startswith(b"%PDF") else None
+                    if nit_pdf:
+                        try:
+                            bids.save_source(bid["key"], nit_pdf)   # so the risk step can read it again without an upload
+                        except OSError:
+                            log.warning("could not keep the notice for %s", bid["key"])
                     if not data.startswith(b"%PDF"):
                         state, message = "login", "The portal asks for a login or captcha before it gives documents, which this app never gets past. Download the notice yourself and upload it here."
                     elif not ai.configured():
@@ -903,7 +911,9 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                         except ai.AIError as e:
                             state, message = "ai_failed", str(e)
             added = bids.generate_items(bid_id, now())
-            return {"facts": facts, "added": added, "nit": state, "message": message, "corrigenda": corrigenda}
+            boq_out = boq_call(fetch_boq, client, boq, bid["key"], links, nit["href"] if nit else None)
+            risks_out = boq_call(fetch_risks, boq, bid["key"], bid_as_tender(bid), nit_pdf)
+            return {"facts": facts, "added": added, "nit": state, "message": message, "corrigenda": corrigenda, "boq": boq_out, "risks": risks_out}
         finally:
             fetch_lock.release()
 

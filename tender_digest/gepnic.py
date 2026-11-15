@@ -159,25 +159,27 @@ def parse_doc_links(html: str) -> list[dict[str, str]]:
     return out
 
 
+_BOQ_NAME = re.compile(r"(?<![a-z])boq(?![a-z])|b\.o\.q|bill[\s_-]*of[\s_-]*quantit|price[\s_-]*bid|financial[\s_-]*bid|schedule[\s_-]*(b\b|of[\s_-]*rates)", re.I)
+_SHEET_EXT = re.compile(r"\.(xlsx|xlsm|xls|csv)\s*$", re.I)
+
+
+def boq_score(link: dict[str, str]) -> int:
+    """How BOQ-like a document is by its name: 3 a spreadsheet named like a BOQ, 2 any spreadsheet, 1 named like a BOQ, 0 neither."""
+    name = link.get("name", "")
+    sheet, named = bool(_SHEET_EXT.search(name)), bool(_BOQ_NAME.search(name))
+    return 3 if sheet and named else 2 if sheet else 1 if named else 0
+
+
+def pick_boq(links: list[dict[str, str]], exclude_href: str | None = None) -> dict[str, str] | None:
+    """The bill of quantities among the documents: the most BOQ-like name, spreadsheets first. None when nothing looks like one."""
+    best = max((x for x in links if x["href"] != exclude_href), key=boq_score, default=None)
+    return best if best and boq_score(best) > 0 else None
+
+
 def pick_nit(links: list[dict[str, str]]) -> dict[str, str] | None:
-    """The tender notice (NIT) among the documents: named like a notice, else the first one listed."""
-    return next((x for x in links if re.search(r"notice|nit\b|tender.?doc", x["name"], re.I)), links[0] if links else None)
-
-
-def apply_detail(tender: Tender, pairs: dict[str, str]) -> None:
-    def pick(*labels: str) -> str:
-        for label in labels:
-            for key, value in pairs.items():
-                if key.lower().startswith(label.lower()) and value and value.upper() != "NA":
-                    return value
-        return ""
-
-    tender.description = pick("Work Description") or pick("Title")
-    tender.category = pick("Product Category")
-    tender.sub_category = pick("Sub category")
-    tender.location = pick("Location")
-    tender.value = parse_money(pick("Tender Value"))
-    tender.emd = parse_money(pick("EMD Amount"))
+    """The tender notice (NIT) among the documents: named like a notice, else the first one that is not a BOQ."""
+    named = next((x for x in links if re.search(r"notice|nit\b|tender.?doc", x["name"], re.I) and boq_score(x) < 2), None)
+    return named or next((x for x in links if boq_score(x) == 0), None)
 
 
 class PortalError(RuntimeError):

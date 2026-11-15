@@ -56,6 +56,8 @@ On a bid's page, below the checklist:
 
 The BOQ data is stored in `boq.db` next to the main database (set `BOQ_DB_PATH` to change it). Lump-sum lines and PDF BOQs are not priced or read.
 
+**Fetch from portal** on a bid also brings in the BOQ and the risks, when the portal gives them without a login: it finds the BOQ file among the tender's documents (a spreadsheet, or a document named BOQ, Bill of Quantities or Price Bid), loads and matches it, and has Claude read the tender notice for risks (once; the notice is kept so you can read it again later without uploading). A BOQ you already loaded is never replaced by a fetch. If the portal asks for a login, OTP or captcha, the app says so and stops: it never tries to get past them. Fetching is per bid and on request, with a pause between requests, not a bulk crawl of every tender.
+
 ## Tenders the app cannot collect (add by hand)
 
 Some tenders never reach the lists the app reads: a portal behind a captcha, login or OTP, a newspaper notice, an NIT sent to you.
