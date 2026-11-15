@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { Nav } from '../App';
 import { FitBadge } from '../ai';
 import { FilterBar } from '../FilterBar';
+import { EMPTY } from '../filters';
 import { StarButton, TenderDrawer } from '../TenderDrawer';
 import { chain, fmtDate, headline, relative } from '../format';
 import { useLoad } from '../hooks';
@@ -67,7 +68,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
 
         {error && <div className="alert bad">{error} <button className="link-btn" onClick={reload}>Try again</button></div>}
         {!data && !error && Array.from({ length: 5 }, (_, i) => <div key={i} className="tender"><div><Skeleton h={16} w="80%" style={{ marginBottom: 8 }} /><Skeleton h={12} w="55%" /></div><Skeleton h={30} w={110} /></div>)}
-        {data && items.length === 0 && <div className="empty">No tenders match these filters.</div>}
+        {data && items.length === 0 && <div className="empty"><h2>No tenders match these filters</h2><p className="sub">Widen the closing window or remove a filter to see more.</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>Clear all filters</button></div>}
 
         <div style={{ opacity: loading && data ? 0.55 : 1 }} aria-busy={loading}>
           {layout === 'cards' && items.map((t) => <Card key={t.key} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}
@@ -98,7 +99,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
 
         {data && data.total > PAGE_SIZE && (
           <div className="pager">
-            <span className="muted">Page {display.page} of {pages}</span>
+            <span className="muted">Showing {((display.page - 1) * PAGE_SIZE + 1).toLocaleString('en-IN')}–{Math.min(display.page * PAGE_SIZE, data.total).toLocaleString('en-IN')} of {data.total.toLocaleString('en-IN')}</span>
             <span style={{ display: 'flex', gap: 8 }}>
               <button className="btn small" disabled={display.page <= 1} onClick={() => nav.setDisplay({ page: display.page - 1 })}>Previous</button>
               <button className="btn small" disabled={display.page >= pages} onClick={() => nav.setDisplay({ page: display.page + 1 })}>Next</button>
@@ -115,7 +116,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
 function Card({ t, now, onOpen, onStar, onCopy, onStart }: { t: Tender; now: string; onOpen: () => void; onStar: (s: boolean) => void; onCopy: () => void; onStart: () => void }) {
   const rel = relative(t.closing, now);
   return (
-    <article className="tender" onClick={onOpen}>
+    <article className={`tender urg-${rel.tone || 'none'}`} onClick={onOpen}>
       <div>
         <div className="t-title">
           <StarButton t={t} onChange={onStar} />
@@ -129,14 +130,14 @@ function Card({ t, now, onOpen, onStar, onCopy, onStart }: { t: Tender; now: str
           {!t.work_type && t.category && <span className="badge plain">{t.category}</span>}
           {t.location && <span className="badge plain">{t.location}</span>}
           <span className="mono">{t.tender_id}</span>
-          <button className="btn small" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`Copy Tender ID ${t.tender_id}`}>Copy ID</button>
+          <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`Copy Tender ID ${t.tender_id}`}>Copy ID</button>
           <button className="btn small primary" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start bid</button>
         </div>
       </div>
       <div className="side">
         <div className="value">{t.value === null ? 'Value not stated' : t.value_text}</div>
         <div className="closes">Closes {fmtDate(t.closing, true)}</div>
-        {rel.text && <div className={`when ${rel.tone}`}>{rel.text}</div>}
+        {rel.text && <div className={`when pill ${rel.tone}`}>{rel.text}</div>}
       </div>
     </article>
   );
