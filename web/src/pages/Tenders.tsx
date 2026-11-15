@@ -22,6 +22,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   const [items, setItems] = useState<Tender[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   useEffect(() => { if (data) setItems(data.items); }, [data]);
+  useEffect(() => { window.addEventListener('tenders-changed', reload); return () => window.removeEventListener('tenders-changed', reload); }, [reload]);
 
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
   const layout = display.layout;
@@ -49,6 +50,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
           <p className="sub">{data ? `${data.total.toLocaleString('en-IN')} civil tender${data.total === 1 ? '' : 's'}` : 'Loading…'}</p>
         </div>
         <div className="head-actions">
+          <button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender</button>
           <a className="btn" href={api.exportUrl(filters, display.sort)} download>Download spreadsheet</a>
         </div>
       </div>
