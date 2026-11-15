@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import asdict
 from datetime import datetime
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from . import appsettings, collector, digest, mailer
+from . import ai, appsettings, collector, digest, mailer
+from .bids import BidBook
 from .config import Settings
 from .store import SeenStore
 
@@ -30,8 +32,10 @@ def local_now(tz_name: str = "Asia/Kolkata") -> datetime:
 
 class RunManager:
     def __init__(self, env: Settings, store: SeenStore, client_factory: collector.ClientFactory = collector.default_client,
-                 sender: Callable[..., list[str]] = mailer.send, tz_name: str = "Asia/Kolkata", background: bool = True):
+                 sender: Callable[..., list[str]] = mailer.send, tz_name: str = "Asia/Kolkata", background: bool = True,
+                 bids: BidBook | None = None):
         self.env, self.store, self.client_factory, self.sender, self.tz_name = env, store, client_factory, sender, tz_name
+        self.bids = bids or BidBook(store)
         self.background = background  # tests run inline
         self._guard = threading.Lock()
         self._lines: list[str] = []
@@ -74,27 +78,59 @@ class RunManager:
         try:
             now = local_now(self.tz_name)
             say(f"Started ({', '.join(p.name for p in settings.portals)})")
-            reports = collector.collect(settings, self.store, now, self.client_factory, say)
+            tracked = self.bids.watch_keys()
+            watched = {"changes": 0}
+
+            def watch(t, client) -> None:
+                bid_id = tracked.get(t.key)
+                if bid_id:
+                    n = self.bids.watch(t, client, now, bid_id)
+                    if n:
+                        watched["changes"] += n
+                        say(f"Bid watch: {n} change{'s' if n != 1 else ''} on {t.tender_id}")
+
+            reports = collector.collect(settings, self.store, now, self.client_factory, say, watch if tracked else None)
+            if tracked:
+                say(f"Bid watch: looked again at tenders you are bidding for ({watched['changes']} change{'s' if watched['changes'] != 1 else ''} found)")
             summary = [
                 {"portal": r.portal.key, "name": r.portal.name, "departments": r.organisations_read, "listed": r.listed,
-                 "new_civil": r.new_civil, "errors": r.errors[:5], "failed": r.failed}
+                 "new_civil": r.new_civil, "errors": r.errors[:5], "failed": r.failed, "access": r.access}
                 for r in reports
             ]
+            intro = ""
+            profile = str(saved.get("company_profile", "") or "")
+            if ai.configured():
+                ai.enrich(self.store, now, profile, bool(saved.get("ai_hide_noncivil", False)), int(os.environ.get("AI_MAX_PER_RUN", "150") or 150), say)
             emailed = 0
             if send_email:
                 pending = self.store.pending(now)
                 soon = self.store.closing_soon(now, settings.closing_soon_days)
-                quiet = not pending and not soon and not any(r.errors for r in reports)
+                try:
+                    bid_block = self.bids.digest_block(now)
+                except Exception:  # noqa: BLE001 - the email goes out without the bid section
+                    log.exception("bid section of the digest failed")
+                    bid_block = {"alerts": [], "changes": []}
+                quiet = not pending and not soon and not any(r.errors for r in reports) and not bid_block["alerts"] and not bid_block["changes"]
                 if quiet and not saved.get("send_empty", True):
                     say("Nothing new, and 'send on empty days' is off: no email sent")
                 else:
-                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal)
+                    if ai.configured() and pending and saved.get("ai_digest_intro", True):
+                        try:
+                            info = self.store.ai_info([t.key for t in pending])
+                            items = sorted(({"tender_id": t.tender_id, "title": t.title, "description": t.description, "location": t.location, "value": t.value,
+                                             "closing": t.closing.date().isoformat() if t.closing else None, "fit": (info.get(t.key) or {}).get("fit")} for t in pending),
+                                           key=lambda x: (-(x["fit"] or 0), -(x["value"] or 0)))
+                            intro = ai.digest_intro(items, profile)
+                        except Exception as e:  # noqa: BLE001 - the email goes out without the intro
+                            say(f"Claude intro skipped: {str(e)[:120]}")
+                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro, bid_block)
                     say(f"Sending '{built.subject}' to {len(settings.recipients)} recipient(s)")
                     accepted = self.sender(
                         settings.brevo_api_key, settings.mail_from, settings.mail_from_name, settings.recipients, built.subject, built.html, built.text,
                         attachments=[{"name": built.csv_name, "content": built.csv_base64}] if built.csv_base64 else None,
                     )
                     self.store.mark_emailed([t.key for t in pending])
+                    self.bids.mark_notified([c["id"] for c in bid_block["changes"]])
                     emailed = len(accepted)
                     say(f"Email accepted for {emailed} of {len(settings.recipients)} recipient(s)")
             failed = reports and all(r.failed for r in reports)
@@ -118,7 +154,7 @@ class RunManager:
         recipients = appsettings.current(self.env, self.store.get_settings())["recipients"]
         if not recipients:
             raise NotConfigured("There are no recipients: add at least one email address first")
-        accepted = self.sender(self.env.brevo_api_key, self.env.mail_from, self.env.mail_from_name, recipients, "Tender digest: test email",
+        accepted = self.sender(self.env.brevo_api_key, self.env.mail_from, self.env.mail_from_name, recipients, "TendAI by QMSofts: test email",
                                "<p>This is a test. The daily digest is set up for this address.</p>", "This is a test. The daily digest is set up for this address.")
         return len(accepted)
 

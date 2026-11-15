@@ -68,6 +68,7 @@ export function FilterBar({ filters, display, config, facets, onChange, onApplyV
             return <button key={p.key} type="button" aria-pressed={on} className={on ? 'on' : ''} onClick={() => set({ portal: on ? filters.portal.filter((x) => x !== p.key) : [...filters.portal, p.key] })}>{p.state}</button>;
           })}
         </div>
+        {(facets?.work_type?.length ?? 0) > 0 && <MultiSelect title="Work type" options={facets?.work_type ?? []} selected={filters.work_type} onChange={(v) => set({ work_type: v })} allowNone={false} />}
         <MultiSelect title="Category" options={facets?.category ?? []} selected={filters.category} onChange={(v) => set({ category: v })} />
         <MultiSelect title="Department" options={facets?.department ?? []} selected={filters.department} onChange={(v) => set({ department: v })} />
         <MultiSelect title="Location" options={facets?.location ?? []} selected={filters.location} onChange={(v) => set({ location: v })} />
@@ -121,7 +122,7 @@ function ViewsMenu({ filters, display, onApply }: { filters: Filters; display: D
     if (!trimmed) return;
     const params = toParams(filters, Object.fromEntries(SAVED_KEYS.map((k) => [k, display[k]])) as Partial<Display>);
     const obj: Record<string, unknown> = {};
-    for (const k of new Set(params.keys())) obj[k] = params.getAll(k).length > 1 || ['portal', 'category', 'department', 'location'].includes(k) ? params.getAll(k) : params.get(k);
+    for (const k of new Set(params.keys())) obj[k] = params.getAll(k).length > 1 || ['portal', 'category', 'department', 'location', 'work_type'].includes(k) ? params.getAll(k) : params.get(k);
     for (const k of ['no_value', 'no_closing', 'no_published', 'starred']) if (obj[k] === 'true') obj[k] = true;
     persist([...(views ?? []), { id: String(Date.now()), name: trimmed, filters: obj }], `Saved view "${trimmed}"`);
     setName('');

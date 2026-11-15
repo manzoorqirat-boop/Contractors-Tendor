@@ -5,10 +5,13 @@ Secrets (the Brevo key, the login password) are never part of this: they stay in
 from __future__ import annotations
 
 import dataclasses
+import ipaddress
+import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
-from .config import Settings
+from .config import Portal, Settings
 
 _EMAIL = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 _TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -34,6 +37,57 @@ def _words(value: Any, label: str) -> list[str]:
     if len(out) > MAX_ITEMS:
         raise SettingsError(f"{label}: at most {MAX_ITEMS} entries")
     return out
+
+
+def allowed_suffixes() -> tuple[str, ...]:
+    """Portal addresses must end in one of these. The server fetches whatever is saved, so this keeps it to government sites.
+
+    Add more with the PORTAL_HOST_SUFFIXES variable, e.g. ".gov.in,.nic.in,.nprocure.com".
+    """
+    raw = os.environ.get("PORTAL_HOST_SUFFIXES", ".gov.in,.nic.in")
+    return tuple(x.strip().lower() if x.strip().startswith(".") else "." + x.strip().lower() for x in re.split(r"[,;\s]+", raw) if x.strip())
+
+
+def clean_portal(raw: Any, taken: set[str]) -> dict[str, str]:
+    """Validates a portal typed in the page and returns {key, name, state, base_url}. Raises SettingsError."""
+    if not isinstance(raw, dict):
+        raise SettingsError("Portal details are missing")
+    name = str(raw.get("name") or "").strip()[:80]
+    state = str(raw.get("state") or "").strip()[:40] or name
+    url = str(raw.get("base_url") or "").strip().rstrip("/")
+    if not name:
+        raise SettingsError("Give the portal a name")
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        port = -1
+    suffixes = allowed_suffixes()
+    if parsed.scheme != "https" or parsed.username or parsed.password or port not in (None, 443) or parsed.query or parsed.fragment or not host:
+        raise SettingsError("Use the portal's https address, for example https://etenders.kerala.gov.in/nicgep")
+    try:
+        ipaddress.ip_address(host)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    if is_ip:  # SettingsError is a ValueError, so it must be raised outside the try above
+        raise SettingsError("Use the portal's web address, not an IP number")
+    if not host.endswith(suffixes):
+        raise SettingsError(f"Only addresses ending in {', '.join(suffixes)} can be added")
+    key = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:30]
+    if not key:
+        raise SettingsError("Give the portal a name with letters or numbers")
+    if key in taken:
+        raise SettingsError(f"There is already a portal called '{name}'. Use a different name")
+    return {"key": key, "name": name, "state": state, "base_url": url}
+
+
+def all_portals(env: Settings, saved: dict[str, Any]) -> list[Portal]:
+    """Built-in portals from portals.json plus the ones added in the page."""
+    seen = {p.key for p in env.portals}
+    extra = [Portal(**p) for p in saved.get("custom_portals", []) if isinstance(p, dict) and p.get("key") not in seen]
+    return list(env.portals) + extra
 
 
 def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
@@ -70,6 +124,21 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
         if v < 0 or v > 1e13:
             raise SettingsError("Minimum value is out of range")
         out["min_value"] = v
+    for flag in ("ai_digest_intro", "ai_hide_noncivil"):
+        if flag in payload:
+            if not isinstance(payload[flag], bool):
+                raise SettingsError(f"{flag} must be true or false")
+            out[flag] = payload[flag]
+    if "logo_text" in payload:
+        text = str(payload["logo_text"] or "").strip()
+        if not re.fullmatch(r"[^\W_]{1,3}", text):
+            raise SettingsError("Logo letters must be 1 to 3 letters or numbers")
+        out["logo_text"] = text
+    if "company_profile" in payload:
+        text = str(payload["company_profile"] or "").strip()
+        if len(text) > 2000:
+            raise SettingsError("Company profile is too long (max 2000 characters)")
+        out["company_profile"] = text
     for key, label in (("extra_keywords", "Extra civil keywords"), ("exclude_words", "Excluded words")):
         if key in payload:
             out[key] = _words(payload[key], label)
@@ -78,7 +147,7 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
 
 DEFAULTS = {
     "send_time": "08:00", "schedule_enabled": True, "send_empty": True, "min_value": 0.0,
-    "extra_keywords": [], "exclude_words": [],
+    "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "ai_digest_intro": True, "ai_hide_noncivil": False,
 }
 
 
@@ -90,9 +159,14 @@ def current(env: Settings, saved: dict[str, Any]) -> dict[str, Any]:
         "schedule_enabled": saved.get("schedule_enabled", DEFAULTS["schedule_enabled"]),
         "send_empty": saved.get("send_empty", DEFAULTS["send_empty"]),
         "portals": saved.get("portals", [p.key for p in env.portals]),
+        "custom_portals": saved.get("custom_portals", []),
         "min_value": saved.get("min_value", env.min_value),
         "extra_keywords": saved.get("extra_keywords", DEFAULTS["extra_keywords"]),
         "exclude_words": saved.get("exclude_words", DEFAULTS["exclude_words"]),
+        "company_profile": saved.get("company_profile", DEFAULTS["company_profile"]),
+        "logo_text": saved.get("logo_text", DEFAULTS["logo_text"]),
+        "ai_digest_intro": saved.get("ai_digest_intro", DEFAULTS["ai_digest_intro"]),
+        "ai_hide_noncivil": saved.get("ai_hide_noncivil", DEFAULTS["ai_hide_noncivil"]),
     }
 
 
@@ -111,6 +185,6 @@ def effective(env: Settings, saved: dict[str, Any], only_portals: list[str] | No
         exclude = f"{exclude}|{_alternation(cur['exclude_words'])}" if exclude else _alternation(cur["exclude_words"])
     return dataclasses.replace(
         env,
-        portals=[p for p in env.portals if p.key in enabled],
+        portals=[p for p in all_portals(env, saved) if p.key in enabled],
         recipients=cur["recipients"], min_value=float(cur["min_value"]), civil_keywords=keywords, exclude=exclude,
     )

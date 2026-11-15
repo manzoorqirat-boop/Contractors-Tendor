@@ -1,4 +1,4 @@
-# Tender dashboard
+# TendAI by QMSofts (tender dashboard)
 
 A web service that reads the public tender lists of Indian government e-procurement portals, keeps the **civil works**
 tenders, and gives you:
@@ -32,6 +32,21 @@ tenders, and gives you:
   the tenders it counts. Tables can be downloaded.
 - **Tenders**: cards or a table, sortable, with a detail panel, stars for a watchlist, and a spreadsheet download.
 
+## Bid workspace (tender filing support)
+
+TendAI does not submit bids: portals need your DSC and their own login, and the app never goes around those. It prepares everything around the filing.
+
+- **Start a bid** from any tender's panel. The **Bids** page is your pipeline (Interested, Preparing, Submitted, Bid opened, Won, Lost, Dropped) with a "Coming up" list of closing dates, EMD due, pre-bid meetings and query deadlines.
+- **Checklist** per bid: standard steps plus, after *Read tender document*, the required documents and conditions. Each required document is matched to the **Vault** and flagged *Not in vault*, *Expired* or *Expires before closing*.
+- **Vault**: reusable papers (optionally with the file, up to 10 MB) with expiry dates, and **Company facts** (turnover, class, similar work) that the AI uses and never guesses.
+- **Eligibility check** (AI): each condition marked met, gap or unclear, with what to do.
+- **Change watch**: every run looks again at tenders you are bidding for and records moved closing/opening dates, new corrigenda and the pre-bid meeting date. The tender list and daily email follow the new date. Corrigenda are read from the tender's detail page, so a portal that words them differently may show none: still check the portal.
+- **Draft letters** (AI): covering letter, declaration/undertaking, pre-bid query, or your own instruction. Unknown details are left in [brackets].
+- **Results**: record your price, the winning price and the outcome. Win rate, gap to L1 and your record by work type, department and size appear under Bids > Results, and on similar tenders.
+- The **daily email** gains a "Your bids" section (deadlines in the next days, new changes).
+
+Uploaded vault files are stored in a `vault` folder next to the database (so on the `/data` volume), or in `VAULT_DIR` if set. Back it up with the database.
+
 ## Deploy on Railway (one service)
 
 1. New Railway service from this repo. Railway builds the `Dockerfile` (React page + Python service in one image).
@@ -48,14 +63,20 @@ the scheduler and the "one run at a time" lock live inside the process.
 | Variable | Required | Purpose |
 |---|---|---|
 | `APP_PASSWORD` | **Yes** | Login password for the page (at least 8 characters). The service will not start without it. Secret. |
+| `APP_USERNAME` | Optional | Login username (default `admin`, not case-sensitive). |
 | `SECRET_KEY` | Recommended | Long random string that signs login cookies. Without it everyone is logged out on every restart. Secret. |
 | `BREVO_API_KEY` | For email | Brevo API key. Secret. |
 | `MAIL_FROM` | For email | A sender address verified in Brevo. |
 | `STATE_PATH` | Yes on Railway | `/data/tender_state.db` (the Dockerfile already defaults to this). |
 | `RECIPIENTS` | Optional | Starting list of email ids (commas or spaces). After you save the list in Settings, the page's list wins. |
-| `MAIL_FROM_NAME` | Optional | Default `Tender Digest`. |
+| `ANTHROPIC_API_KEY` | Optional | Turns on the **Summarise with Claude** button in the tender panel. Secret. Unset = feature off. |
+| `ANTHROPIC_MODEL` | Optional | Default `claude-sonnet-5-5`. Used for summaries, bid briefs and reading documents. |
+| `ANTHROPIC_FAST_MODEL` | Optional | Default `claude-haiku-5-5`. Used to label many tenders at once. |
+| `AI_MAX_PER_RUN` | Optional | Default `150`. The most tenders Claude labels in one run, which caps the cost. |
+| `MAIL_FROM_NAME` | Optional | Default `TendAI by QMSofts`. |
 | `COOKIE_SECURE` | Optional | Default `true`. Set `false` only for local testing without HTTPS. |
 | `TZ_NAME` | Optional | Default `Asia/Kolkata`. |
+| `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
 | `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
 
 `PORT` is set by Railway. **The Brevo key and the password are never shown in the page or sent to the browser.**
@@ -65,6 +86,20 @@ the scheduler and the "one run at a time" lock live inside the process.
 - Create an API key and verify the sender address or domain (Brevo, Senders).
 - If Brevo's *authorised IP* restriction is on, Railway's outgoing addresses change and sends are refused with an
   "unrecognised IP" error. Turn the restriction off for this key. The page shows Brevo's reason if a send is refused.
+
+## AI features (optional)
+
+Set `ANTHROPIC_API_KEY` and these appear. Fill in **Settings > AI assistant > About your company** for fit scores and bid briefs.
+
+- **Work type and fit score** on every open tender (1 to 5 against your company profile). Sort by *Best fit*, filter by *Work type*.
+- **May not be civil** tag on tenders Claude doubts (an option hides them instead).
+- **Ask bar**: type a question in plain words and it becomes filters.
+- **Tender panel**: summary, bid / no-bid brief, and *Read tender document* (upload a PDF up to 10 MB, or paste text).
+- **Same work tendered again** warning, found by comparing wording within a department (no AI cost).
+- **Daily email** opens with a short "worth a look today" paragraph.
+
+Labelling runs after each collection, newest tenders first, up to `AI_MAX_PER_RUN`. **Label tenders now** in Settings does 45 at a time.
+AI can be wrong: check every figure and date on the portal before bidding.
 
 ## Security
 
@@ -90,6 +125,21 @@ portal's search page; paste the ID there.
 
 Portals are HTML pages, not an API. If one redesigns, runs report it as unavailable and the others carry on. The parsing is
 in `tender_digest/gepnic.py`, tested against real saved pages.
+
+### Adding portals from the page
+
+**Settings > Add a portal**: type a name and the portal's https address (it must end in `.gov.in` or `.nic.in`; see `PORTAL_HOST_SUFFIXES`).
+The app checks the address straight away.
+
+- **It can read the portal** (a NIC "GePNIC" portal): the portal is switched on and used by Run now and the daily run.
+- **It cannot**: the portal is still saved, but it is **not** run. It goes on the **Check these by hand** list (Settings, with a notice
+  on the Dashboard and a line in the daily email) with the reason: captcha, login needed, OTP login needed, refuses this server,
+  not a portal type the app can read, or not reachable. Open it in your own browser and look yourself.
+
+The reason is worked out from the portal's answer and the wording of its page, so treat it as a good guess. **Check all portals now**
+asks every portal again. Every run also records what it found. The app never tries to get past a captcha, a login or an OTP.
+Portals added in the page are stored in the database (on the `/data` volume); the built-in ones stay in `tender_digest/portals.json`.
+Removing one keeps the tenders already collected from it.
 
 ### Not covered yet
 

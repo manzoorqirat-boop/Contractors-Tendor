@@ -11,19 +11,22 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
-from . import appsettings, mailer
-from .config import Settings, load_settings
+from . import access, ai, appsettings, mailer
+from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
+from .gepnic import PortalError, parse_date, pick_nit
+from .config import Portal, Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
 from .store import DIMENSIONS, SORTS, SeenStore
@@ -36,10 +39,39 @@ MAX_VIEWS = 30
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?)?$")
 # The settings a saved view may hold: the page's filters and display choices, nothing else.
 VIEW_KEYS = {
-    "portal", "category", "department", "location", "q", "status", "min_value", "max_value", "value_lt", "no_value", "no_closing", "no_published", "starred",
+    "portal", "category", "department", "location", "work_type", "min_fit", "q", "status", "min_value", "max_value", "value_lt", "no_value", "no_closing", "no_published", "starred",
     "closing_from", "closing_to", "seen_from", "seen_to", "published_from", "published_to", "closing_within", "since_days", "sort",
     "group_by", "split_by", "measure", "chart", "page",
 }
+
+
+def clean_ask(raw: dict, portal_keys: set[str]) -> dict:
+    """Claude's guess at filters, reduced to values the filters accept. Anything else is dropped."""
+    f: dict[str, Any] = {}
+    if not isinstance(raw, dict):
+        return {"filters": f, "sort": None, "explanation": ""}
+    if isinstance(raw.get("portal"), list):
+        f["portal"] = [p for p in raw["portal"] if p in portal_keys]
+    for k in ("category", "department", "location", "work_type"):
+        if isinstance(raw.get(k), list):
+            f[k] = [str(v)[:200] for v in raw[k]][:20]
+    if isinstance(raw.get("q"), str) and raw["q"].strip():
+        f["q"] = raw["q"].strip()[:100]
+    if raw.get("status") in ("open", "closing_soon", "closed", "all"):
+        f["status"] = raw["status"]
+    for k in ("min_value", "max_value"):
+        v = raw.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < 1e13:
+            f[k] = v
+    for k in ("closing_within", "since_days"):
+        v = raw.get(k)
+        if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 365:
+            f[k] = v
+    if raw.get("starred") is True:
+        f["starred"] = True
+    f = {k: v for k, v in f.items() if v not in ([], "", None)}
+    sort = raw.get("sort") if raw.get("sort") in SORTS else None
+    return {"filters": f, "sort": sort, "explanation": str(raw.get("explanation") or "")[:200]}
 
 
 @dataclass
@@ -50,6 +82,7 @@ class AppConfig:
     tz_name: str = "Asia/Kolkata"
     static_dir: Path | None = None
     run_scheduler: bool = True
+    username: str = ""  # empty = any username accepted (tests); config_from_env defaults it to "admin"
 
 
 def config_from_env() -> AppConfig:
@@ -61,7 +94,7 @@ def config_from_env() -> AppConfig:
         key = secrets.token_hex(32)
         log.warning("SECRET_KEY is not set: a temporary one is used, so everyone is logged out whenever the service restarts. Set SECRET_KEY.")
     return AppConfig(
-        password=password, secret_key=key, cookie_secure=os.environ.get("COOKIE_SECURE", "true").lower() not in ("0", "false", "no"),
+        password=password, secret_key=key, username=os.environ.get("APP_USERNAME", "admin").strip(), cookie_secure=os.environ.get("COOKIE_SECURE", "true").lower() not in ("0", "false", "no"),
         tz_name=os.environ.get("TZ_NAME", "Asia/Kolkata"),
         static_dir=Path(os.environ.get("STATIC_DIR") or Path(__file__).resolve().parent.parent / "web" / "dist"),
     )
@@ -114,7 +147,23 @@ class LoginLimiter:
 
 
 class LoginBody(BaseModel):
+    username: str = ""
     password: str
+
+
+class SummaryBody(BaseModel):
+    key: str
+    refresh: bool = False
+
+
+class AskBody(BaseModel):
+    question: str
+
+
+class DocBody(BaseModel):
+    key: str
+    text: str = ""
+    pdf_base64: str = ""
 
 
 class StarBody(BaseModel):
@@ -132,18 +181,69 @@ class ViewsBody(BaseModel):
     views: list[ViewItem]
 
 
+class BidCreate(BaseModel):
+    key: str
+
+
+class ItemBody(BaseModel):
+    text: str
+    kind: str = "task"
+
+
+class DraftBody(BaseModel):
+    kind: str
+    instructions: str = ""
+    refresh: bool = False
+
+
+class VaultBody(BaseModel):
+    name: str = ""
+    kind: str = "other"
+    issued: str = ""
+    expiry: str = ""
+    notes: str = ""
+    filename: str = ""
+    file_base64: str = ""
+
+
 class RunBody(BaseModel):
     portals: list[str] | None = None
     send_email: bool = False
 
 
-def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None) -> FastAPI:
-    manager = manager or RunManager(env, store, tz_name=config.tz_name)
+def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None) -> FastAPI:
+    vault_dir = default_vault_dir(env.state_path)
+    bids = BidBook(store, vault_dir)
+    manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     scheduler = Scheduler(manager) if config.run_scheduler else None
     limiter = LoginLimiter()
-    portal_names = {p.key: p.name for p in env.portals}
-    portal_states = {p.key: p.state for p in env.portals}
-    portal_search = {p.key: p.base_url.rstrip("/") + "/app?page=FrontEndAdvancedSearch&service=page" for p in env.portals}
+    probe = prober or access.probe
+    builtin_keys = {p.key for p in env.portals}
+    # Portals typed into the page are saved in the database, so these lookups are refilled (in place) whenever they change.
+    portal_names: dict[str, str] = {}
+    portal_states: dict[str, str] = {}
+    portal_search: dict[str, str] = {}
+
+    def portals_now() -> list[Portal]:
+        return appsettings.all_portals(env, store.get_settings())
+
+    def refresh_portals() -> None:
+        ps = portals_now()
+        for d, value in ((portal_names, lambda p: p.name), (portal_states, lambda p: p.state),
+                         (portal_search, lambda p: p.base_url.rstrip("/") + "/app?page=FrontEndAdvancedSearch&service=page")):
+            d.clear()
+            d.update({p.key: value(p) for p in ps})
+
+    refresh_portals()
+
+    def portal_entry(p: Portal, saved: dict[str, Any], statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        st = statuses.get(p.key)
+        return {
+            "key": p.key, "name": p.name, "state": p.state, "base_url": p.base_url, "custom": p.key not in builtin_keys,
+            "enabled": p.key in appsettings.current(env, saved)["portals"], **access.describe(st["kind"] if st else "unknown"),
+            "detail": st["detail"] if st else "", "checked": st["checked"] if st else None,
+            "departments": st["departments"] if st else 0, "tenders": st["tenders"] if st else 0,
+        }
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -156,7 +256,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if scheduler:
             scheduler.stop()
 
-    app = FastAPI(title="Tender digest", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app = FastAPI(title="TendAI by QMSofts", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
     @app.middleware("http")
     async def protect(request: Request, call_next):
@@ -197,9 +297,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         client = client_of(request)
         if limiter.blocked(client):
             raise HTTPException(429, "Too many wrong attempts. Wait a few minutes and try again.")
-        if not hmac.compare_digest(body.password.encode(), config.password.encode()):
+        user_ok = not config.username or hmac.compare_digest(body.username.strip().lower().encode(), config.username.lower().encode())
+        pass_ok = hmac.compare_digest(body.password.encode(), config.password.encode())
+        if not (user_ok and pass_ok):
             limiter.failed(client)
-            raise HTTPException(401, "Wrong password")
+            raise HTTPException(401, "Wrong username or password")
         limiter.succeeded(client)
         response.set_cookie(COOKIE, make_token(config.secret_key), max_age=SESSION_SECONDS, httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
         return {"ok": True}
@@ -209,6 +311,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         response.delete_cookie(COOKIE, path="/")
         return {"ok": True}
 
+    @app.get("/api/branding")
+    def branding() -> dict:
+        # Public on purpose: the login screen shows the logo before anyone has signed in. Nothing secret is in it.
+        return {"logo_text": appsettings.current(env, store.get_settings())["logo_text"]}
+
     @app.get("/api/me")
     def me(request: Request) -> dict:
         return {"authenticated": valid_token(config.secret_key, request.cookies.get(COOKIE))}
@@ -217,7 +324,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def filter_params(
         portal: list[str] | None = Query(None), category: list[str] | None = Query(None), department: list[str] | None = Query(None),
-        location: list[str] | None = Query(None), q: str | None = Query(None, max_length=100), status: str = "open",
+        location: list[str] | None = Query(None), work_type: list[str] | None = Query(None), min_fit: int | None = Query(None, ge=1, le=5), q: str | None = Query(None, max_length=100), status: str = "open",
         min_value: float | None = Query(None, ge=0), max_value: float | None = Query(None, ge=0), value_lt: float | None = Query(None, ge=0),
         no_value: bool = False, no_closing: bool = False, no_published: bool = False, starred: bool = False,
         closing_from: str | None = None, closing_to: str | None = None, seen_from: str | None = None, seen_to: str | None = None,
@@ -230,13 +337,13 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         for name, value in dates.items():
             if value and not DATE_RE.match(value):
                 raise HTTPException(422, f"{name} must look like 2026-11-20")
-        lists = {"portal": portal, "category": category, "department": department, "location": location}
+        lists = {"portal": portal, "category": category, "department": department, "location": location, "work_type": work_type}
         for name, values in lists.items():
             if values and (len(values) > 50 or any(len(v) > 200 for v in values)):
                 raise HTTPException(422, f"Too many or too long values for {name}")
         return {
             **{k: v for k, v in lists.items() if v}, "q": q, "status": status, "min_value": min_value, "max_value": max_value, "value_lt": value_lt,
-            "no_value": no_value, "no_closing": no_closing, "no_published": no_published, "starred": starred, "closing_within": closing_within, "since_days": since_days,
+            "no_value": no_value, "no_closing": no_closing, "no_published": no_published, "starred": starred, "closing_within": closing_within, "since_days": since_days, "min_fit": min_fit,
             "soon_days": env.closing_soon_days, **{k: v for k, v in dates.items() if v},
         }
 
@@ -246,11 +353,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     def get_config() -> dict:
         cur = appsettings.current(env, store.get_settings())
         return {
-            "portals": [{"key": p.key, "name": p.name, "state": p.state, "search_url": portal_search[p.key]} for p in env.portals],
+            "portals": [{"key": p.key, "name": p.name, "state": p.state, "search_url": portal_search[p.key]} for p in portals_now()],
             "mail_configured": manager.mail_configured, "recipient_count": len(cur["recipients"]),
             "now": now().isoformat(timespec="seconds"), "timezone": config.tz_name,
             "dimensions": [{"key": k, "label": d["label"], "time": isinstance(d["order"], str) and d["order"] in ("first", "last")} for k, d in DIMENSIONS.items()],
-            "soon_days": env.closing_soon_days,
+            "soon_days": env.closing_soon_days, "ai_enabled": ai.configured(),
         }
 
     @app.get("/api/stats", dependencies=auth)
@@ -320,7 +427,85 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         row = store.get_tender(key)
         if not row:
             raise HTTPException(404, "No such tender")
+        for field in ("brief", "doc"):
+            row[field] = json.loads(row[field]) if row.get(field) else None
+        row["related"] = store.related(key)
+        row["bid_id"] = bids.id_for_key(key)
+        row["history"] = bids.history_notes(row.get("work_type"), row.get("organisation"), row.get("value"))
         return shape(row)
+
+    def ai_call(fn, *args):
+        try:
+            return fn(*args)
+        except ai.NotConfigured as e:
+            raise HTTPException(503, str(e)) from None
+        except ai.AIError as e:
+            raise HTTPException(502, str(e)) from None
+
+    def profile() -> str:
+        return str(store.get_settings().get("company_profile", "") or "")
+
+    def tender_for_ai(key: str) -> dict:
+        row = store.get_tender(key)
+        if not row:
+            raise HTTPException(404, "No such tender")
+        return shape(row)
+
+    @app.post("/api/tenders/summary", dependencies=auth)
+    def tender_summary(body: SummaryBody) -> dict:
+        row = tender_for_ai(body.key)
+        if row.get("summary") and not body.refresh:
+            return {"summary": row["summary"], "cached": True}
+        text = ai_call(ai.summarise, row)
+        store.set_ai_text(body.key, "summary", text)
+        return {"summary": text, "cached": False}
+
+    @app.post("/api/tenders/document", dependencies=auth)
+    def tender_document(body: DocBody) -> dict:
+        row = tender_for_ai(body.key)
+        doc = ai_call(ai.read_document, row, body.text, body.pdf_base64)
+        store.set_ai_text(body.key, "doc", json.dumps(doc))
+        return {"doc": doc}
+
+    @app.post("/api/tenders/brief", dependencies=auth)
+    def tender_brief(body: SummaryBody) -> dict:
+        row = tender_for_ai(body.key)
+        if row.get("brief") and not body.refresh:
+            return {"brief": json.loads(row["brief"]), "cached": True}
+        doc = json.loads(row["doc"]) if row.get("doc") else None
+        hist = bids.history_notes(row.get("work_type"), row.get("organisation"), row.get("value"))
+        out = ai_call(ai.brief, row, profile(), doc, *([hist] if hist else []))  # history is passed only when there is some
+        store.set_ai_text(body.key, "brief", json.dumps(out))
+        return {"brief": out, "cached": False}
+
+    @app.post("/api/ask", dependencies=auth)
+    def ask(body: AskBody) -> dict:
+        question = body.question.strip()
+        if not question:
+            raise HTTPException(422, "Type a question first")
+        fac = store.facets(now())
+        raw = ai_call(ai.ask, question, [{"key": k, "name": n} for k, n in portal_names.items()],
+                      {k: [f["value"] for f in fac.get(k, [])] for k in ("category", "department", "location")}, now().date().isoformat())
+        return clean_ask(raw, set(portal_names))
+
+    @app.get("/api/ai/status", dependencies=auth)
+    def ai_status() -> dict:
+        return {"configured": ai.configured(), "model": ai.model(), "fast_model": ai.fast_model(), "profile_set": bool(profile().strip()), **store.ai_counts(now())}
+
+    @app.post("/api/ai/test", dependencies=auth)
+    def ai_test() -> dict:
+        ai_call(ai.ping)
+        return {"ok": True, "model": ai.model(), "fast_model": ai.fast_model()}
+
+    @app.post("/api/ai/score", dependencies=auth)
+    def ai_score() -> dict:
+        if not ai.configured():
+            raise HTTPException(503, "AI features are off. Set ANTHROPIC_API_KEY on the server to turn them on.")
+        saved = store.get_settings()
+        res = ai.enrich(store, now(), profile(), bool(saved.get("ai_hide_noncivil", False)), 45)
+        if res["error"] and not res["scored"]:
+            raise HTTPException(502, res["error"])
+        return {**res, **store.ai_counts(now())}
 
     @app.post("/api/tenders/star", dependencies=auth)
     def star(body: StarBody) -> dict:
@@ -346,6 +531,276 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             raise HTTPException(422, "Saved views are too large")
         store.put_settings({"views": views})
         return {"views": views}
+
+    # ---- bid workspace: pipeline, checklist, eligibility, drafts, changes, results ---------------------------------
+
+    def company_facts() -> list[dict]:
+        raw = store.get_settings().get("company_facts", [])
+        return [f for f in raw if isinstance(f, dict)] if isinstance(raw, list) else []
+
+    def bid_or_404(bid_id: int) -> dict:
+        bid = bids.get(bid_id)
+        if not bid:
+            raise HTTPException(404, "No such bid")
+        return bid
+
+    def bid_as_tender(bid: dict) -> dict:
+        return {k: bid.get(k) for k in ("title", "description", "organisation", "category", "location", "value", "emd", "published", "closing", "opening", "tender_id", "portal")} | {
+            "portal_name": portal_names.get(bid.get("portal") or "", bid.get("portal"))}
+
+    def bid_error(e: BidError) -> HTTPException:
+        return HTTPException(422, str(e))
+
+    def bid_full(bid: dict) -> dict:
+        items = bids.with_matches(bid, now())
+        changes = bids.changes(bid["id"])
+        return {
+            **bid, "portal_name": portal_names.get(bid["portal"] or "", bid["portal"]), "search_url": portal_search.get(bid["portal"] or "", ""),
+            "value_text": format_inr(bid["value"]), "items": items, "changes": changes, "unseen": sum(1 for c in changes if not c["seen"]),
+            "history": bids.history_notes(bid.get("work_type"), bid.get("organisation"), bid.get("value")),
+        }
+
+    @app.get("/api/bids", dependencies=auth)
+    def list_bids(stage: str | None = None) -> dict:
+        if stage and stage not in STAGES:
+            raise HTTPException(422, "Unknown stage")
+        rows = bids.list(stage)
+        for r in rows:
+            r["portal_name"] = portal_names.get(r["portal"] or "", r["portal"])
+            r["value_text"] = format_inr(r["value"])
+        counts = {s: 0 for s in STAGES}
+        for r in bids.list():
+            counts[r["stage"]] += 1
+        return {"bids": rows, "counts": counts, "stages": [{"key": k, "label": STAGE_LABELS[k]} for k in STAGES], "unseen": bids.unseen_total()}
+
+    @app.post("/api/bids", dependencies=auth)
+    def create_bid(body: BidCreate) -> dict:
+        try:
+            bid, created = bids.create_from_tender(body.key, now())
+        except BidError as e:
+            raise HTTPException(404, str(e)) from None
+        if created:
+            bids.generate_items(bid["id"], now())
+        return {"id": bid["id"], "created": created}
+
+    @app.get("/api/bids/alerts", dependencies=auth)
+    def bid_alerts(days: int = Query(7, ge=1, le=60)) -> dict:
+        return {"alerts": bids.alerts(now(), days), "unseen": bids.unseen_total()}
+
+    @app.get("/api/bids/stats", dependencies=auth)
+    def bid_stats() -> dict:
+        return bids.stats()
+
+    @app.get("/api/bids/{bid_id}", dependencies=auth)
+    def get_bid(bid_id: int) -> dict:
+        return bid_full(bid_or_404(bid_id))
+
+    @app.patch("/api/bids/{bid_id}", dependencies=auth)
+    def patch_bid(bid_id: int, body: dict[str, Any]) -> dict:
+        bid_or_404(bid_id)
+        try:
+            bids.update(bid_id, clean_patch(body), now())
+        except BidError as e:
+            raise bid_error(e) from None
+        return bid_full(bid_or_404(bid_id))
+
+    @app.delete("/api/bids/{bid_id}", dependencies=auth)
+    def delete_bid(bid_id: int) -> dict:
+        if not bids.delete(bid_id):
+            raise HTTPException(404, "No such bid")
+        return {"removed": bid_id}
+
+    @app.post("/api/bids/{bid_id}/items", dependencies=auth)
+    def add_bid_item(bid_id: int, body: ItemBody) -> dict:
+        bid_or_404(bid_id)
+        try:
+            return bids.add_item(bid_id, body.text, body.kind, now())
+        except BidError as e:
+            raise bid_error(e) from None
+
+    @app.post("/api/bids/{bid_id}/items/generate", dependencies=auth)
+    def generate_bid_items(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        return {"added": bids.generate_items(bid_id, now())}
+
+    @app.patch("/api/bids/{bid_id}/items/{item_id}", dependencies=auth)
+    def patch_bid_item(bid_id: int, item_id: int, body: dict[str, Any]) -> dict:
+        bid_or_404(bid_id)
+        try:
+            return bids.update_item(bid_id, item_id, body)
+        except BidError as e:
+            raise bid_error(e) from None
+
+    @app.delete("/api/bids/{bid_id}/items/{item_id}", dependencies=auth)
+    def delete_bid_item(bid_id: int, item_id: int) -> dict:
+        if not bids.delete_item(bid_id, item_id):
+            raise HTTPException(404, "No such item")
+        return {"removed": item_id}
+
+    @app.post("/api/bids/{bid_id}/changes/seen", dependencies=auth)
+    def bid_changes_seen(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        bids.mark_seen(bid_id)
+        return {"ok": True}
+
+    @app.post("/api/bids/{bid_id}/document", dependencies=auth)
+    def bid_document(bid_id: int, body: DocBody) -> dict:
+        bid = bid_or_404(bid_id)
+        doc = ai_call(ai.read_document, bid_as_tender(bid), body.text, body.pdf_base64)
+        bids.set_json(bid_id, "doc", doc, now())
+        if store.get_tender(bid["key"]):
+            store.set_ai_text(bid["key"], "doc", json.dumps(doc))
+        return {"doc": doc, "added": bids.generate_items(bid_id, now())}
+
+    fetch_lock = threading.Lock()
+
+    @app.post("/api/bids/{bid_id}/fetch", dependencies=auth)
+    def bid_fetch(bid_id: int) -> dict:
+        """Looks the tender up again on its portal: the public fee/class/date fields, and the tender notice (NIT) when the portal gives it without a login."""
+        bid = bid_or_404(bid_id)
+        portal = next((p for p in portals_now() if p.key == bid["portal"]), None)
+        if not portal:
+            raise HTTPException(404, "That portal is no longer in your list")
+        if not fetch_lock.acquire(blocking=False):
+            raise HTTPException(409, "Another fetch is in progress. Try again in a moment")
+        try:
+            client = manager.client_factory(portal, env)
+            try:
+                t = locate_on_portal(client, portal.key, bid["organisation"] or "", bid["tender_id"])
+                if t is None:
+                    raise HTTPException(404, "The tender is no longer listed on the portal. It may have closed or been withdrawn")
+                full = getattr(client, "detail_full", None)
+                pairs, corrigenda, links = full(t) if full else (client.detail(t), [], [])
+            except PortalError as e:
+                raise HTTPException(502, f"The portal could not be read: {e}") from None
+            facts = portal_facts(pairs)
+            bids.set_json(bid_id, "portal_facts", facts, now())
+            patch = {}
+            for label, field in (("Clarification End Date", "query_deadline"), ("Pre Bid Meeting Date", "prebid_date")):
+                d = parse_date(pairs.get(label, ""))
+                if d and not bid.get(field):
+                    patch[field] = d.isoformat(timespec="seconds")
+            if patch:
+                bids.update(bid_id, patch, now())
+            state, message = "no_link", "The portal lists no downloadable notice for this tender."
+            nit = pick_nit(links)
+            if nit and hasattr(client, "download"):
+                try:
+                    data, _ctype = client.download(nit["href"])
+                except PortalError as e:
+                    state, message = "failed", f"The portal would not give the notice: {e}"
+                else:
+                    if not data.startswith(b"%PDF"):
+                        state, message = "login", "The portal asks for a login or captcha before it gives documents, which this app never gets past. Download the notice yourself and upload it here."
+                    elif not ai.configured():
+                        state, message = "ai_off", "The notice was available, but the AI assistant is off, so it was not read."
+                    else:
+                        try:
+                            doc = ai.read_document(bid_as_tender(bid), "", base64.b64encode(data).decode())
+                            bids.set_json(bid_id, "doc", doc, now())
+                            if store.get_tender(bid["key"]):
+                                store.set_ai_text(bid["key"], "doc", json.dumps(doc))
+                            state, message = "read", "Read the tender notice from the portal."
+                        except ai.AIError as e:
+                            state, message = "ai_failed", str(e)
+            added = bids.generate_items(bid_id, now())
+            return {"facts": facts, "added": added, "nit": state, "message": message, "corrigenda": corrigenda}
+        finally:
+            fetch_lock.release()
+
+    @app.post("/api/bids/{bid_id}/brief", dependencies=auth)
+    def bid_brief(bid_id: int, body: SummaryBody) -> dict:
+        bid = bid_or_404(bid_id)
+        if bid.get("brief") and not body.refresh:
+            return {"brief": bid["brief"], "cached": True}
+        hist = bids.history_notes(bid.get("work_type"), bid.get("organisation"), bid.get("value"))
+        out = ai_call(ai.brief, bid_as_tender(bid), profile(), bid.get("doc"), *([hist] if hist else []))
+        bids.set_json(bid_id, "brief", out, now())
+        return {"brief": out, "cached": False}
+
+    @app.post("/api/bids/{bid_id}/eligibility", dependencies=auth)
+    def bid_eligibility(bid_id: int) -> dict:
+        bid = bid_or_404(bid_id)
+        if not ai.configured():
+            raise HTTPException(503, "AI features are off. Set ANTHROPIC_API_KEY on the server to turn them on.")
+        doc = bid.get("doc") or {}
+        if not (doc.get("requirements") or doc.get("financial")):
+            raise HTTPException(422, "The tender document has no eligibility conditions yet. Read the tender document first.")
+        vault = [{**d, "kind": VAULT_KINDS.get(d["kind"], ("Other",))[0]} for d in bids.vault_list()]
+        out = ai_call(ai.eligibility, bid_as_tender(bid), profile(), company_facts(), vault, bid.get("doc") or {})
+        out["checked"] = now().isoformat(timespec="seconds")
+        bids.set_json(bid_id, "eligibility", out, now())
+        return out
+
+    @app.post("/api/bids/{bid_id}/draft", dependencies=auth)
+    def bid_draft(bid_id: int, body: DraftBody) -> dict:
+        bid = bid_or_404(bid_id)
+        if body.kind not in ai.DRAFT_KINDS:
+            raise HTTPException(422, "Unknown kind of draft")
+        if body.kind == "custom" and not body.instructions.strip():
+            raise HTTPException(422, "Say what to write")
+        drafts = bid.get("drafts") or {}
+        if drafts.get(body.kind) and not body.refresh and body.kind != "custom":
+            return {"kind": body.kind, "text": drafts[body.kind], "cached": True}
+        text = ai_call(ai.draft, body.kind, bid_as_tender(bid), profile(), company_facts(), bid.get("doc"), body.instructions)
+        drafts[body.kind] = text
+        bids.set_json(bid_id, "drafts", drafts, now())
+        return {"kind": body.kind, "text": text, "cached": False}
+
+    # ---- vault: reusable company papers and the facts about your company ---------------------------------------------
+
+    @app.get("/api/vault", dependencies=auth)
+    def vault_list() -> dict:
+        today = now()
+        docs = [{**d, "status": bids.doc_status(d, today)} for d in bids.vault_list()]
+        return {"documents": docs, "kinds": [{"key": k, "label": v[0]} for k, v in VAULT_KINDS.items()], "facts": company_facts()}
+
+    @app.post("/api/vault", dependencies=auth)
+    def vault_add(body: VaultBody) -> dict:
+        data = None
+        if body.file_base64:
+            try:
+                data = base64.b64decode(body.file_base64, validate=True)
+            except ValueError:
+                raise HTTPException(422, "That file could not be read") from None
+        try:
+            return bids.vault_add(body.model_dump(), data, body.filename, now())
+        except BidError as e:
+            raise bid_error(e) from None
+
+    @app.patch("/api/vault/{doc_id}", dependencies=auth)
+    def vault_update(doc_id: int, body: dict[str, Any]) -> dict:
+        try:
+            return bids.vault_update(doc_id, body)
+        except BidError as e:
+            raise HTTPException(404 if "No such" in str(e) else 422, str(e)) from None
+
+    @app.delete("/api/vault/{doc_id}", dependencies=auth)
+    def vault_delete(doc_id: int) -> dict:
+        if not bids.vault_delete(doc_id):
+            raise HTTPException(404, "No such document")
+        return {"removed": doc_id}
+
+    @app.get("/api/vault/{doc_id}/file", dependencies=auth)
+    def vault_file(doc_id: int):
+        found = bids.vault_file(doc_id)
+        if not found:
+            raise HTTPException(404, "No file is stored for that document")
+        path, name = found
+        return FileResponse(path, media_type="application/octet-stream", filename=name)
+
+    @app.put("/api/company-facts", dependencies=auth)
+    def put_company_facts(body: dict[str, Any]) -> dict:
+        raw = body.get("facts")
+        if not isinstance(raw, list) or len(raw) > 40:
+            raise HTTPException(422, "Facts must be a list of up to 40 items")
+        facts = []
+        for f in raw:
+            label, value = str((f or {}).get("label", "")).strip()[:60], str((f or {}).get("value", "")).strip()[:160]
+            if label and value:
+                facts.append({"label": label, "value": value})
+        store.put_settings({"company_facts": facts})
+        return {"facts": facts}
 
     # ---- runs ------------------------------------------------------------------------------------------------
 
@@ -379,7 +834,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.get("/api/settings", dependencies=auth)
     def get_settings() -> dict:
         return {**appsettings.current(env, store.get_settings()), "mail_configured": manager.mail_configured, "mail_from": env.mail_from,
-                "available_portals": [{"key": p.key, "name": p.name} for p in env.portals]}
+                "available_portals": [{"key": p.key, "name": p.name} for p in portals_now()]}
 
     @app.put("/api/settings", dependencies=auth)
     def put_settings(body: dict[str, Any]) -> dict:
@@ -388,6 +843,59 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         except appsettings.SettingsError as e:
             raise HTTPException(422, str(e)) from None
         return get_settings()
+
+    # ---- portals: add your own, and see which ones the app cannot read ---------------------------------------
+
+    @app.get("/api/portals", dependencies=auth)
+    def list_portals() -> dict:
+        saved, statuses = store.get_settings(), store.portal_statuses()
+        entries = [portal_entry(p, saved, statuses) for p in portals_now()]
+        return {"portals": entries, "manual": [e for e in entries if e["manual"]]}
+
+    @app.post("/api/portals", dependencies=auth)
+    def add_portal(body: dict[str, Any]) -> dict:
+        saved = store.get_settings()
+        existing = appsettings.all_portals(env, saved)
+        try:
+            new = appsettings.clean_portal(body, {p.key for p in existing})
+        except appsettings.SettingsError as e:
+            raise HTTPException(422, str(e)) from None
+        same = next((p for p in existing if p.base_url.rstrip("/").lower() == new["base_url"].lower()), None)
+        if same:
+            raise HTTPException(422, f"That address is already in the list as '{same.name}'")
+        result = probe(new["base_url"])
+        # Added even when the app cannot read it: it then appears on the "check manually" list with the reason.
+        store.put_settings({"custom_portals": [*saved.get("custom_portals", []), new]})
+        store.put_portal_status(new["key"], result["kind"], result["detail"], now(), result["departments"], result["tenders"])
+        if result["kind"] == "ok":
+            store.put_settings({"portals": [*appsettings.current(env, saved)["portals"], new["key"]]})
+        refresh_portals()
+        return portal_entry(Portal(**new), store.get_settings(), store.portal_statuses())
+
+    @app.post("/api/portals/{key}/check", dependencies=auth)
+    def check_portal(key: str) -> dict:
+        portal = next((p for p in portals_now() if p.key == key), None)
+        if not portal:
+            raise HTTPException(404, "No such portal")
+        result = probe(portal.base_url)
+        store.put_portal_status(key, result["kind"], result["detail"], now(), result["departments"], result["tenders"])
+        return portal_entry(portal, store.get_settings(), store.portal_statuses())
+
+    @app.delete("/api/portals/{key}", dependencies=auth)
+    def remove_portal(key: str) -> dict:
+        if key in builtin_keys:
+            raise HTTPException(422, "Built-in portals cannot be removed. Switch them off in Settings instead")
+        saved = store.get_settings()
+        customs = saved.get("custom_portals", [])
+        if key not in {p.get("key") for p in customs}:
+            raise HTTPException(404, "No such portal")
+        update: dict[str, Any] = {"custom_portals": [p for p in customs if p.get("key") != key]}
+        if "portals" in saved:
+            update["portals"] = [k for k in saved["portals"] if k != key]
+        store.put_settings(update)
+        store.delete_portal_status(key)
+        refresh_portals()
+        return {"removed": key}
 
     @app.post("/api/settings/test-email", dependencies=auth)
     def test_email() -> dict:

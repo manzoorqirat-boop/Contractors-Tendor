@@ -401,3 +401,37 @@ def test_static_page_served_with_spa_fallback_and_no_path_escape(tmp_path):
     assert c.get("/assets/a.js").text == "x=1"
     assert "nope" not in c.get("/..%2Fsecret.txt").text and "nope" not in c.get("/../secret.txt").text
     assert c.get("/api/nothing").status_code in (401, 404)
+
+
+# ---- AI summary ---------------------------------------------------------------------------------------------
+
+def test_summary_needs_login_and_is_off_without_a_key(ctx, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert ctx.client.post("/api/tenders/summary", json={"key": "x"}).status_code == 401
+    login(ctx)
+    assert ctx.client.get("/api/config").json()["ai_enabled"] is False
+    ctx.client.post("/api/runs", json={})
+    key = ctx.client.get("/api/tenders").json()["items"][0]["key"]
+    assert ctx.client.post("/api/tenders/summary", json={"key": key}).status_code == 503
+    assert ctx.client.post("/api/tenders/summary", json={"key": "nope"}).status_code == 404
+
+
+def test_summary_is_cached_per_tender(ctx, monkeypatch):
+    calls = []
+    monkeypatch.setattr(web.ai, "summarise", lambda t: calls.append(t) or "What: a road.")
+    login(ctx)
+    ctx.client.post("/api/runs", json={})
+    key = ctx.client.get("/api/tenders").json()["items"][0]["key"]
+    first = ctx.client.post("/api/tenders/summary", json={"key": key}).json()
+    second = ctx.client.post("/api/tenders/summary", json={"key": key}).json()
+    assert first == {"summary": "What: a road.", "cached": False} and second["cached"] is True and len(calls) == 1
+
+
+def test_username_is_checked_when_set():
+    env = settings()
+    app = web.create_app(web.AppConfig(PASSWORD, "s3cret", username="admin", cookie_secure=False, run_scheduler=False), env, SeenStore(":memory:"),
+                         RunManager(env, SeenStore(":memory:"), lambda p, s: None, FakeSender(), background=False))
+    c = TestClient(app)
+    assert c.post("/api/login", json={"username": "someone", "password": PASSWORD}).status_code == 401
+    assert c.post("/api/login", json={"password": PASSWORD}).status_code == 401
+    assert c.post("/api/login", json={"username": " Admin ", "password": PASSWORD}).status_code == 200

@@ -132,6 +132,38 @@ def parse_detail(html: str) -> dict[str, str]:
     return pairs
 
 
+def parse_corrigenda(html: str) -> list[str]:
+    """'Title (type)' for every corrigendum or addendum listed on a tender's detail page. Empty when there are none."""
+    soup = BeautifulSoup(html, "lxml")
+    out: list[str] = []
+    for table in soup.find_all("table"):
+        header = table.find("tr", class_="list_header")
+        if header is None or header.find_parent("table") is not table or "corrigendum title" not in _text(header).lower():
+            continue
+        for row in table.find_all("tr"):
+            cells = row.find_all("td")
+            if row is header or row.find_parent("table") is not table or len(cells) < 3:
+                continue
+            title, kind = _text(cells[1]), _text(cells[2])
+            if title:
+                out.append(f"{title} ({kind})" if kind else title)
+    return list(dict.fromkeys(out))
+
+
+def parse_doc_links(html: str) -> list[dict[str, str]]:
+    """The downloadable documents on a tender's detail page: [{name, href}]. The links are session-bound and expire within minutes."""
+    out = []
+    for a in BeautifulSoup(html, "lxml").find_all("a", href=True):
+        if re.search(r"docDownoad|docDownload", a["href"], re.I):
+            out.append({"name": _text(a), "href": a["href"]})
+    return out
+
+
+def pick_nit(links: list[dict[str, str]]) -> dict[str, str] | None:
+    """The tender notice (NIT) among the documents: named like a notice, else the first one listed."""
+    return next((x for x in links if re.search(r"notice|nit\b|tender.?doc", x["name"], re.I)), links[0] if links else None)
+
+
 def apply_detail(tender: Tender, pairs: dict[str, str]) -> None:
     def pick(*labels: str) -> str:
         for label in labels:
@@ -149,7 +181,30 @@ def apply_detail(tender: Tender, pairs: dict[str, str]) -> None:
 
 
 class PortalError(RuntimeError):
-    pass
+    """A portal could not be read. `kind` says why, so the page can tell a captcha or login wall from an outage.
+
+    kinds: unreachable (default, usually temporary), blocked, captcha, login, otp, different_software.
+    """
+
+    def __init__(self, message: str = "", kind: str = "unreachable"):
+        super().__init__(message)
+        self.kind = kind
+
+
+_OTP = re.compile(r"\botp\b|one[\s-]?time[\s-]?(password|pin)|mobile\s+verification", re.I)
+_CAPTCHA = re.compile(r"captcha|enter the (text|characters) (shown|in the image)", re.I)
+_LOGIN = re.compile(r"type=[\"']?password|please (log ?in|sign ?in)|login (is )?required|user ?id.{0,40}password", re.I | re.S)
+
+
+def classify_page(html: str) -> str:
+    """Why a page that loaded fine has no department list. A guess from the page's wording, never a certainty."""
+    if _OTP.search(html):
+        return "otp"
+    if _CAPTCHA.search(html):
+        return "captcha"
+    if _LOGIN.search(html):
+        return "login"
+    return "different_software"
 
 
 class GepnicClient:
@@ -169,7 +224,7 @@ class GepnicClient:
         return f"{self.base}/app?page=FrontEndAdvancedSearch&service=page"
 
     def _get(self, url: str, attempts: int = 3) -> str:
-        last: Exception | None = None
+        last: PortalError | None = None
         for attempt in range(attempts):
             wait = self.delay - (time.monotonic() - self._last)
             if wait > 0:
@@ -177,19 +232,40 @@ class GepnicClient:
             try:
                 response = self.http.get(urljoin(self.base + "/", url.replace("&amp;", "&")), timeout=self.timeout)
                 self._last = time.monotonic()
-                if response.status_code == 200 and "Stale Session" not in response.text[:3000]:
+                status = response.status_code
+                if status == 200 and "Stale Session" not in response.text[:3000]:
+                    final = str(getattr(response, "url", "") or "").lower()
+                    if getattr(response, "history", None) and re.search(r"log-?in|signin|sso", final):
+                        raise PortalError("the portal sent us to a login page: it needs an account", "login")
                     return response.text
-                last = PortalError(f"HTTP {response.status_code} from {url[:80]}")
+                if status == 401:
+                    raise PortalError("the portal asks for a login (HTTP 401)", "login")
+                if status == 403:
+                    raise PortalError("the portal refuses this server (HTTP 403), often because it blocks data-centre addresses", "blocked")
+                if status == 404:
+                    raise PortalError("that page does not exist on this portal (HTTP 404): wrong address or different software", "different_software")
+                last = PortalError(f"HTTP {status} from {url[:80]}", "unreachable")
+            except PortalError as e:
+                if e.kind != "unreachable":
+                    raise  # a permanent answer: retrying only annoys the portal
+                last = e
             except requests.RequestException as e:
                 self._last = time.monotonic()
-                last = e
-            time.sleep(min(2 ** attempt * 2, 10))
-        raise PortalError(str(last))
+                last = PortalError(str(e)[:200], "unreachable")
+            time.sleep(min(2 ** attempt * 2, 10) if attempt + 1 < attempts else 0)
+        raise last or PortalError("no answer", "unreachable")
 
-    def organisations(self) -> list[tuple[str, int, str]]:
-        orgs = parse_organisations(self._get("app?page=FrontEndTendersByOrganisation&service=page"))
+    def organisations(self, attempts: int = 3) -> list[tuple[str, int, str]]:
+        html = self._get("app?page=FrontEndTendersByOrganisation&service=page", attempts)
+        orgs = parse_organisations(html)
         if not orgs:
-            raise PortalError("the department list came back empty")
+            kind = classify_page(html)
+            why = {
+                "otp": "the portal asks for an OTP login",
+                "captcha": "the portal asks for a captcha",
+                "login": "the portal asks for a login",
+            }.get(kind, "the department list came back empty: not a portal this app can read")
+            raise PortalError(why, kind)
         return orgs
 
     def tenders_of(self, link: str, portal: str) -> list[Tender]:
@@ -197,3 +273,30 @@ class GepnicClient:
 
     def detail(self, tender: Tender) -> dict[str, str]:
         return parse_detail(self._get(tender.detail_path))
+
+    def detail_full(self, tender: Tender) -> tuple[dict[str, str], list[str], list[dict[str, str]]]:
+        """Detail pairs, corrigenda and document links from one fetch."""
+        html = self._get(tender.detail_path)
+        return parse_detail(html), parse_corrigenda(html), parse_doc_links(html)
+
+    def download(self, href: str, max_bytes: int = 10 * 1024 * 1024) -> tuple[bytes, str]:
+        """One document, politely. Returns (bytes, content type); a portal that wants a login or captcha usually answers with an HTML page instead."""
+        wait = self.delay - (time.monotonic() - self._last)
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            r = self.http.get(urljoin(self.base + "/", href.replace("&amp;", "&")), timeout=self.timeout, stream=True)
+            self._last = time.monotonic()
+        except requests.RequestException as e:
+            raise PortalError(str(e)[:200], "unreachable") from None
+        if r.status_code != 200:
+            raise PortalError(f"HTTP {r.status_code} on the document link", "blocked" if r.status_code in (401, 403) else "unreachable")
+        data = r.raw.read(max_bytes + 1, decode_content=True) if hasattr(r, "raw") else r.content[: max_bytes + 1]
+        if len(data) > max_bytes:
+            raise PortalError("the document is over 10 MB", "unreachable")
+        return data, r.headers.get("Content-Type", "")
+
+    def detail_page(self, tender: Tender) -> tuple[dict[str, str], list[str]]:
+        """One fetch of the detail page: its label/value pairs and its corrigenda. Used to watch tenders you are bidding for."""
+        html = self._get(tender.detail_path)
+        return parse_detail(html), parse_corrigenda(html)

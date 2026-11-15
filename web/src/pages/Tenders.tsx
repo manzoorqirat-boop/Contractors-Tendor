@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { Nav } from '../App';
+import { FitBadge } from '../ai';
 import { FilterBar } from '../FilterBar';
 import { StarButton, TenderDrawer } from '../TenderDrawer';
 import { chain, fmtDate, headline, relative } from '../format';
@@ -9,7 +10,7 @@ import { Skeleton, useToast } from '../ui';
 import type { AppConfig, Tender } from '../types';
 
 const SORTS: [string, string][] = [
-  ['closing', 'Closing soonest'], ['closing_desc', 'Closing latest'], ['value', 'Highest value'], ['value_asc', 'Lowest value'], ['published', 'Newest published'], ['first_seen', 'Newly found'],
+  ['closing', 'Closing soonest'], ['closing_desc', 'Closing latest'], ['value', 'Highest value'], ['value_asc', 'Lowest value'], ['published', 'Newest published'], ['first_seen', 'Newly found'], ['fit', 'Best fit'],
 ];
 const PAGE_SIZE = 25;
 
@@ -23,6 +24,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
 
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
   const layout = display.layout;
+  const showFit = items.some((t) => t.fit || t.ai_civil === 0);
   const setStar = (key: string, starred: boolean) => setItems((xs) => xs.map((t) => (t.key === key ? { ...t, starred } : t)));
   const sortBy = (s: string) => nav.setDisplay({ sort: s, page: 1 });
 
@@ -64,7 +66,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
           {layout === 'table' && items.length > 0 && (
             <div className="scroll-x">
               <table className="tbl">
-                <thead><tr><th aria-label="Star" /><th>Work</th><th>Department</th><th>Portal</th><th className="num">Value</th><th>Closes</th></tr></thead>
+                <thead><tr><th aria-label="Star" /><th>Work</th>{showFit && <th>Fit</th>}<th>Department</th><th>Portal</th><th className="num">Value</th><th>Closes</th></tr></thead>
                 <tbody>
                   {items.map((t) => {
                     const rel = relative(t.closing, config.now);
@@ -72,6 +74,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
                       <tr key={t.key} className="click" tabIndex={0} onClick={() => setSelected(t.key)} onKeyDown={(e) => { if (e.key === 'Enter') setSelected(t.key); }}>
                         <td><StarButton t={t} onChange={(s) => setStar(t.key, s)} /></td>
                         <td style={{ minWidth: 240 }}><div className="strong">{headline(t).slice(0, 140)}{headline(t).length > 140 ? '…' : ''}</div><div className="mono muted">{t.tender_id}</div></td>
+                        {showFit && <td className="nowrap"><FitBadge fit={t.fit} reason={t.fit_reason} notCivil={t.ai_civil} /></td>}
                         <td className="muted small">{chain(t.organisation)[0]}</td>
                         <td className="nowrap">{t.portal_name.split(' (')[0]}</td>
                         <td className="num nowrap">{t.value === null ? <span className="muted">Not stated</span> : t.value_text.split(' (')[0]}</td>
@@ -113,7 +116,9 @@ function Card({ t, now, onOpen, onStar, onCopy }: { t: Tender; now: string; onOp
         <div className="org">{chain(t.organisation).join(' › ')}</div>
         <div className="chips">
           <span className="badge accent">{t.portal_name.split(' (')[0]}</span>
-          {t.category && <span className="badge plain">{t.category}</span>}
+          {t.work_type && <span className="badge plain">{t.work_type}</span>}
+          <FitBadge fit={t.fit} reason={t.fit_reason} notCivil={t.ai_civil} />
+          {!t.work_type && t.category && <span className="badge plain">{t.category}</span>}
           {t.location && <span className="badge plain">{t.location}</span>}
           <span className="mono">{t.tender_id}</span>
           <button className="btn small" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`Copy Tender ID ${t.tender_id}`}>Copy ID</button>

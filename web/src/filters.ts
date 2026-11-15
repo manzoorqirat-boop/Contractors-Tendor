@@ -3,11 +3,11 @@ import type { AppConfig, Display, Drill, Filters } from './types';
 
 export const NONE = '__none__'; // the server's word for "not stated"
 
-export const EMPTY: Filters = { q: '', status: 'open', portal: [], category: [], department: [], location: [] };
+export const EMPTY: Filters = { q: '', status: 'open', portal: [], category: [], department: [], location: [], work_type: [] };
 export const DISPLAY: Display = { sort: 'closing', page: 1, group_by: 'portal', split_by: 'category', measure: 'count', chart: 'stacked', layout: 'cards' };
 
-const LISTS = ['portal', 'category', 'department', 'location'] as const;
-const STRINGS = ['min_value', 'max_value', 'value_lt', 'closing_from', 'closing_to', 'seen_from', 'seen_to', 'published_from', 'published_to', 'closing_within', 'since_days'] as const;
+const LISTS = ['portal', 'category', 'department', 'location', 'work_type'] as const;
+const STRINGS = ['min_fit', 'min_value', 'max_value', 'value_lt', 'closing_from', 'closing_to', 'seen_from', 'seen_to', 'published_from', 'published_to', 'closing_within', 'since_days'] as const;
 const FLAGS = ['no_value', 'no_closing', 'no_published', 'starred'] as const;
 
 /** Filters -> URL parameters. Empty things are left out, so links stay short. */
@@ -23,7 +23,7 @@ export function toParams(f: Filters, d?: Partial<Display>): URLSearchParams {
 }
 
 export function fromParams(p: URLSearchParams): { filters: Filters; display: Display } {
-  const f: Filters = { ...EMPTY, portal: [], category: [], department: [], location: [] };
+  const f: Filters = { ...EMPTY, portal: [], category: [], department: [], location: [], work_type: [] };
   f.q = p.get('q') ?? '';
   const status = p.get('status');
   if (status === 'open' || status === 'closing_soon' || status === 'closed' || status === 'all') f.status = status;
@@ -78,7 +78,7 @@ export function describe(f: Filters, config?: AppConfig): Chip[] {
   if (f.status !== 'open') chips.push({ id: 'status', label: { closing_soon: 'Closing soon', closed: 'Closed', all: 'Open and closed', open: 'Open' }[f.status], remove: (x) => ({ ...x, status: 'open' }) });
   for (const k of LISTS) {
     if (f[k].length) {
-      const label = k === 'portal' ? 'Portal' : k[0].toUpperCase() + k.slice(1);
+      const label = k === 'portal' ? 'Portal' : k === 'work_type' ? 'Work type' : k[0].toUpperCase() + k.slice(1);
       const names = f[k].map((v) => (k === 'portal' ? config?.portals.find((p) => p.key === v)?.state ?? v : name(v)));
       chips.push({ id: k, label: `${label}: ${names.length > 2 ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(', ')}`, remove: (x) => without(x, k) });
     }
@@ -101,6 +101,7 @@ export function describe(f: Filters, config?: AppConfig): Chip[] {
   if (f.no_closing) chips.push({ id: 'no_closing', label: 'No closing date', remove: (x) => without(x, 'no_closing') });
   if (f.no_published) chips.push({ id: 'no_published', label: 'No publish date', remove: (x) => without(x, 'no_published') });
   if (f.since_days) chips.push({ id: 'since', label: `Found in the last ${f.since_days} days`, remove: (x) => without(x, 'since_days') });
+  if (f.min_fit) chips.push({ id: 'min_fit', label: `Fit ${f.min_fit}+ of 5`, remove: (x) => without(x, 'min_fit') });
   if (f.starred) chips.push({ id: 'starred', label: 'Starred only', remove: (x) => without(x, 'starred') });
   return chips;
 }

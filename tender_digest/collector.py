@@ -22,6 +22,8 @@ class PortalReport:
     listed: int = 0
     new_civil: int = 0
     errors: list[str] = field(default_factory=list)
+    access: str = "ok"  # ok, or why the app could not read it: captcha, login, otp, blocked, different_software, unreachable
+    access_detail: str = ""
 
     @property
     def failed(self) -> bool:
@@ -30,6 +32,8 @@ class PortalReport:
 
 ClientFactory = Callable[[Portal, Settings], GepnicClient]
 Progress = Callable[[str], None]
+# Called with (tender, client) for a tender already known, so the bid workspace can look again at tenders being bid for.
+Watcher = Callable[[Tender, GepnicClient], None]
 
 
 def default_client(portal: Portal, settings: Settings) -> GepnicClient:
@@ -37,7 +41,8 @@ def default_client(portal: Portal, settings: Settings) -> GepnicClient:
 
 
 def collect(
-    settings: Settings, store: SeenStore, now: datetime, client_factory: ClientFactory = default_client, progress: Progress | None = None
+    settings: Settings, store: SeenStore, now: datetime, client_factory: ClientFactory = default_client, progress: Progress | None = None,
+    watcher: Watcher | None = None,
 ) -> list[PortalReport]:
     say = progress or (lambda _m: None)
     reports = []
@@ -47,21 +52,25 @@ def collect(
         client = client_factory(portal, settings)
         report.search_url = client.search_url
         try:
-            _collect_portal(portal, settings, client, store, now, report, say)
+            _collect_portal(portal, settings, client, store, now, report, say, watcher)
         except PortalError as e:
             report.errors.append(f"could not read the portal: {e}")
+            report.access, report.access_detail = e.kind, str(e)[:300]
             log.warning("%s: %s", portal.key, e)
             say(f"{portal.name}: could not be read ({e})")
+        store.put_portal_status(portal.key, report.access, report.access_detail, now, report.organisations_read, report.listed)
         say(f"{portal.name}: done, {report.listed} listed, {report.new_civil} new civil")
         reports.append(report)
     return reports
 
 
 def _collect_portal(
-    portal: Portal, settings: Settings, client: GepnicClient, store: SeenStore, now: datetime, report: PortalReport, say: Progress
+    portal: Portal, settings: Settings, client: GepnicClient, store: SeenStore, now: datetime, report: PortalReport, say: Progress,
+    watcher: Watcher | None = None,
 ) -> None:
     include = portal.org_include or settings.org_include
     fetched = 0
+    dept_error: PortalError | None = None
     for name, count, link in client.organisations():
         if count == 0 or not filters.wants_organisation(name, include):
             continue
@@ -69,6 +78,7 @@ def _collect_portal(
             tenders = client.tenders_of(link, portal.key)
         except PortalError as e:
             report.errors.append(f"{name}: {e}")
+            dept_error = e
             continue
         report.organisations_read += 1
         report.listed += len(tenders)
@@ -76,6 +86,11 @@ def _collect_portal(
 
         for tender in tenders:
             if store.is_seen(tender.key):
+                if watcher:
+                    try:
+                        watcher(tender, client)
+                    except Exception:  # noqa: BLE001 - watching a bid must never stop the collection
+                        log.exception("bid watch failed for %s", tender.key)
                 continue
             if not filters.is_recent(tender, now, settings.lookback_days):
                 store.skip(tender.key, now)
@@ -100,3 +115,5 @@ def _collect_portal(
                 report.new_civil += 1
             elif detail_known:
                 store.skip(tender.key, now)
+    if report.organisations_read == 0 and dept_error is not None:
+        report.access, report.access_detail = dept_error.kind, str(dept_error)[:300]

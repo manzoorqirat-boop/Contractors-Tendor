@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 
+from . import access
 from .collector import PortalReport
 from .gepnic import Tender
 
@@ -47,7 +48,7 @@ STYLE = (
     "h3{font-size:14px;margin:14px 0 4px;color:#374151}table{border-collapse:collapse;width:100%;font-size:13px}"
     "th{text-align:left;color:#6b7280;font-size:12px;padding:6px 8px}td{padding:8px;border-bottom:1px solid #e5e7eb;vertical-align:top}"
     ".n{white-space:nowrap}.o{color:#6b7280;font-size:12px;margin-top:3px}.m{font-size:12px;margin-top:3px}a{color:#2563eb}"
-    ".w{background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;margin:16px 0;font-size:13px}</style>"
+    ".i{background:#eef4ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px 12px;margin:16px 0;font-size:13px;line-height:1.5}.w{background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;margin:16px 0;font-size:13px}</style>"
 )
 
 
@@ -106,6 +107,8 @@ def build(
     prefix: str = "Civil tenders",
     max_new_per_portal: int = 25,
     max_soon_per_portal: int = 10,
+    intro: str = "",
+    bids: dict | None = None,
 ) -> Digest:
     by_portal = {r.portal.key: r for r in reports}
     new_keys = {t.key for t in new}
@@ -162,19 +165,54 @@ def build(
             f"Some data could not be read today, so this list may be incomplete:<ul style='margin:6px 0 0 18px'>{lines}</ul></div>"
         )
 
+    manual = [r for r in reports if r.access in access.NEEDS_MANUAL and r.access != "unreachable"]
+    if manual:
+        items = "".join(f"<li><b>{escape(r.portal.name)}</b>: {escape(access.describe(r.access)['label'])}</li>" for r in manual)
+        notes += (
+            "<div class=w>Check these portals by hand. The app cannot read them on its own, so nothing from them is in this list:"
+            f"<ul style='margin:6px 0 0 18px'>{items}</ul></div>"
+        )
+
+    bids = bids or {"alerts": [], "changes": []}
+    change_text = {"closing": "closing date moved", "opening": "bid opening date moved", "corrigendum": "corrigendum", "prebid": "pre-bid meeting date"}
+    bid_html = ""
+    if bids["alerts"] or bids["changes"]:
+        a_rows = "".join(
+            f"<tr><td><b>{escape(a['label'])}</b>" + (f"<div class=o>{escape(a['title'])} · ID {escape(a['tender_id'])}</div>" if a["title"] else (f"<div class=o>{escape(a['extra'])}</div>" if a.get("extra") else ""))
+            + f"</td><td class=n>{escape(a['date'][:10])}</td><td class=n>{'OVERDUE' if a['urgency'] == 'overdue' else 'today' if a['days_left'] == 0 else 'in ' + str(a['days_left']) + ' day' + ('s' if a['days_left'] != 1 else '')}</td></tr>"
+            for a in bids["alerts"])
+        c_rows = "".join(
+            f"<li><b>{escape(change_text.get(c['what'], c['what']))}</b> · ID {escape(c['tender_id'])}: {escape(c['title'])}"
+            + (f"<div class=o>{escape((c['old'] or '')[:10])} → {escape((c['new'] or '')[:16])}</div>" if c["what"] in ("closing", "opening") else f"<div class=o>{escape(c['new'] or '')}</div>")
+            + "</li>" for c in bids["changes"])
+        bid_html = (
+            "<h2>Your bids</h2>"
+            + (f"<table><tr><th>What</th><th>Date</th><th>When</th></tr>{a_rows}</table>" if a_rows else "")
+            + (f"<div class=w><b>Changes on tenders you are bidding for</b><ul style='margin:6px 0 0 18px'>{c_rows}</ul>Check the portal and your bid before the closing date.</div>" if c_rows else "")
+        )
+
     html = (
         f"<html><head><meta charset='utf-8'>{STYLE}</head><body><div class=c>"
+        "<div class=o style='font-weight:600'>TendAI by QMSofts</div>"
         f"<h1>{escape(prefix)}</h1>"
         f"<div class=o>{now.strftime('%A, %d %B %Y')}</div>"
         f"{notes}"
-        f"{section('New since the last digest', new, 'No new civil tenders.', max_new_per_portal)}"
+        + (f"<div class=i><b>Today's highlights</b><br>{escape(intro)}</div>" if intro else "")
+        + f"{bid_html}{section('New since the last digest', new, 'No new civil tenders.', max_new_per_portal)}"
         f"{section('Closing in the next few days', soon, 'Nothing else closes soon.', max_soon_per_portal)}"
         "<p class=o style='margin-top:28px'>Read from the public tender lists of the portals named above. "
         "Always confirm details, eligibility and dates on the portal itself before bidding. "
-        "Tender links on these portals expire after a few minutes, so search by Tender ID.</p></div></body></html>"
+        "Tender links on these portals expire after a few minutes, so search by Tender ID.<br>Sent by TendAI by QMSofts.</p></div></body></html>"
     )
 
-    text_lines = [f"{prefix} - {now.strftime('%d %b %Y')}", ""]
+    text_lines = ["TendAI by QMSofts", f"{prefix} - {now.strftime('%d %b %Y')}", ""]
+    if intro:
+        text_lines += ["TODAY'S HIGHLIGHTS", intro, ""]
+    if bids["alerts"] or bids["changes"]:
+        text_lines.append("YOUR BIDS")
+        text_lines += [f"- {a['label']}: {a['date'][:10]}" + (f" ({a['title'][:60]})" if a["title"] else "") for a in bids["alerts"]]
+        text_lines += [f"- CHANGE ({change_text.get(c['what'], c['what'])}) ID {c['tender_id']}: {c['new'] or ''}" for c in bids["changes"]]
+        text_lines.append("")
     for title, tenders in (("NEW", new), ("CLOSING SOON", soon)):
         text_lines.append(f"{title} ({len(tenders)})")
         for t in sorted(tenders, key=lambda x: (x.portal, x.closing or datetime.max)):
@@ -186,6 +224,8 @@ def build(
         text_lines.append("")
     for r in problems:
         text_lines.append(f"Note: {r.portal.name}: {r.errors[0]}")
+    for r in manual:
+        text_lines.append(f"CHECK BY HAND: {r.portal.name}: {access.describe(r.access)['label']}")
     names = {k: r.portal.name for k, r in by_portal.items()}
     csv_rows = [("New", t, names.get(t.portal, t.portal)) for t in sorted(new, key=lambda x: (x.portal, -(x.value or 0)))]
     csv_rows += [("Closing soon", t, names.get(t.portal, t.portal)) for t in sorted(soon, key=lambda x: (x.portal, x.closing or datetime.max))]
