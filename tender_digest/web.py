@@ -27,7 +27,7 @@ from . import access, ai, appsettings, mailer
 from .boq.match import ClaudeVerifier
 from .boq.service import BoqError, BoqService
 from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
-from .gepnic import PortalError, parse_date, pick_nit
+from .gepnic import PortalError, Tender, parse_date, pick_nit
 from .config import Portal, Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
@@ -183,6 +183,46 @@ class ViewsBody(BaseModel):
     views: list[ViewItem]
 
 
+class ListingBody(BaseModel):
+    text: str = ""
+    pdf_base64: str = ""
+
+
+class ManualBody(BaseModel):
+    """A tender the app could not collect, typed or read in from its notice."""
+    tender_id: str = ""
+    title: str = ""
+    description: str = ""
+    reference: str = ""
+    organisation: str = ""
+    location: str = ""
+    value: float | None = None
+    emd: float | None = None
+    published: str = ""
+    closing: str = ""
+    opening: str = ""
+    portal_name: str = ""
+    text: str = ""
+    pdf_base64: str = ""
+    read_document: bool = True
+
+
+class ManualEdit(BaseModel):
+    tender_id: str | None = None
+    title: str | None = None
+    description: str | None = None
+    reference: str | None = None
+    organisation: str | None = None
+    location: str | None = None
+    value: float | None = None
+    emd: float | None = None
+    published: str | None = None
+    closing: str | None = None
+    opening: str | None = None
+    clear_value: bool = False
+    clear_emd: bool = False
+
+
 class BidCreate(BaseModel):
     key: str
 
@@ -263,6 +303,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                          (portal_search, lambda p: p.base_url.rstrip("/") + "/app?page=FrontEndAdvancedSearch&service=page")):
             d.clear()
             d.update({p.key: value(p) for p in ps})
+        portal_names["manual"], portal_states["manual"] = "Added by hand", "Added by hand"
 
     refresh_portals()
 
@@ -461,6 +502,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             row[field] = json.loads(row[field]) if row.get(field) else None
         row["related"] = store.related(key)
         row["bid_id"] = bids.id_for_key(key)
+        row["manual"] = row["portal"] == "manual"
+        row["has_source"] = bids.has_source(key)
         row["history"] = bids.history_notes(row.get("work_type"), row.get("organisation"), row.get("value"))
         return shape(row)
 
@@ -474,6 +517,16 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def profile() -> str:
         return str(store.get_settings().get("company_profile", "") or "")
+
+    def keep_source(key: str, text: str, pdf_base64: str) -> None:
+        """Keeps the notice just read, so risk and BOQ steps can reuse it. Never fails the request it rides on."""
+        try:
+            if pdf_base64:
+                bids.save_source(key, base64.b64decode(pdf_base64, validate=True))
+            elif text.strip():
+                bids.save_source(key, text[: ai.MAX_TEXT])
+        except (ValueError, OSError):
+            log.warning("could not keep the notice for %s", key)
 
     def tender_for_ai(key: str) -> dict:
         row = store.get_tender(key)
@@ -495,7 +548,118 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         row = tender_for_ai(body.key)
         doc = ai_call(ai.read_document, row, body.text, body.pdf_base64)
         store.set_ai_text(body.key, "doc", json.dumps(doc))
+        keep_source(body.key, body.text, body.pdf_base64)
         return {"doc": doc}
+
+    # ---- a tender the app could not collect: added by hand from its notice ----------------------------------------
+
+    def when_or_422(v: str | None, label: str) -> datetime | None:
+        v = (v or "").strip()
+        if not v:
+            return None
+        try:
+            d = datetime.fromisoformat(v)
+        except ValueError:
+            raise HTTPException(422, f"{label} should look like 2026-12-02 15:00") from None
+        if not 2000 <= d.year <= 2100:
+            raise HTTPException(422, f"{label} is not a believable date")
+        return d.replace(tzinfo=None)
+
+    def clean_money(v: float | None, label: str) -> float | None:
+        if v is None:
+            return None
+        if not 0 < v < 1e13:
+            raise HTTPException(422, f"{label} must be a positive amount in rupees")
+        return float(v)
+
+    @app.post("/api/tenders/manual/read", dependencies=auth)
+    def manual_read(body: ListingBody) -> dict:
+        """Reads the listing details out of a notice, for the person to check and correct. Saves nothing."""
+        return {"listing": ai_call(ai.read_listing, body.text, body.pdf_base64)}
+
+    @app.get("/api/tenders/manual/check", dependencies=auth)
+    def manual_check(tender_id: str = Query(..., max_length=80)) -> dict:
+        """Is this Tender ID already held, from a portal or added earlier?"""
+        found = store.find_by_tender_id(tender_id.strip())
+        return {"existing": [{"key": f["key"], "portal_name": portal_names.get(f["portal"], f["portal"]), "organisation": f["organisation"], "manual": f["portal"] == "manual"} for f in found]}
+
+    @app.post("/api/tenders/manual", dependencies=auth)
+    def manual_create(body: ManualBody) -> dict:
+        tid = body.tender_id.strip()[:80]
+        if not tid:
+            raise HTTPException(422, "The Tender ID is needed: it is how you find the tender on its portal")
+        if not (body.title.strip() or body.description.strip()):
+            raise HTTPException(422, "Give the work a name or description")
+        closing = when_or_422(body.closing, "The closing date")
+        if closing is None:
+            raise HTTPException(422, "The closing date is needed, so deadlines and reminders work")
+        if store.find_by_tender_id(tid):
+            raise HTTPException(409, "A tender with this ID is already in the app. Open it from the Tenders page instead of adding it again")
+        desc = body.description.strip()[:500]
+        t = Tender(portal="manual", tender_id=tid, title=(body.title.strip() or desc)[:160], reference=body.reference.strip()[:120], organisation=body.organisation.strip()[:300],
+                   published=when_or_422(body.published, "The publish date"), closing=closing, opening=when_or_422(body.opening, "The opening date"),
+                   description=desc or body.title.strip()[:500], category="", value=clean_money(body.value, "The value"), location=body.location.strip()[:120],
+                   emd=clean_money(body.emd, "The EMD"), extra={"portal_name": body.portal_name.strip()[:80]})
+        store.keep(t, now())
+        store.mark_emailed([t.key])  # you added it yourself: it does not belong in "new since the last digest"
+        keep_source(t.key, body.text, body.pdf_base64)
+        out: dict[str, Any] = {"key": t.key, "doc_read": False, "doc_error": "", "source_kept": bids.has_source(t.key)}
+        if body.read_document and (body.text.strip() or body.pdf_base64):
+            if not ai.configured():
+                out["doc_error"] = "The AI assistant is off, so the notice was saved but not read."
+            else:
+                try:
+                    doc = ai.read_document(tender_for_ai(t.key), body.text, body.pdf_base64)
+                    store.set_ai_text(t.key, "doc", json.dumps(doc))
+                    out["doc_read"] = True
+                except ai.AIError as e:
+                    out["doc_error"] = str(e)
+        return out
+
+    def manual_or_404(key: str) -> Tender:
+        t = store.tender_object(key)
+        if not t or t.portal != "manual":
+            raise HTTPException(404, "That tender was not added by hand")
+        return t
+
+    @app.patch("/api/tenders/manual", dependencies=auth)
+    def manual_edit(body: ManualEdit, key: str = Query(..., max_length=300)) -> dict:
+        t = manual_or_404(key)
+        changed: dict[str, Any] = {}
+        for f in ("title", "description", "reference", "organisation", "location"):
+            v = getattr(body, f)
+            if v is not None:
+                setattr(t, f, v.strip()[:500 if f == "description" else 300])
+                changed[f] = getattr(t, f)
+        for f, label in (("published", "The publish date"), ("closing", "The closing date"), ("opening", "The opening date")):
+            v = getattr(body, f)
+            if v is not None:
+                d = when_or_422(v, label)
+                if f == "closing" and d is None:
+                    raise HTTPException(422, "The closing date cannot be empty")
+                setattr(t, f, d)
+                changed[f] = d.isoformat(timespec="seconds") if d else None
+        for f, label, clear in (("value", "The value", body.clear_value), ("emd", "The EMD", body.clear_emd)):
+            if clear:
+                setattr(t, f, None)
+                changed[f] = None
+            elif getattr(body, f) is not None:
+                setattr(t, f, clean_money(getattr(body, f), label))
+                changed[f] = getattr(t, f)
+        if not (t.title or t.description):
+            raise HTTPException(422, "Give the work a name or description")
+        store.keep(t, now())
+        bids.sync_listing(key, changed)
+        return {"key": key}
+
+    @app.delete("/api/tenders/manual", dependencies=auth)
+    def manual_delete(key: str = Query(..., max_length=300)) -> dict:
+        manual_or_404(key)
+        if bids.id_for_key(key):
+            raise HTTPException(409, "This tender has a bid. Remove the bid first")
+        store.delete_tender(key)
+        bids.delete_source(key)
+        return {"removed": key}
 
     @app.post("/api/tenders/brief", dependencies=auth)
     def tender_brief(body: SummaryBody) -> dict:
@@ -588,6 +752,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             **bid, "portal_name": portal_names.get(bid["portal"] or "", bid["portal"]), "search_url": portal_search.get(bid["portal"] or "", ""),
             "value_text": format_inr(bid["value"]), "items": items, "changes": changes, "unseen": sum(1 for c in changes if not c["seen"]),
             "history": bids.history_notes(bid.get("work_type"), bid.get("organisation"), bid.get("value")),
+            "has_source": bids.has_source(bid["key"]), "manual": bid["portal"] == "manual",
         }
 
     @app.get("/api/bids", dependencies=auth)
@@ -677,6 +842,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     def bid_document(bid_id: int, body: DocBody) -> dict:
         bid = bid_or_404(bid_id)
         doc = ai_call(ai.read_document, bid_as_tender(bid), body.text, body.pdf_base64)
+        keep_source(bid["key"], body.text, body.pdf_base64)
         bids.set_json(bid_id, "doc", doc, now())
         if store.get_tender(bid["key"]):
             store.set_ai_text(bid["key"], "doc", json.dumps(doc))
@@ -688,6 +854,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     def bid_fetch(bid_id: int) -> dict:
         """Looks the tender up again on its portal: the public fee/class/date fields, and the tender notice (NIT) when the portal gives it without a login."""
         bid = bid_or_404(bid_id)
+        if bid["portal"] == "manual":
+            raise HTTPException(422, "This tender was added by hand, so there is nothing to fetch from a portal. Upload its notice instead.")
         portal = next((p for p in portals_now() if p.key == bid["portal"]), None)
         if not portal:
             raise HTTPException(404, "That portal is no longer in your list")
@@ -818,7 +986,15 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.post("/api/bids/{bid_id}/risks", dependencies=auth)
     def bid_risks_read(bid_id: int, body: RiskBody) -> dict:
         bid = bid_or_404(bid_id)
-        return boq_call(boq.read_risks, bid["key"], bid_as_tender(bid), body.text, body.pdf_base64)
+        text, pdf = body.text, body.pdf_base64
+        if not text.strip() and not pdf:
+            text, pdf = bids.load_source(bid["key"])  # the notice kept when the tender was added or its document read
+            if not text and not pdf:
+                raise HTTPException(422, "No notice is saved for this tender yet. Upload it or paste its text.")
+        out = boq_call(boq.read_risks, bid["key"], bid_as_tender(bid), text, pdf)
+        if body.text.strip() or body.pdf_base64:
+            keep_source(bid["key"], body.text, body.pdf_base64)
+        return out
 
     @app.post("/api/bids/{bid_id}/risks/simulate", dependencies=auth)
     def bid_risks_simulate(bid_id: int, body: SimBody) -> dict:
