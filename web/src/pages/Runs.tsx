@@ -73,7 +73,7 @@ export function RunsPage({ config }: { config: AppConfig }) {
                 <tr key={r.id} className="click" onClick={() => setWatching(r.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') setWatching(r.id); }}>
                   <td>{fmtDate(r.started, true)}</td>
                   <td>{r.trigger === 'scheduled' ? 'Daily' : 'Manual'}</td>
-                  <td><StatusBadge run={r} /></td>
+                  <td><StatusBadge run={r} />{r.status === 'failed' && r.error && <div className="muted small" title={r.error}>{r.error.slice(0, 80)}</div>}</td>
                   <td className="num">{r.new_civil}</td>
                   <td className="num">{r.send_email ? r.emailed_count : '-'}</td>
                   <td className="num">{duration(r.started, r.finished)}</td>
