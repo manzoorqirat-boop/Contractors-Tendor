@@ -88,6 +88,8 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden'; // the page behind does not scroll while the panel is open
     ref.current?.focus();
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onClose(); return; }
@@ -100,7 +102,7 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', key);
-    return () => { document.removeEventListener('keydown', key); prev?.focus?.(); };
+    return () => { document.removeEventListener('keydown', key); document.body.style.overflow = overflow; prev?.focus?.(); };
   }, [onClose]);
   return (
     <div className="drawer-wrap">
