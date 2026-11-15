@@ -323,3 +323,6 @@ main:focus { outline: none; }
 .ws-tabs button { flex: 0 0 auto; background: none; border: 0; border-bottom: 3px solid transparent; color: var(--muted); padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .ws-tabs button:hover { color: inherit; }
 .ws-tabs button.on { color: inherit; border-bottom-color: var(--accent); }
+
+/* ---- top bar: set-up links ---------------------------------------------------------------------------------------- */
+.topbar .link-btn[aria-current="page"] { font-weight: 700; color: inherit; text-decoration: underline; text-underline-offset: 4px; }
