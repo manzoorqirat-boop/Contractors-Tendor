@@ -298,3 +298,14 @@ main:focus { outline: none; }
 .draft-box { width: 100%; min-height: 280px; margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: 13px/1.55 ui-monospace, Menlo, Consolas, monospace; }
 .fact-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
 @media (max-width: 640px) { .check-tools { max-width: none; } .checklist li { flex-direction: column; } .fact-row { grid-template-columns: 1fr auto; } .fact-row input:nth-child(2) { grid-column: 1; } }
+
+/* ---- UI improvements: toasts, next-step banner, phone navigation ------------------------------------------------ */
+.toast { display: flex; align-items: flex-start; gap: 10px; }
+.toast-x { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 2px; font: inherit; opacity: .8; }
+.toast-x:hover { opacity: 1; }
+.next-step { border-left: 4px solid var(--accent); background: var(--accent-soft); margin-bottom: 14px; }
+@media (max-width: 640px) {
+  .nav { overflow-x: auto; flex-wrap: nowrap; justify-content: flex-start; scrollbar-width: none; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav button { flex: 0 0 auto; padding: 8px 12px; white-space: nowrap; }
+}
