@@ -673,6 +673,13 @@ class SeenStore:
             r = self.db.execute("SELECT * FROM runs WHERE status = 'running' ORDER BY id DESC LIMIT 1").fetchone()
         return self._run(r) if r else None
 
+    def scheduled_runs_on(self, day_iso: str) -> list[dict]:
+        """The daily runs that started on this local day (YYYY-MM-DD), oldest first, so the scheduler can retry a failed one."""
+        with self.lock:
+            rows = self.db.execute("SELECT id, status, started, finished, error FROM runs WHERE trigger = 'scheduled' AND substr(started, 1, 10) = ? ORDER BY id",
+                                   (day_iso,)).fetchall()
+        return [dict(r) for r in rows]
+
     def last_run_started(self, trigger: str) -> datetime | None:
         with self.lock:
             r = self.db.execute("SELECT started FROM runs WHERE trigger = ? ORDER BY id DESC LIMIT 1", (trigger,)).fetchone()
