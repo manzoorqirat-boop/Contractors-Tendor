@@ -316,3 +316,10 @@ main:focus { outline: none; }
 .jump button { flex: 0 0 auto; border: 1px solid var(--border, #d0d5dd); background: var(--surface); color: inherit; border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
 .jump button:hover { border-color: var(--accent); }
 [id^="sec-"] { scroll-margin-top: 56px; }
+
+/* ---- bid page: tabs ---------------------------------------------------------------------------------------------- */
+.ws-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border, #d0d5dd); margin-bottom: 14px; scrollbar-width: none; }
+.ws-tabs::-webkit-scrollbar { display: none; }
+.ws-tabs button { flex: 0 0 auto; background: none; border: 0; border-bottom: 3px solid transparent; color: var(--muted); padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ws-tabs button:hover { color: inherit; }
+.ws-tabs button.on { color: inherit; border-bottom-color: var(--accent); }
