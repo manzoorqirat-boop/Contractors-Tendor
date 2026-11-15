@@ -103,7 +103,7 @@ class BoqService:
             except RuntimeError as e:
                 raise BoqError(str(e)) from None
             except Exception:
-                raise BoqError("That file could not be read as a BOQ. Check that it is a valid .xlsx or .csv file.") from None
+                raise BoqError("That file could not be read as a BOQ. Check that it is a valid .xlsx, .xlsm, .xls or .csv file.") from None
         if not doc.lines:
             raise BoqError(doc.warnings[0] if doc.warnings else "No items were found in that file.")
         inner = self._verifier_factory() if self._verifier_factory else None
