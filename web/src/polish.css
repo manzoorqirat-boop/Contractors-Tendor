@@ -68,7 +68,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
 .tbl th { position: sticky; top: 0; background: var(--surface); padding: 10px 10px; font-weight: 600; z-index: 1; }
 .tbl td { padding: 12px 10px; }
 .tbl tr.click:hover td { background: var(--surface-2); }
-.empty { padding: 48px 16px; border: 1px dashed var(--border); border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.empty { padding: 36px 16px; }
 
 /* ---- overlays and feedback ---- */
 .drawer { box-shadow: -16px 0 48px rgba(16, 24, 40, .22); animation: slide-in .22s var(--ease); }
@@ -109,15 +109,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
 .kpi.tone-warn { background: linear-gradient(180deg, var(--warn-soft), var(--surface) 70%); border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
 .kpi.tone-good .num, .kpi .note.good { color: var(--ok); }
 .card-head { align-items: flex-start; margin-bottom: 6px; }
-.card-head .link-btn { color: var(--accent); font-weight: 550; white-space: nowrap; opacity: .85; }
-.card-head .link-btn:hover { opacity: 1; background: var(--accent-soft); }
+.dash-grid .card-head .link-btn { color: var(--accent); font-weight: 550; white-space: nowrap; opacity: .85; }
+.dash-grid .card-head .link-btn:hover { opacity: 1; background: var(--accent-soft); }
 .cols-2 { gap: 16px; margin-bottom: 16px; }
 .empty-ico { width: 40px; height: 40px; fill: var(--muted); opacity: .5; margin-bottom: 10px; }
 
 /* ---- tenders list ---- */
 .list-tools { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -18px -20px 6px; padding: 12px 20px; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); border-radius: var(--r-lg) var(--r-lg) 0 0; }
-.field-inline { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-weight: 550; }
-.field-inline select { width: auto; padding: 5px 28px 5px 10px; }
+.field-inline { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-weight: 550; }
+.list-tools .field-inline { display: inline-flex; align-items: center; gap: 8px; }
+.list-tools .field-inline select { width: auto; padding: 5px 28px 5px 10px; }
 .tender { padding-left: 20px; }
 .tender::after { content: ''; position: absolute; left: 4px; top: 16px; bottom: 16px; width: 3px; border-radius: 3px; background: transparent; }
 .tender.urg-urgent::after { background: var(--bad); } .tender.urg-soon::after { background: var(--warn); } .tender.urg-ok::after { background: var(--ok); opacity: .6; }
@@ -133,13 +134,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
 @media (max-width: 860px) { .list-tools { margin: -18px -16px 6px; padding: 10px 16px; } .tender .side { text-align: left; } }
 
 /* ---- bids pipeline ---- */
-.chips-row { gap: 4px; padding: 4px; margin-bottom: 16px; background: var(--surface-2); border-radius: var(--r-md); overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
-.chips-row::-webkit-scrollbar { display: none; }
-.chip.pick { display: inline-flex; align-items: center; gap: 8px; flex: none; border: 0; border-radius: 7px; background: transparent; padding: 6px 12px; font-weight: 550; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
-.chip.pick:hover { color: var(--text); }
-.chip.pick.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.chips-row[aria-label='Show'] { gap: 4px; padding: 4px; margin-bottom: 16px; background: var(--surface-2); border-radius: var(--r-md); overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+.chips-row[aria-label='Show']::-webkit-scrollbar { display: none; }
+.chips-row[aria-label='Show'] .chip.pick { display: inline-flex; align-items: center; gap: 8px; flex: none; border: 0; border-radius: 7px; background: transparent; padding: 6px 12px; font-weight: 550; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
+.chips-row[aria-label='Show'] .chip.pick:hover { color: var(--text); }
+.chips-row[aria-label='Show'] .chip.pick.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .chip-n { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--border); color: var(--muted); font-size: 11.5px; font-weight: 650; text-align: center; font-variant-numeric: tabular-nums; }
-.chip.pick.on .chip-n { background: var(--accent); color: var(--accent-text); }
+.chips-row[aria-label='Show'] .chip.pick.on .chip-n { background: var(--accent); color: var(--accent-text); }
 .bid-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 14px; }
 .bidcard { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 18px 16px 22px; transition: border-color .15s, box-shadow .2s var(--ease), transform .2s var(--ease); }
 .bidcard:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
@@ -148,7 +149,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
 .bidcard .chips { margin-top: 10px; }
 .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .progress { flex: 1; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
-.progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .4s var(--ease); }
+.progress > span { display: block; height: 100%; border-radius: inherit; background: var(--ok); transition: width .4s var(--ease); }
 .stage-select { border-radius: 999px; padding: 4px 10px; font-weight: 600; background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .nextup { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 2px; }
 .nextup li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; margin: 0 -10px; border-radius: var(--r-sm); transition: background .15s; }
@@ -200,3 +201,10 @@ details > summary { cursor: pointer; padding: 6px 0; font-weight: 550; } details
 .legend button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 5px 8px; border-radius: 6px; cursor: pointer; text-align: left; }
 .legend button:hover { background: var(--surface-2); }
 .legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; } .legend-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- form grids: fields stay stacked and never overlap ---- */
+.ws-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px 16px; align-items: end; }
+.ws-grid > * { min-width: 0; }
+.field-inline > input, .field-inline > select { font-weight: 400; color: var(--text); font-size: 14px; }
+input[type='date'], input[type='datetime-local'] { min-width: 0; font-variant-numeric: tabular-nums; }
+.field-inline .static { padding: 8px 0; }
