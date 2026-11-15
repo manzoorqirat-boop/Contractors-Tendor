@@ -32,7 +32,6 @@ export function BoqCard({ bidId }: { bidId: number }) {
   const reloadAll = () => { view.reload(); other.reload(); };
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showCat, setShowCat] = useState(false);
   const [picking, setPicking] = useState<number | null>(null);
   const [filter, setFilter] = useState<'all' | 'check' | 'none'>('all');
 
@@ -74,13 +73,12 @@ export function BoqCard({ bidId }: { bidId: number }) {
           <p className="sub">Upload the tender's BOQ (.xlsx or .csv). Each line is matched to your item catalogue; confirm the matches and the cost is worked out from your own rates.</p>
         </div>
         <div className="head-actions">
-          <button className="btn small" onClick={() => setShowCat((v) => !v)} aria-expanded={showCat}>Item catalogue{d ? ` (${d.catalogue.item_master ?? 0})` : ''}</button>
+          <a className="btn small" href="#/vault">Item catalogue{d ? ` (${d.catalogue.item_master ?? 0})` : ''} in Vault</a>
         </div>
       </div>
 
       {view.error && <div className="alert bad">{view.error}</div>}
-      {noCatalogue && <div className="alert warn">Your item catalogue is empty, so nothing can be matched yet. Open <strong>Item catalogue</strong> and load your item list first.</div>}
-      {(showCat || noCatalogue) && <CataloguePanel onDone={() => { view.reload(); items.reload(); }} />}
+      {noCatalogue && <div className="alert warn">Your item catalogue is empty, so nothing can be matched yet. Load your item list once in the <a href="#/vault">Vault</a>, then come back here.</div>}
 
       <div className="ai-doc">
         <label className="field" style={{ margin: 0 }}>BOQ file (.xlsx or .csv, up to 10 MB)
@@ -182,7 +180,7 @@ function MatchCell({ line, items, picking, onPick, onCancel, onChoose }: {
   );
 }
 
-function CataloguePanel({ onDone }: { onDone: () => void }) {
+export function CataloguePanel({ onDone }: { onDone: () => void }) {
   const toast = useToast();
   const [kind, setKind] = useState('items');
   const [text, setText] = useState('');
