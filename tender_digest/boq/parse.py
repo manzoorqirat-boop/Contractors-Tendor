@@ -139,20 +139,56 @@ def read_csv(path: str | Path) -> list[list[str]]:
         return [row for row in csv.reader(f)]
 
 
+def _best_sheet(sheets: list[list[list[Any]]]) -> list[list[Any]]:
+    """The first sheet that holds a BOQ table; falls back to the first sheet."""
+    for rows in sheets:
+        if _find_header(rows):
+            return rows
+    return sheets[0] if sheets else []
+
+
 def read_xlsx(path: str | Path) -> list[list[Any]]:
-    """First sheet that holds a BOQ table; falls back to the first sheet. Needs openpyxl (not a hard dependency of the app)."""
+    """.xlsx and macro-enabled .xlsm. Needs openpyxl. The file is opened as a stream so a wrong extension does not matter."""
     try:
         import openpyxl
     except ImportError:
         raise RuntimeError("Reading Excel BOQs needs the openpyxl package. Install it with: pip install openpyxl") from None
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-    first = None
-    for ws in wb.worksheets:
-        rows = [list(r) for r in ws.iter_rows(values_only=True)]
-        first = first if first is not None else rows
-        if _find_header(rows):
-            return rows
-    return first or []
+    with open(path, "rb") as f:
+        wb = openpyxl.load_workbook(f, data_only=True, read_only=True)
+        return _best_sheet([[list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets])
+
+
+def read_xls(path: str | Path) -> list[list[Any]]:
+    """The old binary .xls format. Needs xlrd 2.x."""
+    try:
+        import xlrd
+    except ImportError:
+        raise RuntimeError("Reading old .xls BOQs needs the xlrd package. Install it with: pip install xlrd") from None
+    wb = xlrd.open_workbook(file_contents=Path(path).read_bytes())
+    sheets = [[[sh.cell_value(i, j) for j in range(sh.ncols)] for i in range(sh.nrows)] for sh in wb.sheets()]
+    return _best_sheet(sheets)
+
+
+def read_markup(path: str | Path) -> list[list[Any]]:
+    """Many portals save an HTML table, or Excel 2003 XML, under an .xls name. Both open in Excel, so both are accepted here."""
+    from bs4 import BeautifulSoup
+    raw = Path(path).read_bytes()
+    text = raw.decode("utf-8-sig", errors="replace")
+    if "<Workbook" in text[:2000] or "urn:schemas-microsoft-com:office:spreadsheet" in text[:2000]:
+        soup = BeautifulSoup(text, "xml")
+        return _best_sheet([[[(c.find("Data").get_text(strip=True) if c.find("Data") else "") for c in tr.find_all("Cell")] for tr in ws.find_all("Row")] for ws in soup.find_all("Worksheet")])
+    soup = BeautifulSoup(text, "lxml")
+    return _best_sheet([[[c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])] for tr in t.find_all("tr")] for t in soup.find_all("table")])
+
+
+def _kind(path: Path) -> str:
+    """What the file really is, whatever it is called: a renamed .xlsx is common."""
+    head = path.read_bytes()[:8]
+    if head[:4] == b"PK\x03\x04":
+        return "xlsx"
+    if head == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "xls"
+    return "text"
 
 
 def parse_file(path: str | Path) -> BoqDocument:
@@ -160,8 +196,14 @@ def parse_file(path: str | Path) -> BoqDocument:
     ext = p.suffix.lower()
     if ext in (".csv", ".txt"):
         return parse_rows(read_csv(p))
-    if ext in (".xlsx", ".xlsm"):
-        return parse_rows(read_xlsx(p))
-    if ext == ".xls":
-        raise RuntimeError("Old .xls files are not read. Open the file in Excel, save it as .xlsx, and try again.")
-    raise RuntimeError(f"Cannot read a BOQ from a {ext or 'file without an extension'}. Use .xlsx or .csv.")
+    if ext in (".xlsx", ".xlsm", ".xls"):
+        kind = _kind(p)
+        if kind == "xlsx":
+            return parse_rows(read_xlsx(p))
+        if kind == "xls":
+            return parse_rows(read_xls(p))
+        head = p.read_bytes()[:2000].lstrip().lower()
+        if head.startswith(b"<"):
+            return parse_rows(read_markup(p))
+        return parse_rows(read_csv(p))  # a tab or comma text file saved under an Excel name
+    raise RuntimeError(f"Cannot read a BOQ from a {ext or 'file without an extension'}. Use .xlsx, .xlsm, .xls or .csv.")
