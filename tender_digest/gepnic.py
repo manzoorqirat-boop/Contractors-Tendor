@@ -182,6 +182,22 @@ def pick_nit(links: list[dict[str, str]]) -> dict[str, str] | None:
     return named or next((x for x in links if boq_score(x) == 0), None)
 
 
+def apply_detail(tender: Tender, pairs: dict[str, str]) -> None:
+    def pick(*labels: str) -> str:
+        for label in labels:
+            for key, value in pairs.items():
+                if key.lower().startswith(label.lower()) and value and value.upper() != "NA":
+                    return value
+        return ""
+
+    tender.description = pick("Work Description") or pick("Title")
+    tender.category = pick("Product Category")
+    tender.sub_category = pick("Sub category")
+    tender.location = pick("Location")
+    tender.value = parse_money(pick("Tender Value"))
+    tender.emd = parse_money(pick("EMD Amount"))
+
+
 class PortalError(RuntimeError):
     """A portal could not be read. `kind` says why, so the page can tell a captcha or login wall from an outage.
 
