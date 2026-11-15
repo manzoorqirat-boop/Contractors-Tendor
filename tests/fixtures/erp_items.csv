@@ -1,0 +1,17 @@
+erp_item_code,item_name,detailed_specification,category,primary_uom,standard_base_rate,sor_code,is_composite,hsn_sac_code,gst_pct
+EXC-01,Excavation in ordinary soil,Roadway excavation in ordinary soil with disposal within 1000 m lead,Earthwork,Cum,121.50,2.8,yes,,18
+EMB-01,Embankment construction,Embankment with approved borrow material compacted to 97% MDD,Earthwork,Cum,188.00,,yes,,18
+SUB-01,Subgrade preparation,Subgrade compacted to 97% MDD 500 mm thick,Earthwork,Cum,139.00,,yes,,18
+GSB-01,Granular sub-base Grading II,Granular sub-base 200 mm thick laid and compacted,Roads,Cum,1410.00,,yes,,18
+WMM-250,Wet mix macadam,Wet mix macadam 250 mm thick laid with paver and compacted,Roads,Cum,1745.00,,yes,,18
+WMM-150,Wet mix macadam,Wet mix macadam 150 mm thick laid with paver and compacted,Roads,Cum,1690.00,,yes,,18
+DBM-50,Dense bituminous macadam Grade II,DBM Grade II 50 mm thick with VG-30 bitumen,Bitumen,Cum,9180.00,,yes,,18
+BC-30,Bituminous concrete Grade II,BC Grade II 30 mm thick with VG-30 bitumen,Bitumen,Cum,10320.00,,yes,,18
+RCC-25,RCC M25,Reinforced cement concrete M25 for foundations,Concrete,Cum,7900.00,,yes,,18
+RCC-30,RCC M30,Reinforced cement concrete M30 in substructure of bridges abutments piers wing walls,Concrete,Cu.m,8720.00,16.4,yes,,18
+RCC-35,RCC M35,Reinforced cement concrete M35 in superstructure deck slab and girders,Concrete,Cu.m,9390.00,,yes,,18
+TMT-500D,TMT steel Fe 500D,TMT bars Fe 500D steel reinforcement,Steel,MT,62000.00,,no,7214,18
+NP4-1200,RCC NP4 pipe 1200 mm dia,Supply and laying of RCC NP4 pipe 1200 mm dia in cross drainage,Drainage,Rmt,7790.00,,yes,,18
+MBCB-01,Metal beam crash barrier,W-type metal beam crash barrier with posts and end terminals,Road furniture,RM,2480.00,,yes,,18
+SIGN-01,Retro reflective road sign,Retro-reflective sign Class C sheeting with galvanised post,Road furniture,Nos,5850.00,,yes,,18
+CEM-OPC53,Cement OPC 53,Ordinary Portland cement 53 grade,Cement,Bag,380.00,,no,2523,28
