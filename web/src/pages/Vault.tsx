@@ -18,16 +18,22 @@ export function VaultPage({ config }: { config: AppConfig }) {
   if (error) return <div className="alert bad">{error} <button className="link-btn" onClick={reload}>Try again</button></div>;
   if (loading && !data) return <Skeleton h={160} />;
   if (!data) return null;
+  const expired = data.documents.filter((d) => { const l = daysTo(d.expiry, config.now); return l !== null && l < 0; }).length;
+  const expiring = data.documents.filter((d) => { const l = daysTo(d.expiry, config.now); return l !== null && l >= 0 && l <= 30; }).length;
 
   return (
     <>
       <div className="page-head"><div><h1>Vault</h1><p className="sub">Papers you reuse in every bid, and the facts about your company. Bids match their required documents to these and warn when one expires before closing.</p></div></div>
-      <CompanyProfile />
-      <Facts facts={data.facts} />
+      {(expired > 0 || expiring > 0) && (
+        <div className={`vault-alert ${expired > 0 ? 'bad' : 'warn'}`} role="status">
+          <strong>{expired > 0 ? `${expired} document${expired === 1 ? ' has' : 's have'} expired` : `${expiring} document${expiring === 1 ? ' expires' : 's expire'} within 30 days`}</strong>
+          <span>{expired > 0 && expiring > 0 ? ` and ${expiring} more expire within 30 days. ` : ' '}Renew before you submit, because bids flag papers that expire before closing.</span>
+        </div>
+      )}
       <AddDocument kinds={data.kinds} onAdded={() => { reload(); toast('Added to the vault'); }} />
-      <section className="card">
-        <h2>Documents ({data.documents.length})</h2>
-        {data.documents.length === 0 && <p className="empty">Nothing yet. Add your registration, GST, PAN, balance sheets, past work orders and affidavits.</p>}
+      <section className="card" style={{ marginBottom: 14 }}>
+        <h2>Documents <span className="chip-n">{data.documents.length}</span></h2>
+        {data.documents.length === 0 && <div className="empty"><h2>Your vault is empty</h2><p className="sub">Add your registration, GST, PAN, balance sheets, past work orders and affidavits. Bids will match their required documents to these.</p></div>}
         {data.documents.length > 0 && (
           <div className="scroll-x">
             <table className="tbl">
@@ -39,6 +45,8 @@ export function VaultPage({ config }: { config: AppConfig }) {
           </div>
         )}
       </section>
+      <CompanyProfile />
+      <Facts facts={data.facts} />
       <CatalogueCard />
     </>
   );
@@ -113,7 +121,7 @@ function DocRow({ d, kinds, now, onChange }: { d: VaultDoc; kinds: { key: string
     );
   }
   return (
-    <tr>
+    <tr className={left !== null && left < 0 ? 'row-bad' : left !== null && left <= 30 ? 'row-warn' : ''}>
       <td><strong>{d.name}</strong>{d.notes && <div className="muted small">{d.notes}</div>}{d.filename && <div className="muted small">{d.filename} · {size(d.size)}</div>}</td>
       <td>{label}</td>
       <td>{d.expiry ? <>{fmtDate(d.expiry)} <span className={`badge ${left !== null && left < 0 ? 'bad' : left !== null && left <= 30 ? 'warn' : 'plain'}`}>{left !== null && left < 0 ? 'Expired' : left !== null && left <= 30 ? `${left} day${left === 1 ? '' : 's'} left` : 'Valid'}</span></> : <span className="muted">No expiry</span>}</td>
