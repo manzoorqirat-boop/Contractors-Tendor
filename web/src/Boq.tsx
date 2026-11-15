@@ -26,7 +26,10 @@ export function BoqCard({ bidId }: { bidId: number }) {
   const toast = useToast();
   const [review, setReview] = useState(false);
   const view = useLoad(() => api.bidBoq(bidId, review), [bidId, review]);
+  const other = useLoad(() => api.bidBoq(bidId, !review), [bidId, review]); // the same BOQ priced the other way, for the side-by-side totals
   const items = useLoad(() => api.boqCatalogue(), [bidId]);
+  const [accepting, setAccepting] = useState(false);
+  const reloadAll = () => { view.reload(); other.reload(); };
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [showCat, setShowCat] = useState(false);
@@ -43,16 +46,25 @@ export function BoqCard({ bidId }: { bidId: number }) {
     try {
       const r = await api.uploadBoq(bidId, file.name, await readBase64(file));
       toast(`BOQ read. ${plural(r.boq?.lines.length ?? 0, 'item')} found`);
-      setFile(null); view.reload();
+      setFile(null); reloadAll();
     } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
   }
   async function choose(line: BoqLine, code: string | null) {
     setPicking(null);
-    try { await api.confirmBoqLine(bidId, line.line_no, code); view.reload(); } catch (e) { toast((e as Error).message, 'bad'); }
+    try { await api.confirmBoqLine(bidId, line.line_no, code); reloadAll(); } catch (e) { toast((e as Error).message, 'bad'); }
   }
 
   const lines = (boq?.lines ?? []).filter((l) => filter === 'all' || (filter === 'check' ? l.status === 'NEEDS_REVIEW' : l.status === 'NEW_NON_SOR_ITEM'));
   const pr = d?.pricing ?? null;
+  const confirmedPr = review ? other.data?.pricing ?? null : pr;
+  const withCheckPr = review ? pr : other.data?.pricing ?? null;
+  const suggested = (boq?.lines ?? []).filter((l) => l.status === 'NEEDS_REVIEW' && l.item_code);
+  async function acceptAll() {
+    if (!window.confirm(`Confirm the suggested match on ${plural(suggested.length, 'line')}? You can still change any of them afterwards.`)) return;
+    setAccepting(true);
+    try { for (const l of suggested) await api.confirmBoqLine(bidId, l.line_no, l.item_code); toast(`Confirmed ${plural(suggested.length, 'line')}`); }
+    catch (e) { toast((e as Error).message, 'bad'); } finally { setAccepting(false); reloadAll(); }
+  }
 
   return (
     <section className="card" style={{ marginBottom: 14 }}>
@@ -92,11 +104,13 @@ export function BoqCard({ bidId }: { bidId: number }) {
           <dl className="facts">
             <dt>Buyer's estimate</dt><dd>{inr(pr.estimate_total, false)}</dd>
             <dt>Priced from your catalogue</dt><dd>{pr.priced_lines} of {pr.total_lines} lines, {pr.coverage_pct.toFixed(0)}% of the value</dd>
-            <dt>Your cost for the whole BOQ</dt><dd>{inr(pr.projected_cost, false)} <span className="muted small">({pr.break_even_pct === null ? '-' : pct(pr.break_even_pct)} against the estimate)</span></dd>
+            <dt>Your cost, confirmed lines only</dt><dd>{confirmedPr ? <>{inr(confirmedPr.projected_cost, false)} <span className="muted small">({confirmedPr.break_even_pct === null ? '-' : pct(confirmedPr.break_even_pct)} against the estimate)</span></> : '-'}</dd>
+            <dt>If lines marked Check are right</dt><dd>{withCheckPr ? <>{inr(withCheckPr.projected_cost, false)} <span className="muted small">({withCheckPr.break_even_pct === null ? '-' : pct(withCheckPr.break_even_pct)}). A guess until you confirm them.</span></> : '-'}</dd>
           </dl>
           <p className="muted small">{pr.assumption} Material-only rates and lump sums are never counted as a full cost.</p>
           <div className="head-actions" style={{ margin: '8px 0' }}>
-            <label className="muted small"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Count lines marked "Check" in the cost (a guess until you confirm)</label>
+            {suggested.length > 0 && <button className="btn small primary" onClick={acceptAll} disabled={accepting}>{accepting ? 'Confirming…' : `Confirm all ${suggested.length} suggested matches`}</button>}
+            <label className="muted small"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Show lines marked "Check" with a cost in the table</label>
             <select value={filter} onChange={(e) => setFilter(e.target.value as 'all' | 'check' | 'none')} aria-label="Show lines">
               <option value="all">All lines</option><option value="check">Lines to check</option><option value="none">Not in catalogue</option>
             </select>
