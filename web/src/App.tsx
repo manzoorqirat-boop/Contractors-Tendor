@@ -113,6 +113,8 @@ function Main({ onLogout }: { onLogout: () => void }) {
     return () => window.removeEventListener('open-bid', open);
   }, []);
   const alerts = useLoad(() => api.bidAlerts(), [tab, bidId]);
+  // The browser tab and history entries name the page.
+  useEffect(() => { document.title = `${TABS.find((t) => t.id === tab)?.label ?? 'TendAI'} · TendAI by QMSofts`; }, [tab]);
 
   const nav: Nav = { filters, display, facets: facets.data, setFilters, setDisplay, go };
   const cycleTheme = () => { const next = THEMES[(THEMES.indexOf(theme) + 1) % 3]; setTheme(next); applyTheme(next); try { localStorage.setItem('theme', next); } catch { /* ignore */ } };
