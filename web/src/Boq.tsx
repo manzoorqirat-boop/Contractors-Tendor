@@ -218,7 +218,7 @@ export function CataloguePanel({ onDone }: { onDone: () => void }) {
 
 const PRESENT: Record<string, [string, string]> = { yes: ['warn', 'In this tender'], unclear: ['plain', 'Unclear'], no_mention: ['plain', 'Not mentioned'] };
 
-export function RiskCard({ bidId, aiOn }: { bidId: number; aiOn: boolean }) {
+export function RiskCard({ bidId, aiOn, hasSource = false }: { bidId: number; aiOn: boolean; hasSource?: boolean }) {
   const toast = useToast();
   const risks = useLoad(() => api.bidRisks(bidId), [bidId]);
   const [file, setFile] = useState<File | null>(null);
@@ -259,7 +259,7 @@ export function RiskCard({ bidId, aiOn }: { bidId: number; aiOn: boolean }) {
         <div className="ai-doc">
           <label className="field" style={{ margin: 0 }}>Tender document (PDF, up to 10 MB)<input type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
           <label className="field" style={{ margin: 0 }}>Or paste the text of the NIT and special conditions<textarea value={paste} onChange={(e) => setPaste(e.target.value)} disabled={!!file} spellCheck={false} rows={4} /></label>
-          <div><button className="btn primary" onClick={read} disabled={busy || (!file && !paste.trim())}>{busy ? 'Reading…' : f ? 'Read again' : 'Find the risks'}</button></div>
+          <div><button className="btn primary" onClick={read} disabled={busy || (!file && !paste.trim() && !hasSource)}>{busy ? 'Reading…' : f ? 'Read again' : 'Find the risks'}</button>{hasSource && !file && !paste.trim() && <span className="muted small"> Uses the notice already saved for this tender.</span>}</div>
         </div>
       ) : <p className="muted small">Turn on the AI assistant to read tender documents for risks.</p>}
 
