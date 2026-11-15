@@ -72,8 +72,8 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
           )}
 
           <div className="chips-row" role="group" aria-label="Show">
-            <button type="button" className={`chip pick${view === 'active' ? ' on' : ''}`} onClick={() => setView('active')}>In progress {data ? activeCount : ''}</button>
-            {data?.stages.map((s) => <button key={s.key} type="button" className={`chip pick${view === s.key ? ' on' : ''}`} onClick={() => setView(s.key)}>{s.label} {data.counts[s.key]}</button>)}
+            <button type="button" className={`chip pick${view === 'active' ? ' on' : ''}`} onClick={() => setView('active')}>In progress{data && <span className="chip-n">{activeCount}</span>}</button>
+            {data?.stages.map((s) => <button key={s.key} type="button" className={`chip pick${view === s.key ? ' on' : ''}`} onClick={() => setView(s.key)}>{s.label}<span className="chip-n">{data.counts[s.key]}</span></button>)}
             <button type="button" className={`chip pick${view === 'all' ? ' on' : ''}`} onClick={() => setView('all')}>All</button>
           </div>
 
@@ -87,7 +87,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
               const rel = relative(b.closing, config.now);
               const pct = b.items_total ? Math.round((100 * b.items_done) / b.items_total) : 0;
               return (
-                <article key={b.id} className="card bidcard" onClick={() => onOpen(b.id)}>
+                <article key={b.id} className={`card bidcard urg-${ACTIVE.includes(b.stage) ? rel.tone || 'none' : 'none'}`} onClick={() => onOpen(b.id)}>
                   <div className="bidcard-top">
                     <h3 className="t-title"><button type="button" className="linkish" onClick={(e) => { e.stopPropagation(); onOpen(b.id); }}>{headline(b)}</button></h3>
                     <select className="stage-select" value={b.stage} aria-label="Stage" onClick={(e) => e.stopPropagation()} onChange={(e) => move(b, e.target.value as Stage)}>
