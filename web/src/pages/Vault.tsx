@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { readBase64 } from '../ai';
+import { CataloguePanel } from '../Boq';
 import { fmtDate } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
@@ -21,6 +22,7 @@ export function VaultPage({ config }: { config: AppConfig }) {
   return (
     <>
       <div className="page-head"><div><h1>Vault</h1><p className="sub">Papers you reuse in every bid, and the facts about your company. Bids match their required documents to these and warn when one expires before closing.</p></div></div>
+      <CompanyProfile />
       <Facts facts={data.facts} />
       <AddDocument kinds={data.kinds} onAdded={() => { reload(); toast('Added to the vault'); }} />
       <section className="card">
@@ -37,7 +39,47 @@ export function VaultPage({ config }: { config: AppConfig }) {
           </div>
         )}
       </section>
+      <CatalogueCard />
     </>
+  );
+}
+
+function CompanyProfile() {
+  const toast = useToast();
+  const { data, error } = useLoad(() => api.settings(), []);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (data) setText(data.company_profile || ''); }, [data]);
+  const dirty = !!data && text.trim() !== (data.company_profile || '').trim();
+  async function save() {
+    setBusy(true);
+    try { await api.saveSettings({ company_profile: text }); toast('Company profile saved. Open tenders are re-scored on the next run'); }
+    catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
+  }
+  if (error) return <div className="alert bad">{error}</div>;
+  return (
+    <section className="card" style={{ marginBottom: 14 }}>
+      <h2>About your company</h2>
+      <p className="sub">Used to score how well each tender fits you. Say what work you do, where, the sizes you can take and your registration class.</p>
+      <label className="field"><span className="sr-only">About your company</span>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} disabled={!data} placeholder="Class A civil contractor. Roads and drainage in Pune and Nashik. Projects from 50 lakh to 10 crore. 8 years of PWD work." />
+      </label>
+      <button className="btn primary" onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save profile'}</button>
+    </section>
+  );
+}
+
+function CatalogueCard() {
+  const cat = useLoad(() => api.boqCatalogue(), []);
+  const count = cat.data?.counts?.item_master ?? 0;
+  return (
+    <section className="card" style={{ marginTop: 14 }}>
+      <h2>Item catalogue ({count})</h2>
+      <p className="sub">Your items and rates, loaded once from your ERP. Every bid's BOQ is matched against it. Loading the same code again updates it.</p>
+      <details open={count === 0}><summary className="muted small">{count === 0 ? 'Load your catalogue' : 'Load or update items, rates, schedule of rates, location index'}</summary>
+        <div style={{ marginTop: 10 }}><CataloguePanel onDone={cat.reload} /></div>
+      </details>
+    </section>
   );
 }
 
