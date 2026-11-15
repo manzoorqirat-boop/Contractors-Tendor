@@ -56,7 +56,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
       <div className="page-head">
         <div>
           <h1>Dashboard</h1>
-          <p className="sub">Civil tenders from {config.portals.length} portals. Click any number or bar to open the tenders behind it.</p>
+          <p className="sub">{k ? <>{k.closing_week > 0 ? <><b className="hl-warn">{plural(k.closing_week, 'tender')}</b> close within 7 days</> : 'Nothing closes within 7 days'}{k.new_today > 0 ? <> · <b>{k.new_today}</b> found today</> : ''}. Select any number or bar to see its tenders.</> : `Civil tenders from ${config.portals.length} portals.`}</p>
         </div>
         <div className="head-actions">
           <div className="seg" role="group" aria-label="Chart measure">
@@ -73,7 +73,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
       {stats.error && <div className="alert bad">{stats.error}</div>}
       {empty ? (
         <div className="card empty" style={{ padding: 40 }}>
-          <h2 style={{ marginBottom: 6 }}>No tenders match</h2>
+          <svg className="empty-ico" viewBox="0 0 24 24" aria-hidden><path d="M11 4a7 7 0 105.2 11.7l3.5 3.5 1.4-1.4-3.5-3.5A7 7 0 0011 4zm0 2a5 5 0 110 10 5 5 0 010-10z" /></svg><h2 style={{ marginBottom: 6 }}>No tenders match</h2>
           <p className="sub" style={{ marginBottom: 16 }}>{Object.keys(filters).length && (filters.portal.length || filters.category.length || filters.q) ? 'Try clearing a filter above.' : 'Nothing has been collected yet. Go to Runs and press Run now; the first run takes 20 to 40 minutes.'}</p>
           <button className="btn primary" onClick={() => go('runs')}>Go to Runs</button>
         </div>
@@ -161,7 +161,7 @@ function Kpi({ label, value, note, onClick, tone, loading }: { label: string; va
       <div className={`note${tone === 'good' ? ' good' : ''}`}>{note}</div>
     </>
   );
-  return onClick && !loading ? <button className="card kpi clickable" onClick={onClick}>{body}</button> : <div className="card kpi">{body}</div>;
+  return onClick && !loading ? <button className={`card kpi clickable${tone ? ` tone-${tone}` : ''}`} onClick={onClick}>{body}</button> : <div className={`card kpi${tone ? ` tone-${tone}` : ''}`}>{body}</div>;
 }
 
 function Series({ p, measure, color, horizontal, onOpen }: { p: Pivot; measure: Measure; color: string; horizontal?: boolean; onOpen: (d: Drill | null) => void }) {
