@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from . import access, ai, appsettings, mailer
+from .boq import advisor
 from .boq.match import ClaudeVerifier
 from .boq.service import BoqError, BoqService
 from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
@@ -994,6 +995,35 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         out = boq_call(boq.read_risks, bid["key"], bid_as_tender(bid), text, pdf)
         if body.text.strip() or body.pdf_base64:
             keep_source(bid["key"], body.text, body.pdf_base64)
+        return out
+
+    @app.get("/api/bids/{bid_id}/advice", dependencies=auth)
+    def bid_advice(bid_id: int, min_margin: float = 3.0, target_margin: float = 8.0, include_review: bool = False) -> dict:
+        """Quote advice: your cost range (with risk allowances when they have been read) against how past L1 prices compared with their estimates."""
+        bid = bid_or_404(bid_id)
+        mode, notes = "with_risks", []
+        try:
+            sim = boq.simulate(bid["key"], None, None, None, None, include_review)
+            low, high, est, coverage = sim["cost_low"], sim["cost_high"], sim.get("estimate"), sim["coverage_pct"]
+        except BoqError as e:
+            if "risks" not in str(e).lower():
+                raise HTTPException(422, str(e)) from None
+            pricing = boq.price(bid["key"], include_review, "")
+            if pricing is None:
+                raise HTTPException(422, "Upload the BOQ first: the advisor starts from your costed BOQ.") from None
+            mode, low, high, est, coverage = "boq_only", pricing["projected_cost"], pricing["projected_cost"], pricing["estimate_total"], pricing["coverage_pct"]
+            notes.append("Risk allowances are not included yet. Read the tender document for risks to add them to your cost.")
+        if not est:
+            raise HTTPException(422, "The BOQ has no estimate to compare your quote with.")
+        if coverage < 50:
+            notes.append(f"Only {coverage:.0f}% of the BOQ value is priced from your catalogue; the rest is carried at the buyer's estimate.")
+        outcomes, basis = bids.l1_outcomes(bid.get("work_type"), bid.get("value"))
+        try:
+            out = advisor.advise(low, high, est, outcomes, min_margin, target_margin, basis)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        out.update({"mode": mode, "coverage_pct": coverage, "my_value": bid.get("my_value")})
+        out["notes"] = notes + out["notes"]
         return out
 
     @app.post("/api/bids/{bid_id}/risks/simulate", dependencies=auth)
