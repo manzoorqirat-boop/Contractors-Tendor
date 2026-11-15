@@ -175,12 +175,13 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const ai = useAiStatus();
   const [bid, setBid] = useState<BidDetail | null>(null);
   const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
   const vault = useLoad(() => api.vault(), []);
   const load = () => api.bid(id).then(setBid, (e: Error) => setError(e.message));
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save(patch: Record<string, unknown>) {
-    try { setBid(await api.patchBid(id, patch)); } catch (e) { toast((e as Error).message, 'bad'); }
+    try { setBid(await api.patchBid(id, patch)); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch (e) { toast((e as Error).message, 'bad'); }
   }
   async function remove() {
     if (!window.confirm('Remove this bid and its checklist? The tender itself stays in the list.')) return;
@@ -211,6 +212,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           <p className="sub">{chain(bid.organisation).join(' › ')} · <span className="mono">{bid.tender_id}</span> · {bid.portal_name}</p>
         </div>
         <div className="head-actions">
+          {saved && <span className="muted small" role="status">Saved ✓</span>}
           <button className="btn" onClick={copyId}>Copy Tender ID</button>
           <a className="btn" href={bid.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>
         </div>
@@ -229,6 +231,11 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       )}
 
       <NextStep bid={bid} />
+      <nav className="jump" aria-label="Jump to a section">
+        {([['checklist', 'Checklist'], ['boq', 'BOQ'], ['risk', 'Risk'], ['eligibility', 'Eligibility'], ['brief', 'Brief'], ['drafts', 'Letters'], ['result', 'Result'], ['notes', 'Notes']] as const).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => document.getElementById(`sec-${k}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })}>{l}</button>
+        ))}
+      </nav>
 
       <section className="card" style={{ marginBottom: 14 }}>
         <div className="ws-grid">
@@ -252,15 +259,15 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         {bid.history.length > 0 && <div className="alert warn" style={{ marginTop: 10, marginBottom: 0 }}>{bid.history.map((h) => <div key={h}>{h}</div>)}</div>}
       </section>
 
-      <Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} />
-      <BoqCard bidId={bid.id} />
-      <RiskCard bidId={bid.id} aiOn={!!ai?.configured} />
-      <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
-      {bid.brief && <section className="card" style={{ marginBottom: 14 }}><h2>Bid / no-bid brief</h2><BriefView b={bid.brief} /></section>}
-      <Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
+      <div id="sec-checklist"><Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} /></div>
+      <div id="sec-boq"><BoqCard bidId={bid.id} /></div>
+      <div id="sec-risk"><RiskCard bidId={bid.id} aiOn={!!ai?.configured} /></div>
+      <div id="sec-eligibility"><EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} /></div>
+      {bid.brief && <section id="sec-brief" className="card" style={{ marginBottom: 14 }}><h2>Bid / no-bid brief</h2><BriefView b={bid.brief} /></section>}
+      <div id="sec-drafts"><Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} /></div>
 
       {(['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && (
-        <section className="card" style={{ marginBottom: 14 }}>
+        <section id="sec-result" className="card" style={{ marginBottom: 14 }}>
           <h2>Result</h2>
           <p className="sub">Recording prices and the outcome builds your record, which shows on similar tenders.</p>
           <div className="ws-grid">
@@ -277,7 +284,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         </section>
       )}
 
-      <section className="card" style={{ marginBottom: 14 }}>
+      <section id="sec-notes" className="card" style={{ marginBottom: 14 }}>
         <label className="field">Notes<textarea defaultValue={bid.notes ?? ''} maxLength={4000} placeholder="Site visit, rates, who to call…" onBlur={(e) => e.target.value !== (bid.notes ?? '') && save({ notes: e.target.value })} /></label>
         {bid.changes.length > 0 && (
           <details><summary className="muted small">Change history ({bid.changes.length})</summary>
