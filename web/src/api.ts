@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -95,6 +95,7 @@ export const api = {
   confirmBoqLine: (id: number, line: number, item_code: string | null) => call<BoqView>(`/api/bids/${id}/boq/lines/${line}`, { method: 'POST', body: JSON.stringify({ item_code }) }),
   bidRisks: (id: number) => call<RiskData>(`/api/bids/${id}/risks`),
   readRisks: (id: number, text: string, pdf_base64: string) => call<RiskData>(`/api/bids/${id}/risks`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  advice: (id: number, minMargin: number, targetMargin: number) => call<Advice>(`/api/bids/${id}/advice?min_margin=${minMargin}&target_margin=${targetMargin}`),
   simulate: (id: number, input: SimInput) => call<Simulation>(`/api/bids/${id}/risks/simulate`, { method: 'POST', body: JSON.stringify(input) }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
 };
