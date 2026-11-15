@@ -81,12 +81,13 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
           </dl>
           <div className="d-actions">
             <button className="btn" onClick={copy}>Copy Tender ID</button>
-            <a className="btn" href={t.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>
+            {t.search_url && <a className="btn" href={t.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>}
+            {t.manual && <button className="btn" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('add-tender', { detail: { editKey: t.key } })); }}>Edit details</button>}
             <button className="btn primary" onClick={startBid}>{t.bid_id ? 'Open bid workspace' : 'Start a bid'}</button>
           </div>
           {t.history && t.history.length > 0 && <div className="alert warn" style={{ marginTop: 12 }}>{t.history.map((h) => <div key={h}>{h}</div>)}</div>}
           <AiSections t={t} onChange={(patch) => setT((cur) => (cur ? { ...cur, ...patch } : cur))} />
-          <p className="muted small-note">Portal links expire within minutes, so paste the Tender ID into the portal's search. Confirm every detail on the portal before bidding.</p>
+          <p className="muted small-note">{t.manual ? 'Added by hand from its notice. The app cannot see corrigenda on it, so confirm every detail on the portal before bidding.' : "Portal links expire within minutes, so paste the Tender ID into the portal's search. Confirm every detail on the portal before bidding."}</p>
         </>
       )}
     </Drawer>
