@@ -131,6 +131,12 @@ export interface Simulation {
   risk_low: number; risk_high: number; cost_low: number; cost_high: number; estimate?: number; break_even_pct_low?: number; break_even_pct_high?: number;
   l1_price?: number; margin_at_l1_low?: number; margin_at_l1_high?: number; coverage_pct: number; priced_lines: number; total_lines: number;
 }
+export interface AdvicePoint { pct: number; price: number; margin_worst: number; margin_best: number; margin_pct_worst: number; win: number | null; expected: number | null }
+export interface Advice {
+  mode: 'with_risks' | 'boq_only'; estimate: number; cost_low: number; cost_high: number; floor_pct: number; target_pct: number; recommended_pct: number;
+  samples: number; confidence: 'none' | 'rough' | 'fair' | 'good'; basis: string; points: AdvicePoint[]; notes: string[]; coverage_pct: number;
+  my_value: number | null; min_margin: number; target_margin: number;
+}
 export interface SimInput { l1_price: number | null; quoted_pct: number | null; exposure: Record<string, number>; include_review: boolean }
 
 export interface ManualListing { tender_id: string; reference: string; title: string; description: string; organisation: string; location: string; value: number | null; emd: number | null; published: string; closing: string; opening: string; portal_name: string; form_of_contract: string }
