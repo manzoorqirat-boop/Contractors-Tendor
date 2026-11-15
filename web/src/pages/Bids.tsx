@@ -160,7 +160,7 @@ function DateField({ label, value, time, onSave }: { label: string; value: strin
   const commit = (x: string) => { const out = x ? (time ? `${x}:00` : x) : null; if ((out ?? '') !== (value ?? '') && (out || value)) onSave(out); };
   return (
     <label className="field-inline">{label}
-      <input type={time ? 'datetime-local' : 'date'} value={v} onChange={(e) => { setV(e.target.value); if (e.target.value) commit(e.target.value); }} onBlur={() => { if (!v && value) commit(''); }} />
+      <input type={time ? 'datetime-local' : 'date'} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => commit(v)} onKeyDown={(e) => { if (e.key === 'Enter') commit(v); }} />
     </label>
   );
 }
@@ -298,7 +298,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
             <TextField label="Winner" value={bid.l1_bidder ?? ''} max={120} onSave={(v) => save({ l1_bidder: v })} />
           </div>
           {bid.my_value && bid.l1_value ? <p className="muted small" style={{ marginTop: 8 }}>Your price was {Math.abs(((bid.my_value - bid.l1_value) / bid.l1_value) * 100).toFixed(1)}% {bid.my_value >= bid.l1_value ? 'above' : 'below'} the winning price.</p> : null}
-          <label className="field" style={{ marginTop: 10 }}>What happened<textarea defaultValue={bid.result_note ?? ''} maxLength={1000} onBlur={(e) => e.target.value !== (bid.result_note ?? '') && save({ result_note: e.target.value })} /></label>
+          <label className="field" style={{ marginTop: 10 }}>What happened<textarea key={`r-${bid.result_note ?? ''}`} defaultValue={bid.result_note ?? ''} maxLength={1000} onBlur={(e) => e.target.value !== (bid.result_note ?? '') && save({ result_note: e.target.value })} /></label>
           <div className="d-actions">
             {bid.stage !== 'won' && <button className="btn" onClick={() => save({ stage: 'won' })}>Mark won</button>}
             {bid.stage !== 'lost' && <button className="btn" onClick={() => save({ stage: 'lost' })}>Mark lost</button>}
@@ -307,7 +307,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       )}
 
       {tab === 'result' && <section id="sec-notes" className="card" style={{ marginBottom: 14 }}>
-        <label className="field">Notes<textarea defaultValue={bid.notes ?? ''} maxLength={4000} placeholder="Site visit, rates, who to call…" onBlur={(e) => e.target.value !== (bid.notes ?? '') && save({ notes: e.target.value })} /></label>
+        <label className="field">Notes<textarea key={`n-${bid.notes ?? ''}`} defaultValue={bid.notes ?? ''} maxLength={4000} placeholder="Site visit, rates, who to call…" onBlur={(e) => e.target.value !== (bid.notes ?? '') && save({ notes: e.target.value })} /></label>
         {bid.changes.length > 0 && (
           <details><summary className="muted small">Change history ({bid.changes.length})</summary>
             <ul style={{ margin: '6px 0 0 18px', padding: 0 }} className="small">{bid.changes.map((c) => <li key={c.id}>{fmtDate(c.at, true)} · {CHANGE_TEXT[c.what] ?? c.what}: {c.what === 'closing' || c.what === 'opening' ? `${fmtDate(c.old, true)} → ${fmtDate(c.new, true)}` : c.new}</li>)}</ul>
