@@ -24,6 +24,8 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from . import access, ai, appsettings, mailer
+from .boq.match import ClaudeVerifier
+from .boq.service import BoqError, BoqService
 from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
 from .gepnic import PortalError, parse_date, pick_nit
 from .config import Portal, Settings, load_settings
@@ -206,6 +208,33 @@ class VaultBody(BaseModel):
     file_base64: str = ""
 
 
+class BoqUpload(BaseModel):
+    filename: str = ""
+    file_base64: str = ""
+
+
+class BoqConfirm(BaseModel):
+    item_code: str | None = None
+
+
+class CatalogueBody(BaseModel):
+    kind: str = "items"
+    csv_text: str = ""
+
+
+class RiskBody(BaseModel):
+    text: str = ""
+    pdf_base64: str = ""
+
+
+class SimBody(BaseModel):
+    estimate: float | None = None
+    exposure: dict[str, float] = {}
+    l1_price: float | None = None
+    quoted_pct: float | None = None
+    include_review: bool = False
+
+
 class RunBody(BaseModel):
     portals: list[str] | None = None
     send_email: bool = False
@@ -214,6 +243,7 @@ class RunBody(BaseModel):
 def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None) -> FastAPI:
     vault_dir = default_vault_dir(env.state_path)
     bids = BidBook(store, vault_dir)
+    boq = BoqService.open(env.state_path, lambda: ClaudeVerifier() if ai.configured() else None)
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     scheduler = Scheduler(manager) if config.run_scheduler else None
     limiter = LoginLimiter()
@@ -748,6 +778,52 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return {"kind": body.kind, "text": text, "cached": False}
 
     # ---- vault: reusable company papers and the facts about your company ---------------------------------------------
+
+    # ---- BOQ: catalogue, upload and match, costing, risk -------------------------------------------------------------
+
+    def boq_call(fn, *args, **kwargs):
+        try:
+            return ai_call(lambda: fn(*args, **kwargs))
+        except BoqError as e:
+            raise HTTPException(422, str(e)) from None
+
+    @app.get("/api/boq/catalogue", dependencies=auth)
+    def boq_catalogue() -> dict:
+        return boq.catalogue()
+
+    @app.post("/api/boq/catalogue", dependencies=auth)
+    def boq_catalogue_import(body: CatalogueBody) -> dict:
+        return boq_call(boq.import_catalogue, body.kind, body.csv_text)
+
+    @app.get("/api/bids/{bid_id}/boq", dependencies=auth)
+    def bid_boq(bid_id: int, include_review: bool = False) -> dict:
+        bid = bid_or_404(bid_id)
+        return boq_call(boq.view, bid["key"], include_review)
+
+    @app.post("/api/bids/{bid_id}/boq", dependencies=auth)
+    def bid_boq_upload(bid_id: int, body: BoqUpload) -> dict:
+        bid = bid_or_404(bid_id)
+        return boq_call(boq.analyse, bid["key"], body.filename, body.file_base64)
+
+    @app.post("/api/bids/{bid_id}/boq/lines/{line_no}", dependencies=auth)
+    def bid_boq_confirm(bid_id: int, line_no: int, body: BoqConfirm) -> dict:
+        bid = bid_or_404(bid_id)
+        return boq_call(boq.confirm, bid["key"], line_no, body.item_code, "you")
+
+    @app.get("/api/bids/{bid_id}/risks", dependencies=auth)
+    def bid_risks(bid_id: int) -> dict:
+        bid = bid_or_404(bid_id)
+        return boq.risks(bid["key"])
+
+    @app.post("/api/bids/{bid_id}/risks", dependencies=auth)
+    def bid_risks_read(bid_id: int, body: RiskBody) -> dict:
+        bid = bid_or_404(bid_id)
+        return boq_call(boq.read_risks, bid["key"], bid_as_tender(bid), body.text, body.pdf_base64)
+
+    @app.post("/api/bids/{bid_id}/risks/simulate", dependencies=auth)
+    def bid_risks_simulate(bid_id: int, body: SimBody) -> dict:
+        bid = bid_or_404(bid_id)
+        return boq_call(boq.simulate, bid["key"], body.estimate, body.exposure, body.l1_price, body.quoted_pct, body.include_review)
 
     @app.get("/api/vault", dependencies=auth)
     def vault_list() -> dict:

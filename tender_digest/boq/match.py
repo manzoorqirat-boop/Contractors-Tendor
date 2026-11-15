@@ -133,6 +133,10 @@ class Matcher:
                 return {"source": r["source"], "code": r["sor_code"], "rate": r["rate"], "description": r["description"]}
         return None
 
+    def sor_reference(self, code: str | None, uom: str | None) -> dict | None:
+        """The schedule-of-rates entry for a code and unit, if the code is in the SOR master."""
+        return self._sor_reference(code, uom)
+
     def match_line(self, line: Any, index: int = 0) -> MatchResult:
         """`line` needs .description, .uom (canonical or None) and .sor_code (or None): a BoqLine does."""
         desc, uom, code = line.description, line.uom, getattr(line, "sor_code", None)

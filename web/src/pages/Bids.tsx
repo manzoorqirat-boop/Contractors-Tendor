@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 import { BriefView, readBase64, useAiStatus } from '../ai';
+import { BoqCard, RiskCard } from '../Boq';
 import { chain, fmtDate, headline, inr, plural, relative } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
@@ -239,6 +240,8 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       </section>
 
       <Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} />
+      <BoqCard bidId={bid.id} />
+      <RiskCard bidId={bid.id} aiOn={!!ai?.configured} />
       <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
       {bid.brief && <section className="card" style={{ marginBottom: 14 }}><h2>Bid / no-bid brief</h2><BriefView b={bid.brief} /></section>}
       <Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
