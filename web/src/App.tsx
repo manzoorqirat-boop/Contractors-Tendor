@@ -137,7 +137,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       <aside className="sidebar">
         <div className="brand" aria-label="TendAI by QMSofts">
           <Logo />
-          <span className="brand-name">Tend<span className="brand-ai">AI</span><span className="brand-by">by QMSofts</span></span>
+          <span className="brand-name"><span className="brand-word">Tend<span className="brand-ai">AI</span></span><span className="brand-by">by QMSofts</span></span>
         </div>
         <nav className="nav" aria-label="Main">
           {MAIN_TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'explore' || t.id === 'tenders' ? filters : undefined)}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span>{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title="Changes on tenders you are bidding for">{alerts.data!.unseen}</span>}</button>)}
