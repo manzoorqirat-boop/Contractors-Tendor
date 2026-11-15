@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable
 from zoneinfo import ZoneInfo
 
@@ -159,6 +160,11 @@ class RunManager:
         return len(accepted)
 
 
+MAX_ATTEMPTS = 3                         # daily runs tried per day, the first one included
+RETRY_AFTER = timedelta(minutes=10)      # wait after a failed run before trying again
+RETRYABLE = re.compile(r"^(Interrupted by a restart|Every portal failed|[A-Za-z_.]+(Error|Exception|Timeout)\b)")
+
+
 class Scheduler(threading.Thread):
     """Starts the daily scheduled run. If the service was down at the set time it runs once when it comes back, the same day."""
 
@@ -178,8 +184,16 @@ class Scheduler(threading.Thread):
         hh, mm = (int(x) for x in cur["send_time"].split(":"))
         if now < now.replace(hour=hh, minute=mm, second=0, microsecond=0):
             return False
-        last = self.manager.store.last_run_started("scheduled")
-        return last is None or last.date() < now.date()
+        today = self.manager.store.scheduled_runs_on(now.date().isoformat())
+        if not today:
+            return True
+        # A daily run that failed for a reason that may pass (a restart of the service, every portal down) is tried again a little
+        # later, up to MAX_ATTEMPTS a day. A run that is still going, finished, or failed because setup is missing is left alone.
+        last = today[-1]
+        if len(today) >= MAX_ATTEMPTS or last["status"] != "failed" or not RETRYABLE.match(last.get("error") or ""):
+            return False
+        done = datetime.fromisoformat(last["finished"] or last["started"]).replace(tzinfo=None)
+        return now.replace(tzinfo=None) - done >= RETRY_AFTER
 
     def tick(self) -> int | None:
         now = local_now(self.manager.tz_name)
