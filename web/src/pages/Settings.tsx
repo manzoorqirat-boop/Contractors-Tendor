@@ -18,7 +18,6 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
   const [minValue, setMinValue] = useState('0');
   const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [busy, setBusy] = useState<'save' | 'test' | 'aitest' | 'score' | null>(null);
-  const [profile, setProfile] = useState('');
   const [logoText, setLogoTextField] = useState('QM');
   const [ai, setAi] = useState<AiStatus | null>(null);
   const loadAi = () => api.aiStatus().then(setAi, () => setAi(null));
@@ -30,7 +29,6 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
     setExtra(s.extra_keywords.join('\n'));
     setExclude(s.exclude_words.join('\n'));
     setMinValue(String(s.min_value || 0));
-    setProfile(s.company_profile || '');
     setLogoTextField(s.logo_text || 'QM');
   };
   useEffect(() => { if (data) load(data); }, [data]);
@@ -58,7 +56,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
       const saved = await api.saveSettings({
         recipients: lines(recipients), send_time: form.send_time, schedule_enabled: form.schedule_enabled, send_empty: form.send_empty,
         portals: form.portals, min_value: Number(minValue) || 0, extra_keywords: lines(extra), exclude_words: lines(exclude),
-        company_profile: profile, logo_text: logoText, ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil,
+        logo_text: logoText, ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil,
       });
       loadAi();
       load(saved);
@@ -171,11 +169,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
         <section className="card" style={{ marginBottom: 14 }}>
           <h2>AI assistant {ai && <span className={`badge ${ai.configured ? 'ok' : 'plain'}`} style={{ marginLeft: 6 }}>{ai.configured ? 'On' : 'Off'}</span>}</h2>
           <p className="sub">{ai?.configured ? <>Connected. Main model <strong>{ai.model}</strong>, bulk model <strong>{ai.fast_model}</strong>. {ai.labelled} open tenders labelled, {ai.unlabelled} waiting.</> : 'Off. Add ANTHROPIC_API_KEY to the server variables to turn on summaries, fit scores, work types, the ask bar, the document reader and bid briefs.'}</p>
-          <label className="field">
-            About your company
-            <span className="hint">Used to score how well each tender fits you. Say what work you do, where, the sizes you can take and your registration class. Saving a change re-scores open tenders on the next run.</span>
-            <textarea value={profile} onChange={(e) => setProfile(e.target.value)} maxLength={2000} placeholder="Class A civil contractor. Roads and drainage in Pune and Nashik. Projects from 50 lakh to 10 crore. 8 years of PWD work." />
-          </label>
+          <p className="muted small">Your company profile now lives in the Vault, together with your company facts and item catalogue.</p>
           <label className="check"><input type="checkbox" checked={form.ai_digest_intro} onChange={(e) => patch({ ai_digest_intro: e.target.checked })} />Start the daily email with a short "worth a look today" paragraph</label>
           <label className="check"><input type="checkbox" checked={form.ai_hide_noncivil} onChange={(e) => patch({ ai_hide_noncivil: e.target.checked })} />Hide tenders Claude judges not to be civil work (off: they stay visible with a "May not be civil" tag)</label>
           <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
