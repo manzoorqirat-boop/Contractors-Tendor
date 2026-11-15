@@ -92,7 +92,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
   .side-foot .link-btn { width: auto; font-size: 12.5px; }
   .side-foot .ico { display: none; }
   .sidebar .nav { display: flex; width: 100%; gap: 0; }
-  .sidebar .nav button { flex-direction: column; gap: 2px; padding: 6px 2px; font-size: 10.5px; text-align: center; justify-content: center; }
+  .sidebar .nav { overflow: visible; flex-wrap: nowrap; }
+  .sidebar .nav button { flex: 1 1 0; width: auto; min-width: 0; flex-direction: column; gap: 2px; padding: 6px 2px; font-size: 10.5px; text-align: center; justify-content: center; }
   .sidebar .nav button::before { display: none; }
   .nav-label { flex: none; }
   .sidebar .count-pill { position: absolute; top: 2px; right: 18%; margin: 0; }
