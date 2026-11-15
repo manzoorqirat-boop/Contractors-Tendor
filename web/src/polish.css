@@ -153,3 +153,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
 .nextup { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 2px; }
 .nextup li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; margin: 0 -10px; border-radius: var(--r-sm); transition: background .15s; }
 .nextup li:hover { background: var(--surface-2); }
+
+/* ---- vault ---- */
+.vault-alert { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; padding: 12px 16px; margin-bottom: 14px; border-radius: var(--r-md); border: 1px solid; font-size: 13.5px; }
+.vault-alert strong { font-weight: 650; }
+.vault-alert.bad { background: var(--bad-soft); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
+.vault-alert.warn { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.card > h2 .chip-n { margin-left: 6px; vertical-align: 1px; }
+.tbl tr.row-bad td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+.tbl tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.tbl td.num .btn, .tbl td.num .link-btn { opacity: .85; } .tbl tr:hover td.num .btn, .tbl tr:hover td.num .link-btn { opacity: 1; }
+textarea { line-height: 1.5; }
+details > summary { cursor: pointer; padding: 6px 0; font-weight: 550; } details > summary:hover { color: var(--text); }
+.facts dt { font-weight: 550; }
