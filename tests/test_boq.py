@@ -419,3 +419,8 @@ def test_unbalanced_bidding_detection():
     assert out["front_loaded"] and out["early_premium_pct"] == 50.0 and len(out["items_far_above_estimate"]) == 2
     assert not risk.unbalanced_flags(lines, [1000] * 6)["front_loaded"]
     assert risk.unbalanced_flags(lines, [None] * 6)["items_far_above_estimate"] == []
+
+
+def test_column_number_row_and_whole_number_serials():
+    doc = parse.parse_rows([["Sr", "Description", "Unit", "Quantity", "Rate"], [1.0, 2.0, 3.0, 4.0, 5.0], [1.0, "Earthwork in excavation", "cum", 10, None]])
+    assert len(doc.lines) == 1 and doc.lines[0].sr == "1"
