@@ -13,6 +13,10 @@ const CHANGE_TEXT: Record<string, string> = { closing: 'Closing date moved', ope
 const whenText = (a: BidAlert) => (a.urgency === 'overdue' ? 'overdue' : a.days_left === 0 ? 'today' : a.days_left === 1 ? 'tomorrow' : `in ${a.days_left} days`);
 const num = (v: string): number | null => { const n = Number(v.replace(/[,\s₹]/g, '')); return v.trim() === '' || Number.isNaN(n) ? null : n; };
 
+// Remembered while the app is open, so coming back from a bid returns to the same list.
+let lastMode: 'pipeline' | 'results' = 'pipeline';
+let lastView: 'active' | 'all' | Stage = 'active';
+
 export function BidsPage({ config, bidId, onOpen }: { config: AppConfig; bidId: number | null; onOpen: (id: number | null) => void }) {
   return bidId ? <Workspace key={bidId} id={bidId} config={config} onBack={() => onOpen(null)} /> : <Pipeline config={config} onOpen={onOpen} />;
 }
@@ -21,8 +25,10 @@ export function BidsPage({ config, bidId, onOpen }: { config: AppConfig; bidId: 
 
 function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) => void }) {
   const toast = useToast();
-  const [mode, setMode] = useState<'pipeline' | 'results'>('pipeline');
-  const [view, setView] = useState<'active' | 'all' | Stage>('active');
+  const [mode, setModeState] = useState<'pipeline' | 'results'>(lastMode);
+  const [view, setViewState] = useState<'active' | 'all' | Stage>(lastView);
+  const setMode = (m: 'pipeline' | 'results') => { lastMode = m; setModeState(m); };
+  const setView = (v: 'active' | 'all' | Stage) => { lastView = v; setViewState(v); };
   const list = useLoad(() => api.bids(), []);
   const alerts = useLoad(() => api.bidAlerts(), []);
   const data = list.data;
@@ -80,7 +86,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
               return (
                 <article key={b.id} className="card bidcard" onClick={() => onOpen(b.id)}>
                   <div className="bidcard-top">
-                    <h3 className="t-title">{headline(b)}</h3>
+                    <h3 className="t-title"><button type="button" className="linkish" onClick={(e) => { e.stopPropagation(); onOpen(b.id); }}>{headline(b)}</button></h3>
                     <select className="stage-select" value={b.stage} aria-label="Stage" onClick={(e) => e.stopPropagation()} onChange={(e) => move(b, e.target.value as Stage)}>
                       {data!.stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
@@ -189,6 +195,11 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const rel = relative(bid.closing, config.now);
   const open = ACTIVE.includes(bid.stage);
   const unseen = bid.changes.filter((c) => !c.seen);
+  const docsOpen = bid.items.filter((i) => i.kind === 'document' && !i.done).length;
+  const changeStage = (s: string) => {
+    if (s === 'submitted' && bid.stage !== 'submitted' && docsOpen > 0 && !window.confirm(`${plural(docsOpen, 'document')} on the checklist ${docsOpen === 1 ? 'is' : 'are'} not ticked yet. Mark this bid as submitted anyway?`)) return;
+    save({ stage: s });
+  };
   const stages: { key: Stage; label: string }[] = [['interested', 'Interested'], ['preparing', 'Preparing'], ['submitted', 'Submitted'], ['opened', 'Bid opened'], ['won', 'Won'], ['lost', 'Lost'], ['dropped', 'Dropped']].map(([key, label]) => ({ key: key as Stage, label }));
 
   return (
@@ -217,10 +228,12 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         </div>
       )}
 
+      <NextStep bid={bid} />
+
       <section className="card" style={{ marginBottom: 14 }}>
         <div className="ws-grid">
           <label className="field-inline">Stage
-            <select value={bid.stage} onChange={(e) => save({ stage: e.target.value })}>{stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+            <select value={bid.stage} onChange={(e) => changeStage(e.target.value)}>{stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
           </label>
           <OwnerField value={bid.owner ?? ''} onSave={(v) => save({ owner: v })} />
           <div className="field-inline">Value<span className="static">{bid.value_text}</span></div>
@@ -275,6 +288,18 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       <button className="link-btn" style={{ color: 'var(--bad)' }} onClick={remove}>Remove this bid</button>
     </>
   );
+}
+
+function NextStep({ bid }: { bid: BidDetail }) {
+  const docsOpen = bid.items.filter((i) => i.kind === 'document' && !i.done).length;
+  const problems = bid.items.filter((i) => i.kind === 'document' && !i.done && i.match && ['expired', 'expires_before_close', 'missing'].includes(i.match.status)).length;
+  let text = '';
+  if (bid.stage === 'interested') text = !bid.doc ? 'Read the tender document in the checklist, then run the eligibility check to decide whether to bid.' : !bid.eligibility ? 'Run the eligibility check, then move the bid to Preparing, or to Dropped if you will not bid.' : 'Decide: move the bid to Preparing, or to Dropped if you will not bid.';
+  else if (bid.stage === 'preparing') text = problems > 0 ? `${plural(problems, 'required paper')} not ready in the vault. Fix them in the checklist before closing.` : docsOpen > 0 ? `${plural(docsOpen, 'document')} still to gather before you submit.` : 'Checklist is complete. File on the portal, then mark the bid Submitted.';
+  else if (bid.stage === 'submitted') text = 'Record your quoted price in Result below, then wait for the bid opening.';
+  else if (bid.stage === 'opened') text = 'Add the winning price and mark the bid Won or Lost.';
+  if (!text) return null;
+  return <div className="alert next-step"><strong>Next:</strong> {text}</div>;
 }
 
 function OwnerField({ value, onSave }: { value: string; onSave: (v: string) => void }) {
