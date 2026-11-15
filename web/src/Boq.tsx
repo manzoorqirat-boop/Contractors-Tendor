@@ -70,7 +70,7 @@ export function BoqCard({ bidId }: { bidId: number }) {
       <div className="card-head">
         <div>
           <h2>Bill of quantities (BOQ)</h2>
-          <p className="sub">Upload the tender's BOQ (.xlsx or .csv). Each line is matched to your item catalogue; confirm the matches and the cost is worked out from your own rates.</p>
+          <p className="sub">Upload the tender's BOQ (.xlsx, .xlsm, .xls or .csv). Each line is matched to your item catalogue; confirm the matches and the cost is worked out from your own rates.</p>
         </div>
         <div className="head-actions">
           <a className="btn small" href="#/vault">Item catalogue{d ? ` (${d.catalogue.item_master ?? 0})` : ''} in Vault</a>
@@ -81,8 +81,8 @@ export function BoqCard({ bidId }: { bidId: number }) {
       {noCatalogue && <div className="alert warn">Your item catalogue is empty, so nothing can be matched yet. Load your item list once in the <a href="#/vault">Vault</a>, then come back here.</div>}
 
       <div className="ai-doc">
-        <label className="field" style={{ margin: 0 }}>BOQ file (.xlsx or .csv, up to 10 MB)
-          <input type="file" accept=".xlsx,.xlsm,.csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <label className="field" style={{ margin: 0 }}>BOQ file (.xlsx, .xlsm, .xls or .csv, up to 10 MB)
+          <input type="file" accept=".xlsx,.xlsm,.xls,.csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </label>
         <div><button className="btn primary" onClick={upload} disabled={busy || !file}>{busy ? 'Reading and matching…' : boq ? 'Replace BOQ and match again' : 'Read and match'}</button></div>
         {d && !d.ai && <p className="muted small" style={{ margin: 0 }}>The AI assistant is off, so lines are matched by rules only and none is marked Matched until you confirm it.</p>}
