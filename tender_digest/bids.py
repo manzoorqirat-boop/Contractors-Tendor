@@ -96,6 +96,27 @@ def _when(value: str | None, end_of_day: bool = True) -> datetime | None:
     return d.replace(hour=23, minute=59) if end_of_day and len(value) == 10 else d
 
 
+def l1_outcomes_from(rows: list[dict], work_type: str | None, value: float | None) -> tuple[list[float], str]:
+    """How the lowest bidder priced tenders you have already seen: each as % above (+) or below (-) the tender's estimate.
+
+    A won bid counts at your own price when no L1 price was recorded. Narrows to the same work type, then the same size band,
+    when that leaves at least 5 results; otherwise uses every decided bid.
+    """
+    pts: list[tuple[dict, float]] = []
+    for r in rows:
+        est = r.get("value")
+        low = r.get("l1_value") or (r.get("my_value") if r.get("stage") == "won" else None)
+        if r.get("stage") in ("won", "lost") and est and est > 0 and low and low > 0:
+            pts.append((r, (low / est - 1) * 100))
+    same_type = [p for r, p in pts if work_type and r.get("work_type") == work_type]
+    if len(same_type) >= 5:
+        return same_type, f"{work_type} tenders"
+    same_size = [p for r, p in pts if value and _band(r.get("value")) == _band(value)]
+    if len(same_size) >= 5:
+        return same_size, f"tenders of size {_band(value)}"
+    return [p for _, p in pts], "all your decided bids" if pts else ""
+
+
 def _band(v: float | None) -> str:
     if v is None:
         return "Not stated"
@@ -685,6 +706,11 @@ class BidBook:
             "by_department": group("department", lambda r: _dept(r["organisation"])),
             "by_size": group("size", lambda r: _band(r["value"])),
         }
+
+    def l1_outcomes(self, work_type: str | None, value: float | None) -> tuple[list[float], str]:
+        with self.lock:
+            rows = [dict(r) for r in self.db.execute("SELECT stage, work_type, value, my_value, l1_value FROM bids WHERE stage IN ('won','lost')")]
+        return l1_outcomes_from(rows, work_type, value)
 
     def history_notes(self, work_type: str | None, organisation: str | None, value: float | None) -> list[str]:
         """Plain lines about how you have done on similar tenders: used on a tender's page and in its bid brief."""
