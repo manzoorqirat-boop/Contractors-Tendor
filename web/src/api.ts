@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { AiStatus, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -83,5 +83,13 @@ export const api = {
   deleteVault: (id: number) => call<{ removed: number }>(`/api/vault/${id}`, { method: 'DELETE' }),
   vaultFileUrl: (id: number) => `/api/vault/${id}/file`,
   saveFacts: (facts: CompanyFact[]) => call<{ facts: CompanyFact[] }>('/api/company-facts', { method: 'PUT', body: JSON.stringify({ facts }) }),
+  boqCatalogue: () => call<CatalogueData>('/api/boq/catalogue'),
+  importCatalogue: (kind: string, csv_text: string) => call<CatalogueImport>('/api/boq/catalogue', { method: 'POST', body: JSON.stringify({ kind, csv_text }) }),
+  bidBoq: (id: number, include_review: boolean) => call<BoqView>(`/api/bids/${id}/boq?include_review=${include_review}`),
+  uploadBoq: (id: number, filename: string, file_base64: string) => call<BoqView>(`/api/bids/${id}/boq`, { method: 'POST', body: JSON.stringify({ filename, file_base64 }) }),
+  confirmBoqLine: (id: number, line: number, item_code: string | null) => call<BoqView>(`/api/bids/${id}/boq/lines/${line}`, { method: 'POST', body: JSON.stringify({ item_code }) }),
+  bidRisks: (id: number) => call<RiskData>(`/api/bids/${id}/risks`),
+  readRisks: (id: number, text: string, pdf_base64: string) => call<RiskData>(`/api/bids/${id}/risks`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  simulate: (id: number, input: SimInput) => call<Simulation>(`/api/bids/${id}/risks/simulate`, { method: 'POST', body: JSON.stringify(input) }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
 };

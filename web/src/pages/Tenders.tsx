@@ -28,6 +28,14 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   const setStar = (key: string, starred: boolean) => setItems((xs) => xs.map((t) => (t.key === key ? { ...t, starred } : t)));
   const sortBy = (s: string) => nav.setDisplay({ sort: s, page: 1 });
 
+  async function startBid(key: string) {
+    try {
+      const r = await api.createBid(key);
+      if (r.created) toast('Added to your bids');
+      window.dispatchEvent(new CustomEvent('open-bid', { detail: r.id }));
+    } catch (e) { toast((e as Error).message, 'bad'); }
+  }
+
   async function copyId(id: string) {
     try { await navigator.clipboard.writeText(id); toast('Tender ID copied'); } catch { toast('Could not copy', 'bad'); }
   }
@@ -62,7 +70,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
         {data && items.length === 0 && <div className="empty">No tenders match these filters.</div>}
 
         <div style={{ opacity: loading && data ? 0.55 : 1 }} aria-busy={loading}>
-          {layout === 'cards' && items.map((t) => <Card key={t.key} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} />)}
+          {layout === 'cards' && items.map((t) => <Card key={t.key} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}
           {layout === 'table' && items.length > 0 && (
             <div className="scroll-x">
               <table className="tbl">
@@ -104,7 +112,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   );
 }
 
-function Card({ t, now, onOpen, onStar, onCopy }: { t: Tender; now: string; onOpen: () => void; onStar: (s: boolean) => void; onCopy: () => void }) {
+function Card({ t, now, onOpen, onStar, onCopy, onStart }: { t: Tender; now: string; onOpen: () => void; onStar: (s: boolean) => void; onCopy: () => void; onStart: () => void }) {
   const rel = relative(t.closing, now);
   return (
     <article className="tender" onClick={onOpen}>
@@ -122,6 +130,7 @@ function Card({ t, now, onOpen, onStar, onCopy }: { t: Tender; now: string; onOp
           {t.location && <span className="badge plain">{t.location}</span>}
           <span className="mono">{t.tender_id}</span>
           <button className="btn small" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`Copy Tender ID ${t.tender_id}`}>Copy ID</button>
+          <button className="btn small primary" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start bid</button>
         </div>
       </div>
       <div className="side">

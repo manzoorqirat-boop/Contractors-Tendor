@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 import { BriefView, readBase64, useAiStatus } from '../ai';
+import { BoqCard, RiskCard } from '../Boq';
 import { chain, fmtDate, headline, inr, plural, relative } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
@@ -12,6 +13,10 @@ const CHANGE_TEXT: Record<string, string> = { closing: 'Closing date moved', ope
 const whenText = (a: BidAlert) => (a.urgency === 'overdue' ? 'overdue' : a.days_left === 0 ? 'today' : a.days_left === 1 ? 'tomorrow' : `in ${a.days_left} days`);
 const num = (v: string): number | null => { const n = Number(v.replace(/[,\s₹]/g, '')); return v.trim() === '' || Number.isNaN(n) ? null : n; };
 
+// Remembered while the app is open, so coming back from a bid returns to the same list.
+let lastMode: 'pipeline' | 'results' = 'pipeline';
+let lastView: 'active' | 'all' | Stage = 'active';
+
 export function BidsPage({ config, bidId, onOpen }: { config: AppConfig; bidId: number | null; onOpen: (id: number | null) => void }) {
   return bidId ? <Workspace key={bidId} id={bidId} config={config} onBack={() => onOpen(null)} /> : <Pipeline config={config} onOpen={onOpen} />;
 }
@@ -20,8 +25,10 @@ export function BidsPage({ config, bidId, onOpen }: { config: AppConfig; bidId: 
 
 function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) => void }) {
   const toast = useToast();
-  const [mode, setMode] = useState<'pipeline' | 'results'>('pipeline');
-  const [view, setView] = useState<'active' | 'all' | Stage>('active');
+  const [mode, setModeState] = useState<'pipeline' | 'results'>(lastMode);
+  const [view, setViewState] = useState<'active' | 'all' | Stage>(lastView);
+  const setMode = (m: 'pipeline' | 'results') => { lastMode = m; setModeState(m); };
+  const setView = (v: 'active' | 'all' | Stage) => { lastView = v; setViewState(v); };
   const list = useLoad(() => api.bids(), []);
   const alerts = useLoad(() => api.bidAlerts(), []);
   const data = list.data;
@@ -79,7 +86,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
               return (
                 <article key={b.id} className="card bidcard" onClick={() => onOpen(b.id)}>
                   <div className="bidcard-top">
-                    <h3 className="t-title">{headline(b)}</h3>
+                    <h3 className="t-title"><button type="button" className="linkish" onClick={(e) => { e.stopPropagation(); onOpen(b.id); }}>{headline(b)}</button></h3>
                     <select className="stage-select" value={b.stage} aria-label="Stage" onClick={(e) => e.stopPropagation()} onChange={(e) => move(b, e.target.value as Stage)}>
                       {data!.stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
@@ -168,12 +175,13 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const ai = useAiStatus();
   const [bid, setBid] = useState<BidDetail | null>(null);
   const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
   const vault = useLoad(() => api.vault(), []);
   const load = () => api.bid(id).then(setBid, (e: Error) => setError(e.message));
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save(patch: Record<string, unknown>) {
-    try { setBid(await api.patchBid(id, patch)); } catch (e) { toast((e as Error).message, 'bad'); }
+    try { setBid(await api.patchBid(id, patch)); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch (e) { toast((e as Error).message, 'bad'); }
   }
   async function remove() {
     if (!window.confirm('Remove this bid and its checklist? The tender itself stays in the list.')) return;
@@ -188,6 +196,11 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const rel = relative(bid.closing, config.now);
   const open = ACTIVE.includes(bid.stage);
   const unseen = bid.changes.filter((c) => !c.seen);
+  const docsOpen = bid.items.filter((i) => i.kind === 'document' && !i.done).length;
+  const changeStage = (s: string) => {
+    if (s === 'submitted' && bid.stage !== 'submitted' && docsOpen > 0 && !window.confirm(`${plural(docsOpen, 'document')} on the checklist ${docsOpen === 1 ? 'is' : 'are'} not ticked yet. Mark this bid as submitted anyway?`)) return;
+    save({ stage: s });
+  };
   const stages: { key: Stage; label: string }[] = [['interested', 'Interested'], ['preparing', 'Preparing'], ['submitted', 'Submitted'], ['opened', 'Bid opened'], ['won', 'Won'], ['lost', 'Lost'], ['dropped', 'Dropped']].map(([key, label]) => ({ key: key as Stage, label }));
 
   return (
@@ -199,6 +212,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           <p className="sub">{chain(bid.organisation).join(' › ')} · <span className="mono">{bid.tender_id}</span> · {bid.portal_name}</p>
         </div>
         <div className="head-actions">
+          {saved && <span className="muted small" role="status">Saved ✓</span>}
           <button className="btn" onClick={copyId}>Copy Tender ID</button>
           <a className="btn" href={bid.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>
         </div>
@@ -216,10 +230,17 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         </div>
       )}
 
+      <NextStep bid={bid} />
+      <nav className="jump" aria-label="Jump to a section">
+        {([['checklist', 'Checklist'], ['boq', 'BOQ'], ['risk', 'Risk'], ['eligibility', 'Eligibility'], ['brief', 'Brief'], ['drafts', 'Letters'], ['result', 'Result'], ['notes', 'Notes']] as const).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => document.getElementById(`sec-${k}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })}>{l}</button>
+        ))}
+      </nav>
+
       <section className="card" style={{ marginBottom: 14 }}>
         <div className="ws-grid">
           <label className="field-inline">Stage
-            <select value={bid.stage} onChange={(e) => save({ stage: e.target.value })}>{stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+            <select value={bid.stage} onChange={(e) => changeStage(e.target.value)}>{stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
           </label>
           <OwnerField value={bid.owner ?? ''} onSave={(v) => save({ owner: v })} />
           <div className="field-inline">Value<span className="static">{bid.value_text}</span></div>
@@ -238,13 +259,15 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         {bid.history.length > 0 && <div className="alert warn" style={{ marginTop: 10, marginBottom: 0 }}>{bid.history.map((h) => <div key={h}>{h}</div>)}</div>}
       </section>
 
-      <Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} />
-      <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
-      {bid.brief && <section className="card" style={{ marginBottom: 14 }}><h2>Bid / no-bid brief</h2><BriefView b={bid.brief} /></section>}
-      <Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
+      <div id="sec-checklist"><Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} /></div>
+      <div id="sec-boq"><BoqCard bidId={bid.id} /></div>
+      <div id="sec-risk"><RiskCard bidId={bid.id} aiOn={!!ai?.configured} /></div>
+      <div id="sec-eligibility"><EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} /></div>
+      {bid.brief && <section id="sec-brief" className="card" style={{ marginBottom: 14 }}><h2>Bid / no-bid brief</h2><BriefView b={bid.brief} /></section>}
+      <div id="sec-drafts"><Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} /></div>
 
       {(['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && (
-        <section className="card" style={{ marginBottom: 14 }}>
+        <section id="sec-result" className="card" style={{ marginBottom: 14 }}>
           <h2>Result</h2>
           <p className="sub">Recording prices and the outcome builds your record, which shows on similar tenders.</p>
           <div className="ws-grid">
@@ -261,7 +284,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         </section>
       )}
 
-      <section className="card" style={{ marginBottom: 14 }}>
+      <section id="sec-notes" className="card" style={{ marginBottom: 14 }}>
         <label className="field">Notes<textarea defaultValue={bid.notes ?? ''} maxLength={4000} placeholder="Site visit, rates, who to call…" onBlur={(e) => e.target.value !== (bid.notes ?? '') && save({ notes: e.target.value })} /></label>
         {bid.changes.length > 0 && (
           <details><summary className="muted small">Change history ({bid.changes.length})</summary>
@@ -272,6 +295,18 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       <button className="link-btn" style={{ color: 'var(--bad)' }} onClick={remove}>Remove this bid</button>
     </>
   );
+}
+
+function NextStep({ bid }: { bid: BidDetail }) {
+  const docsOpen = bid.items.filter((i) => i.kind === 'document' && !i.done).length;
+  const problems = bid.items.filter((i) => i.kind === 'document' && !i.done && i.match && ['expired', 'expires_before_close', 'missing'].includes(i.match.status)).length;
+  let text = '';
+  if (bid.stage === 'interested') text = !bid.doc ? 'Read the tender document in the checklist, then run the eligibility check to decide whether to bid.' : !bid.eligibility ? 'Run the eligibility check, then move the bid to Preparing, or to Dropped if you will not bid.' : 'Decide: move the bid to Preparing, or to Dropped if you will not bid.';
+  else if (bid.stage === 'preparing') text = problems > 0 ? `${plural(problems, 'required paper')} not ready in the vault. Fix them in the checklist before closing.` : docsOpen > 0 ? `${plural(docsOpen, 'document')} still to gather before you submit.` : 'Checklist is complete. File on the portal, then mark the bid Submitted.';
+  else if (bid.stage === 'submitted') text = 'Record your quoted price in Result below, then wait for the bid opening.';
+  else if (bid.stage === 'opened') text = 'Add the winning price and mark the bid Won or Lost.';
+  if (!text) return null;
+  return <div className="alert next-step"><strong>Next:</strong> {text}</div>;
 }
 
 function OwnerField({ value, onSave }: { value: string; onSave: (v: string) => void }) {
