@@ -47,9 +47,12 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
     <>
       <div className="page-head">
         <div><h1>Bids</h1><p className="sub">{data ? `${plural(activeCount, 'bid')} in progress` : 'Loading…'}</p></div>
+        <div className="head-actions">
+        <button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender</button>
         <div className="seg" role="group" aria-label="Bids view">
           <button type="button" className={mode === 'pipeline' ? 'on' : ''} aria-pressed={mode === 'pipeline'} onClick={() => setMode('pipeline')}>Pipeline</button>
           <button type="button" className={mode === 'results' ? 'on' : ''} aria-pressed={mode === 'results'} onClick={() => setMode('results')}>Results</button>
+        </div>
         </div>
       </div>
 
@@ -220,7 +223,8 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         <div className="head-actions">
           {saved && <span className="muted small" role="status">Saved ✓</span>}
           <button className="btn" onClick={copyId}>Copy Tender ID</button>
-          <a className="btn" href={bid.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>
+          {bid.manual && <button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender', { detail: { editKey: bid.key } }))}>Edit tender details</button>}
+          {bid.search_url && <a className="btn" href={bid.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>}
         </div>
       </div>
 
@@ -255,8 +259,12 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           <DateField label="Pre-bid meeting" value={bid.prebid_date} time onSave={(v) => save({ prebid_date: v })} />
           <DateField label="Last date for queries" value={bid.query_deadline} onSave={(v) => save({ query_deadline: v })} />
           <DateField label="EMD due" value={bid.emd_due} onSave={(v) => save({ emd_due: v })} />
+          {bid.manual && <DateField label="Last checked on the portal" value={bid.portal_checked ?? null} onSave={(v) => save({ portal_checked: v })} />}
         </div>
-        <p className="muted small" style={{ marginTop: 8 }}>Each run looks at this tender again and records new corrigenda and moved dates. The daily email repeats the ones coming up.</p>
+        {bid.manual
+          ? <p className="muted small" style={{ marginTop: 8 }}>This tender was added by hand, so the app cannot watch it for corrigenda or moved dates. Look at the portal yourself and record the day here: the bid reminds you in the last days before closing.{' '}
+              <button className="link-btn" onClick={() => save({ portal_checked: new Date().toISOString().slice(0, 10) })}>Checked today</button></p>
+          : <p className="muted small" style={{ marginTop: 8 }}>Each run looks at this tender again and records new corrigenda and moved dates. The daily email repeats the ones coming up.</p>}
         {bid.history.length > 0 && <div className="alert warn" style={{ marginTop: 10, marginBottom: 0 }}>{bid.history.map((h) => <div key={h}>{h}</div>)}</div>}
       </section>
 
@@ -275,7 +283,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       </div>
 
       {tab === 'checklist' && <Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} />}
-      {tab === 'price' && <><BoqCard bidId={bid.id} /><RiskCard bidId={bid.id} aiOn={!!ai?.configured} /></>}
+      {tab === 'price' && <><BoqCard bidId={bid.id} /><RiskCard bidId={bid.id} aiOn={!!ai?.configured} hasSource={!!bid.has_source} /></>}
       {tab === 'decide' && (
         <>
           <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
@@ -402,7 +410,7 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
       <div className="card-head">
         <div><h2>Checklist</h2><p className="sub">{done} of {items.length} done{problems > 0 && <> · <span style={{ color: 'var(--warn)' }}>{plural(problems, 'paper')} need attention</span></>}</p></div>
         <div className="head-actions">
-          <button className="btn small primary" onClick={fetchPortal} disabled={fetching}>{fetching ? 'Fetching…' : 'Fetch from portal'}</button>
+          {!bid.manual && <button className="btn small primary" onClick={fetchPortal} disabled={fetching}>{fetching ? 'Fetching…' : 'Fetch from portal'}</button>}
           <button className="btn small" onClick={fromDoc}>Add standard steps</button>
           {aiOn && <button className="btn small" onClick={() => setShowDoc((v) => !v)} aria-expanded={showDoc}>{bid.doc ? 'Read another document' : 'Read tender document'}</button>}
         </div>
