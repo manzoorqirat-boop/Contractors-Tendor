@@ -92,8 +92,25 @@ def test_excel_roundtrip(tmp_path):
         ws.append(r)
     wb.save(tmp_path / "b.xlsx")
     assert len(parse.parse_file(tmp_path / "b.xlsx").lines) == 26
+    # portals often rename files: an .xlsx called .xls, and macro-enabled .xlsm, must both read
+    (tmp_path / "renamed.xls").write_bytes((tmp_path / "b.xlsx").read_bytes())
+    assert len(parse.parse_file(tmp_path / "renamed.xls").lines) == 26
+    (tmp_path / "macro.xlsm").write_bytes((tmp_path / "b.xlsx").read_bytes())
+    assert len(parse.parse_file(tmp_path / "macro.xlsm").lines) == 26
+
+
+def test_html_table_saved_as_xls(tmp_path):
+    html = ("<html><body><table><tr><th>Sr</th><th>Description</th><th>Unit</th><th>Quantity</th><th>Rate</th></tr>"
+            "<tr><td>1</td><td>Earthwork in excavation</td><td>cum</td><td>100</td><td></td></tr></table></body></html>")
+    (tmp_path / "boq.xls").write_text(html, encoding="utf-8")
+    doc = parse.parse_file(tmp_path / "boq.xls")
+    assert len(doc.lines) == 1 and doc.lines[0].qty == 100
+
+
+def test_unknown_extension_is_refused(tmp_path):
+    (tmp_path / "x.doc").write_bytes(b"x")
     with pytest.raises(RuntimeError, match="xlsx"):
-        parse.parse_file(tmp_path / "old.xls")
+        parse.parse_file(tmp_path / "x.doc")
 
 
 # ---- master data ----------------------------------------------------------------------------------------------------------
