@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { api } from '../api';
 import { FilterBar } from '../FilterBar';
 import { mergeDrill } from '../filters';
-import { fmtDate, fmtDay, headline, inr, plural } from '../format';
+import { chain, fmtDate, fmtDay, headline, inr, plural, relative } from '../format';
 import { useLoad } from '../hooks';
 import type { Nav } from '../App';
 import { ChartSkeleton, Skeleton } from '../ui';
@@ -51,6 +52,63 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
 
   const kpiGo = (patch: Partial<Filters>) => go('tenders', { ...filters, ...patch }, undefined);
 
+  const widgets: DashWidget[] = [
+    { id: 'found', title: 'Found per day', node: (
+      <Card title="Found per day" sub="Civil tenders first seen, last 30 days" explore={() => go('explore', filters, { group_by: 'first_seen_day', split_by: 'portal', measure, chart: 'stacked' })} loading={found.loading && !found.data}>
+              {found.data && <DayBars data={fillDays(found.data, seenFrom, 30, measure)} money={measure === 'value'} color="var(--c1)" onOpen={open} />}
+            </Card>
+    ) },
+    { id: 'closing', title: 'Closing in the next 14 days', node: (
+      <Card title="Closing in the next 14 days" sub="Open tenders by closing date" explore={() => go('explore', filters, { group_by: 'closing_day', split_by: 'category', measure, chart: 'stacked' })} loading={closing.loading && !closing.data}>
+              {closing.data && <DayBars data={fillDays(closing.data, today, 14, measure)} money={measure === 'value'} color="var(--c3)" onOpen={open} />}
+            </Card>
+    ) },
+    { id: 'soonest', title: 'Closing soonest', node: (
+      <ClosingList filters={filters} now={config.now} go={go} />
+    ) },
+    { id: 'biggest', title: 'Biggest open tenders', node: (
+      <section className="card">
+              <h2>Biggest open tenders</h2>
+              <p className="sub">By estimated value. Select one to see it in the list.</p>
+              {!stats.data ? <Skeleton h={180} /> : stats.data.biggest.length === 0 ? <div className="empty">No tender with a stated value.</div> : (
+                <table className="tbl"><tbody>
+                  {stats.data.biggest.map((t) => (
+                    <tr key={t.key} className="click" tabIndex={0} onClick={() => go('tenders', { ...filters, q: t.tender_id })} onKeyDown={(e) => { if (e.key === 'Enter') go('tenders', { ...filters, q: t.tender_id }); }}>
+                      <td><div className="strong">{headline(t).slice(0, 110)}{headline(t).length > 110 ? '…' : ''}</div><div className="muted small">{t.portal_name} · closes {fmtDate(t.closing)}</div></td>
+                      <td className="num nowrap strong">{inr(t.value)}</td>
+                    </tr>
+                  ))}
+                </tbody></table>
+              )}
+            </section>
+    ) },
+    { id: 'portal', title: 'By portal', node: (
+      <Card title="By portal" sub={MEASURES[measure]} explore={() => go('explore', filters, { group_by: 'portal', split_by: 'category', measure })} loading={portals.loading && !portals.data}>
+              {portals.data && <Donut p={portals.data} measure={measure} onOpen={open} />}
+            </Card>
+    ) },
+    { id: 'category', title: 'By category', node: (
+      <Card title="By category" sub="As labelled on the portal" explore={() => go('explore', filters, { group_by: 'category', split_by: 'portal', measure })} loading={categories.loading && !categories.data}>
+              {categories.data && <Series p={categories.data} measure={measure} color="var(--c4)" horizontal onOpen={open} />}
+            </Card>
+    ) },
+    { id: 'values', title: 'By estimated value', node: (
+      <Card title="By estimated value" sub="Size of the work (L = lakh, Cr = crore)" explore={() => go('explore', filters, { group_by: 'value_band', split_by: 'portal', measure })} loading={values.loading && !values.data}>
+              {values.data && <Series p={values.data} measure={measure} color="var(--c5)" onOpen={open} />}
+            </Card>
+    ) },
+    { id: 'window', title: 'When they close', node: (
+      <Card title="When they close" sub="Time left to bid" explore={() => go('explore', filters, { group_by: 'closes_in', split_by: 'portal', measure })} loading={window_.loading && !window_.data}>
+              {window_.data && <Series p={window_.data} measure={measure} color="var(--c3)" onOpen={open} />}
+            </Card>
+    ) },
+    { id: 'depts', title: 'Departments with the most tenders', node: (
+      <Card title="Departments with the most tenders" sub="Top 10" explore={() => go('explore', filters, { group_by: 'department', split_by: 'value_band', measure })} loading={depts.loading && !depts.data}>
+              {depts.data && <Series p={depts.data} measure={measure} color="var(--c1)" horizontal onOpen={open} />}
+            </Card>
+    ) },
+  ];
+
   return (
     <>
       <div className="page-head">
@@ -88,52 +146,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
             <Kpi loading={!k} label="Starred" value={k?.starred.toLocaleString('en-IN')} note="your watchlist" onClick={() => kpiGo({ starred: true, status: 'open' })} />
           </div>
 
-          <div className="grid cols-2">
-            <Card title="Found per day" sub="Civil tenders first seen, last 30 days" explore={() => go('explore', filters, { group_by: 'first_seen_day', split_by: 'portal', measure, chart: 'stacked' })} loading={found.loading && !found.data}>
-              {found.data && <DayBars data={fillDays(found.data, seenFrom, 30, measure)} money={measure === 'value'} color="var(--c1)" onOpen={open} />}
-            </Card>
-            <Card title="Closing in the next 14 days" sub="Open tenders by closing date" explore={() => go('explore', filters, { group_by: 'closing_day', split_by: 'category', measure, chart: 'stacked' })} loading={closing.loading && !closing.data}>
-              {closing.data && <DayBars data={fillDays(closing.data, today, 14, measure)} money={measure === 'value'} color="var(--c3)" onOpen={open} />}
-            </Card>
-          </div>
-
-          <div className="grid cols-2">
-            <Card title="By portal" sub={MEASURES[measure]} explore={() => go('explore', filters, { group_by: 'portal', split_by: 'category', measure })} loading={portals.loading && !portals.data}>
-              {portals.data && <Series p={portals.data} measure={measure} color="var(--c2)" horizontal onOpen={open} />}
-            </Card>
-            <Card title="By category" sub="As labelled on the portal" explore={() => go('explore', filters, { group_by: 'category', split_by: 'portal', measure })} loading={categories.loading && !categories.data}>
-              {categories.data && <Series p={categories.data} measure={measure} color="var(--c4)" horizontal onOpen={open} />}
-            </Card>
-          </div>
-
-          <div className="grid cols-2">
-            <Card title="By estimated value" sub="Size of the work (L = lakh, Cr = crore)" explore={() => go('explore', filters, { group_by: 'value_band', split_by: 'portal', measure })} loading={values.loading && !values.data}>
-              {values.data && <Series p={values.data} measure={measure} color="var(--c5)" onOpen={open} />}
-            </Card>
-            <Card title="When they close" sub="Time left to bid" explore={() => go('explore', filters, { group_by: 'closes_in', split_by: 'portal', measure })} loading={window_.loading && !window_.data}>
-              {window_.data && <Series p={window_.data} measure={measure} color="var(--c3)" onOpen={open} />}
-            </Card>
-          </div>
-
-          <div className="grid cols-2">
-            <Card title="Departments with the most tenders" sub="Top 10" explore={() => go('explore', filters, { group_by: 'department', split_by: 'value_band', measure })} loading={depts.loading && !depts.data}>
-              {depts.data && <Series p={depts.data} measure={measure} color="var(--c1)" horizontal onOpen={open} />}
-            </Card>
-            <section className="card">
-              <h2>Biggest open tenders</h2>
-              <p className="sub">By estimated value. Select one to see it in the list.</p>
-              {!stats.data ? <Skeleton h={180} /> : stats.data.biggest.length === 0 ? <div className="empty">No tender with a stated value.</div> : (
-                <table className="tbl"><tbody>
-                  {stats.data.biggest.map((t) => (
-                    <tr key={t.key} className="click" tabIndex={0} onClick={() => go('tenders', { ...filters, q: t.tender_id })} onKeyDown={(e) => { if (e.key === 'Enter') go('tenders', { ...filters, q: t.tender_id }); }}>
-                      <td><div className="strong">{headline(t).slice(0, 110)}{headline(t).length > 110 ? '…' : ''}</div><div className="muted small">{t.portal_name} · closes {fmtDate(t.closing)}</div></td>
-                      <td className="num nowrap strong">{inr(t.value)}</td>
-                    </tr>
-                  ))}
-                </tbody></table>
-              )}
-            </section>
-          </div>
+          <DashGrid widgets={widgets} wide={['depts']} />
         </>
       )}
       <p className="muted small" style={{ marginTop: 6 }}>{k ? `Showing ${plural(k.total_kept, 'tender')} that match your filters.` : ''}</p>
@@ -175,4 +188,127 @@ function Series({ p, measure, color, horizontal, onOpen }: { p: Pivot; measure: 
 function DayBars({ data, money, color, onOpen }: { data: { key: string; value: number; drill: Drill | null }[]; money: boolean; color: string; onOpen: (d: Drill | null) => void }) {
   const rows = data.map((d) => ({ name: d.key, n: d.value, drill: d.drill }));
   return <BarBlock data={rows} category="name" value="n" color={color} label={money ? 'Value' : 'Tenders'} money={money} formatCategory={fmtDay} onSelect={(i) => onOpen(rows[i]?.drill ?? null)} />;
+}
+
+// ---- configurable grid: drag to reorder, resize, hide; saved in this browser ---------------------------------------------
+interface DashWidget { id: string; title: string; node: ReactNode }
+interface Layout { order: string[]; hidden: string[]; wide: string[] }
+const LAYOUT_KEY = 'dash-layout-v1';
+
+function loadLayout(ids: string[], wide: string[]): Layout {
+  try {
+    const r = JSON.parse(localStorage.getItem(LAYOUT_KEY) || 'null');
+    if (r && Array.isArray(r.order)) {
+      const keep = (xs: unknown) => (Array.isArray(xs) ? xs.filter((i): i is string => typeof i === 'string' && ids.includes(i)) : []);
+      const order = keep(r.order);
+      return { order: [...order, ...ids.filter((i) => !order.includes(i))], hidden: keep(r.hidden), wide: keep(r.wide) };
+    }
+  } catch { /* storage blocked or damaged: use the default */ }
+  return { order: ids, hidden: [], wide };
+}
+
+function DashGrid({ widgets, wide }: { widgets: DashWidget[]; wide: string[] }) {
+  const ids = widgets.map((w) => w.id);
+  const [layout, setLayout] = useState<Layout>(() => loadLayout(ids, wide));
+  const [edit, setEdit] = useState(false);
+  const [drag, setDrag] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const byId = new Map(widgets.map((w) => [w.id, w]));
+  const save = (l: Layout) => { setLayout(l); try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(l)); } catch { /* ignore */ } };
+  const visible = layout.order.filter((i) => !layout.hidden.includes(i));
+  const move = (from: string, to: string) => {
+    if (from === to) return;
+    const rest = layout.order.filter((i) => i !== from);
+    rest.splice(rest.indexOf(to), 0, from);
+    save({ ...layout, order: rest });
+  };
+  const nudge = (id: string, d: -1 | 1) => { const j = visible.indexOf(id) + d; if (j >= 0 && j < visible.length) move(id, visible[j]); };
+  const toggle = (key: 'hidden' | 'wide', id: string) => save({ ...layout, [key]: layout[key].includes(id) ? layout[key].filter((i) => i !== id) : [...layout[key], id] });
+
+  return (
+    <>
+      <div className="dash-bar">
+        {edit ? <span className="muted">Drag a card by its handle, or use the arrows. Changes save automatically.</span> : <span />}
+        <span className="head-actions">
+          {edit && <button className="btn small" onClick={() => save({ order: ids, hidden: [], wide })}>Reset layout</button>}
+          <button className={`btn small${edit ? ' primary' : ''}`} onClick={() => setEdit(!edit)} aria-pressed={edit}>{edit ? 'Done' : 'Customize'}</button>
+        </span>
+      </div>
+      <div className={`dash-grid${edit ? ' editing' : ''}`}>
+        {visible.map((id) => {
+          const w = byId.get(id);
+          if (!w) return null;
+          return (
+            <div key={id} className={`widget${layout.wide.includes(id) ? ' w-full' : ''}${drag === id ? ' dragging' : ''}${over === id && drag !== id ? ' drop-here' : ''}`}
+              draggable={edit}
+              onDragStart={(e) => { setDrag(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); }}
+              onDragOver={(e) => { if (edit && drag) { e.preventDefault(); setOver(id); } }}
+              onDrop={(e) => { e.preventDefault(); if (drag) move(drag, id); setDrag(null); setOver(null); }}
+              onDragEnd={() => { setDrag(null); setOver(null); }}>
+              {edit && (
+                <div className="w-bar">
+                  <span className="w-grip" aria-hidden>⠿</span><strong>{w.title}</strong>
+                  <span className="w-btns">
+                    <button className="btn small" onClick={() => nudge(id, -1)} aria-label={`Move ${w.title} earlier`}>↑</button>
+                    <button className="btn small" onClick={() => nudge(id, 1)} aria-label={`Move ${w.title} later`}>↓</button>
+                    <button className="btn small" onClick={() => toggle('wide', id)}>{layout.wide.includes(id) ? 'Half width' : 'Full width'}</button>
+                    <button className="btn small" onClick={() => toggle('hidden', id)} aria-label={`Hide ${w.title}`}>Hide</button>
+                  </span>
+                </div>
+              )}
+              {w.node}
+            </div>
+          );
+        })}
+      </div>
+      {edit && layout.hidden.length > 0 && (
+        <div className="w-tray"><span className="muted">Hidden:</span>{layout.hidden.map((id) => <button key={id} className="btn small" onClick={() => toggle('hidden', id)}>+ {byId.get(id)?.title}</button>)}</div>
+      )}
+    </>
+  );
+}
+
+function ClosingList({ filters, now, go }: { filters: Filters; now: string; go: Nav['go'] }) {
+  const f: Filters = { ...filters, status: 'open' };
+  const { data } = useLoad(() => api.tenders(f, 'closing', 1, 6), [JSON.stringify(f)]);
+  return (
+    <section className="card">
+      <div className="card-head"><div><h2>Closing soonest</h2><p className="sub">Open tenders, nearest deadline first</p></div><button className="link-btn small" onClick={() => go('tenders', f)}>See all →</button></div>
+      {!data ? <Skeleton h={180} /> : data.items.length === 0 ? <div className="empty">Nothing open right now.</div> : (
+        <ul className="soon-list">
+          {data.items.map((t) => { const rel = relative(t.closing, now); return (
+            <li key={t.key}><button type="button" onClick={() => go('tenders', { ...filters, q: t.tender_id })}>
+              <span className="soon-main"><span className="strong">{headline(t).slice(0, 90)}{headline(t).length > 90 ? '…' : ''}</span><span className="muted small">{chain(t.organisation)[0]} · {t.value_text}</span></span>
+              <span className={`when pill ${rel.tone}`}>{rel.text || fmtDate(t.closing)}</span>
+            </button></li>
+          ); })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function Donut({ p, measure, onOpen }: { p: Pivot; measure: Measure; onOpen: (d: Drill | null) => void }) {
+  const data = p.rows.filter((r) => r.key !== 'Other').map((r, i) => ({ name: labelFor(p.group_by, r.key, p.labels), n: metricOf(r, measure), drill: r.drill, fill: `var(--c${(i % 8) + 1})` }));
+  const total = data.reduce((a, d) => a + d.n, 0);
+  const fmt = (n: number) => (measure === 'value' ? inr(n) : n.toLocaleString('en-IN'));
+  if (data.length === 0 || total === 0) return <div className="empty">Nothing to show.</div>;
+  return (
+    <div className="donut">
+      <div className="donut-chart">
+        <ResponsiveContainer width="100%" height={190}>
+          <PieChart>
+            <Pie data={data} dataKey="n" nameKey="name" innerRadius="64%" outerRadius="92%" paddingAngle={2} stroke="none" onClick={(_: unknown, i: number) => onOpen(data[i]?.drill ?? null)}>
+              {data.map((d) => <Cell key={d.name} fill={d.fill} style={{ cursor: 'pointer' }} />)}
+            </Pie>
+            <Tooltip formatter={(v) => fmt(Number(v))} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="donut-total"><strong>{fmt(total)}</strong><span>{measure === 'value' ? 'total value' : 'tenders'}</span></div>
+      </div>
+      <ul className="legend">
+        {data.map((d) => <li key={d.name}><button type="button" onClick={() => onOpen(d.drill)}><i style={{ background: d.fill }} /><span className="legend-name">{d.name}</span><span className="muted">{Math.round((100 * d.n) / total)}%</span></button></li>)}
+      </ul>
+    </div>
+  );
 }
