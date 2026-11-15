@@ -44,6 +44,13 @@ def number(v: Any) -> float | None:
     return -float(s) if neg else float(s)
 
 
+def _sr(v: Any) -> str:
+    """Excel stores 1 as 1.0; show it as 1."""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v or "").strip()
+
+
 @dataclass
 class BoqLine:
     row: int                       # row number in the source sheet, for pointing the user back at it
@@ -100,7 +107,7 @@ def parse_rows(rows: list[list[Any]]) -> BoqDocument:
         r = rows[i]
         cell = lambda k: (r[col[k]] if k in col and col[k] < len(r) else None)  # noqa: E731
         desc = re.sub(r"\s+", " ", str(cell("desc") or "")).strip()
-        if not desc or _SKIP.search(desc):
+        if not desc or _SKIP.search(desc) or number(desc) is not None:  # a numbered "1 2 3 4 5" row under the header is not an item
             continue
         qty, rate, amount = number(cell("qty")), number(cell("rate")), number(cell("amount"))
         uom_raw = str(cell("uom") or "").strip()
@@ -111,7 +118,7 @@ def parse_rows(rows: list[list[Any]]) -> BoqDocument:
         if not code:
             m = _CODE_IN_TEXT.search(desc)
             code = m.group(1) if m else None
-        line = BoqLine(row=i + 1, sr=str(cell("sr") or "").strip(), section=section, description=desc, uom_raw=uom_raw,
+        line = BoqLine(row=i + 1, sr=_sr(cell("sr")), section=section, description=desc, uom_raw=uom_raw,
                        uom=U.normalise_uom(uom_raw), qty=qty, rate=rate, amount=amount, sor_code=code)
         if line.uom is None:
             doc.warnings.append(f"Row {line.row}: unit '{uom_raw}' is not recognised." if uom_raw else f"Row {line.row}: no unit given.")
