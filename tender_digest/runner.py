@@ -1,6 +1,7 @@
 """Runs a collection (and, if asked, the email) in the background, one at a time, and keeps its history."""
 from __future__ import annotations
 
+import html
 import logging
 import os
 import re
@@ -195,9 +196,47 @@ class Scheduler(threading.Thread):
         done = datetime.fromisoformat(last["finished"] or last["started"]).replace(tzinfo=None)
         return now.replace(tzinfo=None) - done >= RETRY_AFTER
 
+    def maybe_alert(self, now: datetime) -> bool:
+        """Email the recipients once a day when today's daily run has failed for good: no more retries are coming and none succeeded."""
+        try:
+            store, manager = self.manager.store, self.manager
+            saved = store.get_settings()
+            cur = appsettings.current(manager.env, saved)
+            day = now.date().isoformat()
+            if not cur["schedule_enabled"] or not manager.mail_configured or not cur["recipients"] or saved.get("last_failure_alert") == day:
+                return False
+            tried = saved.get("failure_alert_try")
+            if tried and now.replace(tzinfo=None) - datetime.fromisoformat(tried).replace(tzinfo=None) < timedelta(minutes=15):
+                return False
+            today = store.scheduled_runs_on(day)
+            if not today or any(r["status"] in ("running", "ok") for r in today):
+                return False
+            last = today[-1]
+            if len(today) < MAX_ATTEMPTS and RETRYABLE.match(last.get("error") or ""):
+                return False  # another attempt is still coming
+            store.put_settings({"failure_alert_try": now.isoformat(timespec="seconds")})
+            subject, body_html, body_text = self._alert_text(today, store.get_run(last["id"]) or {})
+            manager.sender(manager.env.brevo_api_key, manager.env.mail_from, manager.env.mail_from_name, cur["recipients"], subject, body_html, body_text)
+            store.put_settings({"last_failure_alert": day})
+            return True
+        except Exception:  # noqa: BLE001 - an alert problem must never stop the scheduler
+            log.exception("failure alert could not be sent")
+            return False
+
+    @staticmethod
+    def _alert_text(today: list[dict], last_run: dict) -> tuple[str, str, str]:
+        attempts = "\n".join(f"- started {r['started'][11:16]}: {r.get('error') or 'failed'}" for r in today)
+        portals = "\n".join(f"- {r.get('name') or r.get('portal')}: {(r.get('errors') or ['no detail'])[0][:140]}" for r in (last_run.get("reports") or []) if r.get("failed"))
+        text = (f"Today's daily tender run did not complete, so there is no digest today.\n\nAttempts ({len(today)}):\n{attempts}\n"
+                + (f"\nPortals that failed in the last attempt:\n{portals}\n" if portals else "")
+                + "\nOpen the Runs page for the log, and press Run now to try again.")
+        body_html = "<p>" + html.escape(text).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+        return "TendAI: today's daily run failed", body_html, text
+
     def tick(self) -> int | None:
         now = local_now(self.manager.tz_name)
         if not self.due(now):
+            self.maybe_alert(now)
             return None
         try:
             return self.manager.start("scheduled", None, send_email=True)
