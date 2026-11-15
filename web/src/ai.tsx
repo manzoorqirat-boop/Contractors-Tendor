@@ -1,154 +1,100 @@
-import { Fragment, useEffect, useState } from 'react';
-import { api } from './api';
-import { fromParams } from './filters';
-import { fmtDate, inr } from './format';
-import { useToast } from './ui';
-import type { Nav } from './App';
-import type { AiStatus, Brief, DocFacts, Filters, TenderDetail } from './types';
+import { toParams } from './filters';
+import type { AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
-/** Asked once per page load: lets the AI sections stay out of the way when no key is set. */
-let statusPromise: Promise<AiStatus | null> | null = null;
-export function useAiStatus(): AiStatus | null {
-  const [s, setS] = useState<AiStatus | null>(null);
-  useEffect(() => {
-    statusPromise ??= api.aiStatus().catch(() => null);
-    let live = true;
-    statusPromise.then((r) => { if (live) setS(r); });
-    return () => { live = false; };
-  }, []);
-  return s;
-}
-export const resetAiStatus = () => { statusPromise = null; };
-
-export function FitBadge({ fit, reason, notCivil }: { fit?: number | null; reason?: string | null; notCivil?: number | null }) {
-  return (
-    <>
-      {fit ? <span className={`badge ${fit >= 4 ? 'ok' : fit === 3 ? 'warn' : 'plain'}`} title={reason || undefined}>Fit {fit}/5</span> : null}
-      {notCivil === 0 && <span className="badge warn" title="The AI thinks this may not be civil work. Check before relying on it.">May not be civil</span>}
-    </>
-  );
+export class ApiError extends Error {
+  constructor(public status: number, message: string) { super(message); }
 }
 
-/** One question in plain words becomes filters on the Tenders page. */
-export function AskBar({ nav }: { nav: Nav }) {
-  const toast = useToast();
-  const [q, setQ] = useState('');
-  const [busy, setBusy] = useState(false);
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!q.trim() || busy) return;
-    setBusy(true);
+let onUnauthorised: () => void = () => {};
+export function setUnauthorisedHandler(fn: () => void) { onUnauthorised = fn; }
+
+async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
+  } catch {
+    throw new ApiError(0, 'Cannot reach the server. Check your connection and try again.');
+  }
+  if (res.status === 401 && path !== '/api/login') onUnauthorised();
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
     try {
-      const r = await api.ask(q.trim());
-      const p = new URLSearchParams();
-      for (const [k, v] of Object.entries(r.filters)) { if (Array.isArray(v)) v.forEach((x) => p.append(k, String(x))); else if (v === true) p.set(k, 'true'); else p.set(k, String(v)); }
-      const f: Filters = fromParams(p).filters;
-      if (!r.filters.status) f.status = 'open';
-      nav.go('tenders', f, r.sort ? { sort: r.sort } : undefined);
-      toast(r.explanation || 'Showing matching tenders');
-    } catch (err) { toast((err as Error).message, 'bad'); }
-    finally { setBusy(false); }
+      const body = await res.json();
+      if (typeof body.detail === 'string') message = body.detail;
+      else if (Array.isArray(body.detail)) message = 'Some of the values are not valid.';
+    } catch { /* not JSON: keep the generic message */ }
+    throw new ApiError(res.status, message);
   }
-  return (
-    <form className="askbar" onSubmit={submit} role="search">
-      <span className="askbar-ai" aria-hidden>AI</span>
-      <input value={q} onChange={(e) => setQ(e.target.value)} maxLength={500} placeholder="Ask in plain words, e.g. drainage tenders in Pune over 50 lakh closing this week" aria-label="Ask TendAI about tenders" />
-      <button className="btn ai primary" disabled={busy || !q.trim()}>{busy ? 'Thinking…' : 'Ask'}</button>
-    </form>
-  );
+  return res.json() as Promise<T>;
 }
 
-const List = ({ title, items }: { title: string; items: string[] }) => (items.length ? <div className="ai-sec"><h4>{title}</h4><ul>{items.map((x, i) => <li key={i}>{x}</li>)}</ul></div> : null);
-
-function DocView({ doc }: { doc: DocFacts }) {
-  return (
-    <div className="ai-text">
-      {doc.summary && <p style={{ margin: '0 0 8px' }}>{doc.summary}</p>}
-      <List title="Who can bid" items={doc.requirements} />
-      {doc.financial.length > 0 && <div className="ai-sec"><h4>Money</h4><dl className="facts">{doc.financial.map((f, i) => <Fragment key={i}><dt>{f.label}</dt><dd>{f.value}</dd></Fragment>)}</dl></div>}
-      {doc.dates.length > 0 && <div className="ai-sec"><h4>Dates</h4><dl className="facts">{doc.dates.map((f, i) => <Fragment key={i}><dt>{f.label}</dt><dd>{f.value}</dd></Fragment>)}</dl></div>}
-      <List title="Documents to submit" items={doc.documents} />
-      <List title="Penalties" items={doc.penalties} />
-      {doc.red_flags.length > 0 && <div className="alert warn" style={{ marginTop: 8 }}><strong>Watch out</strong><ul style={{ margin: '4px 0 0 18px', padding: 0 }}>{doc.red_flags.map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
-    </div>
-  );
-}
-
-export function BriefView({ b }: { b: Brief }) {
-  const tone = b.recommendation === 'Bid' ? 'ok' : b.recommendation === 'No bid' ? 'bad' : 'warn';
-  return (
-    <div className="ai-text">
-      <div className="brief-head"><span className={`badge ${tone}`}>{b.recommendation}</span><strong>{b.headline}</strong></div>
-      <List title="Why" items={b.reasons} />
-      <List title="Risks" items={b.risks} />
-      <List title="Confirm before bidding" items={b.checks} />
-    </div>
-  );
-}
-
-export const readBase64 = (file: File) => new Promise<string>((resolve, reject) => {
-  const r = new FileReader();
-  r.onload = () => resolve(String(r.result).split(',')[1] ?? '');
-  r.onerror = () => reject(new Error('Could not read that file'));
-  r.readAsDataURL(file);
-});
-
-/** Everything the AI assistant can do for one open tender. Shown only when an API key is set. */
-export function AiSections({ t, onChange }: { t: TenderDetail; onChange: (patch: Partial<TenderDetail>) => void }) {
-  const status = useAiStatus();
-  const [summary, setSummary] = useState(t.summary ?? '');
-  const [brief, setBrief] = useState<Brief | null>(t.brief);
-  const [doc, setDoc] = useState<DocFacts | null>(t.doc);
-  const [busy, setBusy] = useState<'summary' | 'brief' | 'doc' | null>(null);
-  const [error, setError] = useState('');
-  const [text, setText] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [showDoc, setShowDoc] = useState(false);
-
-  useEffect(() => { setSummary(t.summary ?? ''); setBrief(t.brief); setDoc(t.doc); setError(''); setText(''); setFile(null); setShowDoc(false); }, [t.key]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!status?.configured) return null;
-
-  async function run<T>(what: 'summary' | 'brief' | 'doc', fn: () => Promise<T>, done: (r: T) => void) {
-    setBusy(what); setError('');
-    try { done(await fn()); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
-  }
-  const summarise = () => run('summary', () => api.summary(t.key, !!summary), (r) => { setSummary(r.summary); onChange({ summary: r.summary }); });
-  const makeBrief = () => run('brief', () => api.brief(t.key, !!brief), (r) => { setBrief(r.brief); onChange({ brief: r.brief }); });
-  const readDoc = () => run('doc', async () => api.document(t.key, file ? '' : text, file ? await readBase64(file) : ''), (r) => { setDoc(r.doc); onChange({ doc: r.doc }); setShowDoc(false); });
-
-  return (
-    <div className="ai-box">
-      <div className="ai-title"><span className="askbar-ai" aria-hidden>AI</span> TendAI assistant</div>
-      <div className="ai-actions">
-        <button className="btn ai" onClick={summarise} disabled={busy !== null}>{busy === 'summary' ? 'Reading…' : summary ? 'Summarise again' : 'Summarise'}</button>
-        <button className="btn ai" onClick={makeBrief} disabled={busy !== null}>{busy === 'brief' ? 'Thinking…' : brief ? 'Refresh bid brief' : 'Bid / no-bid brief'}</button>
-        <button className="btn ai" onClick={() => setShowDoc((v) => !v)} disabled={busy !== null} aria-expanded={showDoc}>{doc ? 'Read another document' : 'Read tender document'}</button>
-      </div>
-      {error && <div className="alert warn" style={{ marginTop: 10 }}>{error}</div>}
-      {showDoc && (
-        <div className="ai-doc">
-          <label className="field">Upload the tender PDF (up to 10 MB)<input type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
-          <label className="field">Or paste the text<textarea value={text} onChange={(e) => setText(e.target.value)} disabled={!!file} placeholder="Paste the NIT or key pages here" spellCheck={false} /></label>
-          <button className="btn ai primary" onClick={readDoc} disabled={busy !== null || (!file && !text.trim())}>{busy === 'doc' ? 'Reading document…' : 'Extract key facts'}</button>
-        </div>
-      )}
-      {brief && <><h4 className="ai-h">Bid / no-bid brief</h4><BriefView b={brief} /></>}
-      {doc && <><h4 className="ai-h">From the document</h4><DocView doc={doc} /></>}
-      {summary && <><h4 className="ai-h">Summary</h4><div className="ai-text" style={{ whiteSpace: 'pre-wrap' }}>{summary}</div></>}
-      {(summary || brief || doc) && <p className="muted small" style={{ marginTop: 8 }}>AI can be wrong. Check every figure and date on the portal before bidding.</p>}
-    </div>
-  );
-}
-
-export function RelatedNote({ t }: { t: TenderDetail }) {
-  if (!t.related?.length) return null;
-  return (
-    <div className="alert warn" style={{ marginTop: 14 }}>
-      <strong>Looks like the same work was tendered before or again</strong>
-      <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
-        {t.related.map((r) => <li key={r.key}><span className="mono">{r.tender_id}</span> · found {fmtDate(r.first_seen)} · {r.closing ? `closes ${fmtDate(r.closing)}` : 'no closing date'}{r.value !== null && ` · ${inr(r.value, false)}`}</li>)}
-      </ul>
-    </div>
-  );
-}
+export const api = {
+  me: () => call<{ authenticated: boolean }>('/api/me'),
+  login: (username: string, password: string) => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  logout: () => call<{ ok: boolean }>('/api/logout', { method: 'POST' }),
+  config: () => call<AppConfig>('/api/config'),
+  stats: (f: Filters) => call<Stats>(`/api/stats?${toParams(f)}`),
+  tenders: (f: Filters, sort: string, page: number, pageSize = 25) => call<TenderPage>(`/api/tenders?${toParams(f)}&sort=${sort}&page=${page}&page_size=${pageSize}`),
+  exportUrl: (f: Filters, sort = 'closing') => `/api/tenders/export?${toParams(f)}&sort=${sort}`,
+  pivot: (f: Filters, groupBy: string, splitBy: string, top = 12) =>
+    call<Pivot>(`/api/analytics?${toParams(f)}&group_by=${groupBy}${splitBy ? `&split_by=${splitBy}` : ''}&top=${top}`),
+  facets: () => call<Facets>('/api/facets'),
+  tender: (key: string) => call<TenderDetail>(`/api/tenders/detail?key=${encodeURIComponent(key)}`),
+  star: (key: string, starred: boolean) => call<{ key: string; starred: boolean }>('/api/tenders/star', { method: 'POST', body: JSON.stringify({ key, starred }) }),
+  summary: (key: string, refresh = false) => call<{ summary: string; cached: boolean }>('/api/tenders/summary', { method: 'POST', body: JSON.stringify({ key, refresh }) }),
+  brief: (key: string, refresh = false) => call<{ brief: Brief; cached: boolean }>('/api/tenders/brief', { method: 'POST', body: JSON.stringify({ key, refresh }) }),
+  document: (key: string, text: string, pdf_base64: string) => call<{ doc: DocFacts }>('/api/tenders/document', { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
+  ask: (question: string) => call<AskResult>('/api/ask', { method: 'POST', body: JSON.stringify({ question }) }),
+  aiStatus: () => call<AiStatus>('/api/ai/status'),
+  aiTest: () => call<{ ok: boolean; model: string; fast_model: string }>('/api/ai/test', { method: 'POST' }),
+  aiScore: () => call<{ scored: number; labelled: number; unlabelled: number }>('/api/ai/score', { method: 'POST' }),
+  views: () => call<{ views: SavedView[] }>('/api/views'),
+  saveViews: (views: SavedView[]) => call<{ views: SavedView[] }>('/api/views', { method: 'PUT', body: JSON.stringify({ views }) }),
+  runs: () => call<{ runs: Run[]; running: number | null }>('/api/runs'),
+  run: (id: number) => call<Run>(`/api/runs/${id}`),
+  startRun: (portals: string[], sendEmail: boolean) => call<{ id: number }>('/api/runs', { method: 'POST', body: JSON.stringify({ portals, send_email: sendEmail }) }),
+  settings: () => call<Settings>('/api/settings'),
+  saveSettings: (s: Partial<Settings>) => call<Settings>('/api/settings', { method: 'PUT', body: JSON.stringify(s) }),
+  branding: () => call<{ logo_text: string }>('/api/branding'),
+  portals: () => call<{ portals: PortalStatus[]; manual: PortalStatus[] }>('/api/portals'),
+  addPortal: (p: NewPortal) => call<PortalStatus>('/api/portals', { method: 'POST', body: JSON.stringify(p) }),
+  checkPortal: (key: string) => call<PortalStatus>(`/api/portals/${encodeURIComponent(key)}/check`, { method: 'POST' }),
+  removePortal: (key: string) => call<{ removed: string }>(`/api/portals/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+  bids: () => call<BidList>('/api/bids'),
+  createBid: (key: string) => call<{ id: number; created: boolean }>('/api/bids', { method: 'POST', body: JSON.stringify({ key }) }),
+  bid: (id: number) => call<BidDetail>(`/api/bids/${id}`),
+  patchBid: (id: number, patch: Record<string, unknown>) => call<BidDetail>(`/api/bids/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteBid: (id: number) => call<{ removed: number }>(`/api/bids/${id}`, { method: 'DELETE' }),
+  addItem: (id: number, text: string, kind: string) => call<BidItem>(`/api/bids/${id}/items`, { method: 'POST', body: JSON.stringify({ text, kind }) }),
+  patchItem: (id: number, item: number, patch: Record<string, unknown>) => call<BidItem>(`/api/bids/${id}/items/${item}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteItem: (id: number, item: number) => call<{ removed: number }>(`/api/bids/${id}/items/${item}`, { method: 'DELETE' }),
+  generateItems: (id: number) => call<{ added: number }>(`/api/bids/${id}/items/generate`, { method: 'POST' }),
+  changesSeen: (id: number) => call<{ ok: boolean }>(`/api/bids/${id}/changes/seen`, { method: 'POST' }),
+  bidDocument: (id: number, key: string, text: string, pdf_base64: string) => call<{ doc: DocFacts; added: number }>(`/api/bids/${id}/document`, { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
+  manualRead: (text: string, pdf_base64: string) => call<{ listing: ManualListing }>('/api/tenders/manual/read', { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  manualCheck: (id: string) => call<{ existing: { key: string; portal_name: string; organisation: string; manual: boolean }[] }>(`/api/tenders/manual/check?tender_id=${encodeURIComponent(id)}`),
+  manualCreate: (b: ManualFields & { text: string; pdf_base64: string; read_document: boolean }) => call<{ key: string; doc_read: boolean; doc_error: string; source_kept: boolean }>('/api/tenders/manual', { method: 'POST', body: JSON.stringify(b) }),
+  manualEdit: (key: string, b: ManualFields) => call<{ key: string }>(`/api/tenders/manual?key=${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  manualDelete: (key: string) => call<{ removed: string }>(`/api/tenders/manual?key=${encodeURIComponent(key)}`, { method: 'DELETE' }),
+  fetchPortal: (id: number) => call<FetchResult>(`/api/bids/${id}/fetch`, { method: 'POST' }),
+  bidBrief: (id: number, refresh = false) => call<{ brief: Brief; cached: boolean }>(`/api/bids/${id}/brief`, { method: 'POST', body: JSON.stringify({ key: '', refresh }) }),
+  eligibility: (id: number) => call<Eligibility>(`/api/bids/${id}/eligibility`, { method: 'POST' }),
+  draft: (id: number, kind: string, instructions: string, refresh: boolean) => call<{ kind: string; text: string; cached: boolean }>(`/api/bids/${id}/draft`, { method: 'POST', body: JSON.stringify({ kind, instructions, refresh }) }),
+  bidAlerts: (days = 7) => call<{ alerts: BidAlert[]; unseen: number }>(`/api/bids/alerts?days=${days}`),
+  bidStats: () => call<BidStats>('/api/bids/stats'),
+  vault: () => call<VaultData>('/api/vault'),
+  addVault: (doc: { name: string; kind: string; issued: string; expiry: string; notes: string; filename: string; file_base64: string }) => call<VaultDoc>('/api/vault', { method: 'POST', body: JSON.stringify(doc) }),
+  patchVault: (id: number, patch: Record<string, unknown>) => call<VaultDoc>(`/api/vault/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteVault: (id: number) => call<{ removed: number }>(`/api/vault/${id}`, { method: 'DELETE' }),
+  vaultFileUrl: (id: number) => `/api/vault/${id}/file`,
+  saveFacts: (facts: CompanyFact[]) => call<{ facts: CompanyFact[] }>('/api/company-facts', { method: 'PUT', body: JSON.stringify({ facts }) }),
+  boqCatalogue: () => call<CatalogueData>('/api/boq/catalogue'),
+  importCatalogue: (kind: string, csv_text: string) => call<CatalogueImport>('/api/boq/catalogue', { method: 'POST', body: JSON.stringify({ kind, csv_text }) }),
+  bidBoq: (id: number, include_review: boolean) => call<BoqView>(`/api/bids/${id}/boq?include_review=${include_review}`),
+  uploadBoq: (id: number, filename: string, file_base64: string) => call<BoqView>(`/api/bids/${id}/boq`, { method: 'POST', body: JSON.stringify({ filename, file_base64 }) }),
+  confirmBoqLine: (id: number, line: number, item_code: string | null) => call<BoqView>(`/api/bids/${id}/boq/lines/${line}`, { method: 'POST', body: JSON.stringify({ item_code }) }),
+  bidRisks: (id: number) => call<RiskData>(`/api/bids/${id}/risks`),
+  readRisks: (id: number, text: string, pdf_base64: string) => call<RiskData>(`/api/bids/${id}/risks`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  simulate: (id: number, input: SimInput) => call<Simulation>(`/api/bids/${id}/risks/simulate`, { method: 'POST', body: JSON.stringify(input) }),
+  testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
+};
