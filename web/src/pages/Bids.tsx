@@ -7,6 +7,9 @@ import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
 import type { AppConfig, BidAlert, BidDetail, BidItem, BidStats, BidSummary, MatchStatus, Stage, StatGroup, VaultDoc } from '../types';
 
+type WsTab = 'decide' | 'checklist' | 'price' | 'letters' | 'result';
+const defaultTab = (s: Stage): WsTab => (s === 'preparing' ? 'checklist' : ['submitted', 'opened', 'won', 'lost'].includes(s) ? 'result' : 'decide');
+
 const ACTIVE: Stage[] = ['interested', 'preparing', 'submitted', 'opened'];
 const CHANGE_TEXT: Record<string, string> = { closing: 'Closing date moved', opening: 'Bid opening date moved', corrigendum: 'Corrigendum', prebid: 'Pre-bid meeting date' };
 
@@ -176,6 +179,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const [bid, setBid] = useState<BidDetail | null>(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const [tabSel, setTabSel] = useState<WsTab | null>(null);
   const vault = useLoad(() => api.vault(), []);
   const load = () => api.bid(id).then(setBid, (e: Error) => setError(e.message));
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -196,7 +200,9 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const rel = relative(bid.closing, config.now);
   const open = ACTIVE.includes(bid.stage);
   const unseen = bid.changes.filter((c) => !c.seen);
+  const tab = tabSel ?? defaultTab(bid.stage);
   const docsOpen = bid.items.filter((i) => i.kind === 'document' && !i.done).length;
+  const docProblems = bid.items.filter((i) => i.kind === 'document' && !i.done && i.match && ['expired', 'expires_before_close', 'missing'].includes(i.match.status)).length;
   const changeStage = (s: string) => {
     if (s === 'submitted' && bid.stage !== 'submitted' && docsOpen > 0 && !window.confirm(`${plural(docsOpen, 'document')} on the checklist ${docsOpen === 1 ? 'is' : 'are'} not ticked yet. Mark this bid as submitted anyway?`)) return;
     save({ stage: s });
@@ -231,11 +237,6 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       )}
 
       <NextStep bid={bid} />
-      <nav className="jump" aria-label="Jump to a section">
-        {([['checklist', 'Checklist'], ['boq', 'BOQ'], ['risk', 'Risk'], ['eligibility', 'Eligibility'], ['brief', 'Brief'], ['drafts', 'Letters'], ['result', 'Result'], ['notes', 'Notes']] as const).map(([k, l]) => (
-          <button key={k} type="button" onClick={() => document.getElementById(`sec-${k}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })}>{l}</button>
-        ))}
-      </nav>
 
       <section className="card" style={{ marginBottom: 14 }}>
         <div className="ws-grid">
@@ -259,14 +260,29 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         {bid.history.length > 0 && <div className="alert warn" style={{ marginTop: 10, marginBottom: 0 }}>{bid.history.map((h) => <div key={h}>{h}</div>)}</div>}
       </section>
 
-      <div id="sec-checklist"><Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} /></div>
-      <div id="sec-boq"><BoqCard bidId={bid.id} /></div>
-      <div id="sec-risk"><RiskCard bidId={bid.id} aiOn={!!ai?.configured} /></div>
-      <div id="sec-eligibility"><EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} /></div>
-      {bid.brief && <section id="sec-brief" className="card" style={{ marginBottom: 14 }}><h2>Bid / no-bid brief</h2><BriefView b={bid.brief} /></section>}
-      <div id="sec-drafts"><Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} /></div>
+      <div className="ws-tabs" role="tablist" aria-label="Bid sections">
+        {([['decide', 'Decide'], ['checklist', 'Checklist'], ['price', 'Price'], ['letters', 'Letters'], ['result', 'Result & notes']] as [WsTab, string][]).map(([k, l]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTabSel(k)}>
+            {l}{k === 'checklist' && docProblems > 0 && <span className="count-pill alert-pill" title="Required papers not ready">{docProblems}</span>}
+          </button>
+        ))}
+      </div>
 
-      {(['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && (
+      {tab === 'checklist' && <Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} />}
+      {tab === 'price' && <><BoqCard bidId={bid.id} /><RiskCard bidId={bid.id} aiOn={!!ai?.configured} /></>}
+      {tab === 'decide' && (
+        <>
+          <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
+          {bid.brief && <section className="card" style={{ marginBottom: 14 }}><h2>Bid / no-bid brief</h2><BriefView b={bid.brief} /></section>}
+          {!ai?.configured && !bid.eligibility && !bid.brief && <div className="card empty">Eligibility checks and bid / no-bid briefs need the AI assistant. Until it is on, use the checklist to record the conditions yourself.</div>}
+        </>
+      )}
+      {tab === 'letters' && <>
+        <Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
+        {!ai?.configured && !bid.drafts && <div className="card empty">Draft letters need the AI assistant.</div>}
+      </>}
+
+      {tab === 'result' && (['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && (
         <section id="sec-result" className="card" style={{ marginBottom: 14 }}>
           <h2>Result</h2>
           <p className="sub">Recording prices and the outcome builds your record, which shows on similar tenders.</p>
@@ -284,14 +300,15 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         </section>
       )}
 
-      <section id="sec-notes" className="card" style={{ marginBottom: 14 }}>
+      {tab === 'result' && <section id="sec-notes" className="card" style={{ marginBottom: 14 }}>
         <label className="field">Notes<textarea defaultValue={bid.notes ?? ''} maxLength={4000} placeholder="Site visit, rates, who to call…" onBlur={(e) => e.target.value !== (bid.notes ?? '') && save({ notes: e.target.value })} /></label>
         {bid.changes.length > 0 && (
           <details><summary className="muted small">Change history ({bid.changes.length})</summary>
             <ul style={{ margin: '6px 0 0 18px', padding: 0 }} className="small">{bid.changes.map((c) => <li key={c.id}>{fmtDate(c.at, true)} · {CHANGE_TEXT[c.what] ?? c.what}: {c.what === 'closing' || c.what === 'opening' ? `${fmtDate(c.old, true)} → ${fmtDate(c.new, true)}` : c.new}</li>)}</ul>
           </details>
         )}
-      </section>
+      </section>}
+      {tab === 'result' && !(['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && <p className="muted small">The result form appears once the bid is Submitted.</p>}
       <button className="link-btn" style={{ color: 'var(--bad)' }} onClick={remove}>Remove this bid</button>
     </>
   );
