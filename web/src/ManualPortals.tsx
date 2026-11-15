@@ -18,7 +18,10 @@ export function ManualBanner({ onOpen }: { onOpen: () => void }) {
         <strong>{manual.length} portal{manual.length > 1 ? 's' : ''} to check by hand:</strong>{' '}
         {manual.map((p) => `${p.name} (${p.label})`).join(', ')}. The app cannot read {manual.length > 1 ? 'them' : 'it'} on its own, so nothing from {manual.length > 1 ? 'them' : 'it'} is in the numbers below.
       </span>
-      <button className="btn small" onClick={onOpen}>See details</button>
+      <span style={{ display: 'flex', gap: 8 }}>
+        <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender by hand</button>
+        <button className="btn small" onClick={onOpen}>See details</button>
+      </span>
     </div>
   );
 }
