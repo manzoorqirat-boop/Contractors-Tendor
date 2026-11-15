@@ -4,6 +4,7 @@ import { DISPLAY, EMPTY, fromParams, toParams } from './filters';
 import { useLoad } from './hooks';
 import { AskBar } from './ai';
 import { Dashboard } from './pages/Dashboard';
+import { AddTenderHost } from './AddTender';
 import { BidsPage } from './pages/Bids';
 import { Explore } from './pages/Explore';
 import { Login } from './pages/Login';
@@ -133,6 +134,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="app">
+      <AddTenderHost />
       <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
       <aside className="sidebar">
         <div className="brand" aria-label="TendAI by QMSofts">
