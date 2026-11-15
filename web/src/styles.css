@@ -309,3 +309,10 @@ main:focus { outline: none; }
   .nav::-webkit-scrollbar { display: none; }
   .nav button { flex: 0 0 auto; padding: 8px 12px; white-space: nowrap; }
 }
+
+/* ---- bid page: jump bar ------------------------------------------------------------------------------------------ */
+.jump { position: sticky; top: 0; z-index: 5; display: flex; gap: 6px; overflow-x: auto; padding: 8px 0; margin-bottom: 10px; background: var(--bg, var(--surface)); scrollbar-width: none; }
+.jump::-webkit-scrollbar { display: none; }
+.jump button { flex: 0 0 auto; border: 1px solid var(--border, #d0d5dd); background: var(--surface); color: inherit; border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.jump button:hover { border-color: var(--accent); }
+[id^="sec-"] { scroll-margin-top: 56px; }
