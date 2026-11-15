@@ -142,7 +142,7 @@ def build(
             return f"<h2>{escape(title)}</h2><p class=o>{escape(empty)}</p>"
         groups = ""
         for key in dict.fromkeys(t.portal for t in sorted(tenders, key=lambda x: x.portal)):
-            portal_name = by_portal[key].portal.name if key in by_portal else key
+            portal_name = by_portal[key].portal.name if key in by_portal else "Added by hand" if key == "manual" else key
             shown, more = _top([t for t in tenders if t.portal == key], limit)
             groups += (
                 f"<h3>{escape(portal_name)} ({len(shown) + more})</h3>"
