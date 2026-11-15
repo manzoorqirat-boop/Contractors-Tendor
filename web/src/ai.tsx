@@ -24,7 +24,7 @@ export function FitBadge({ fit, reason, notCivil }: { fit?: number | null; reaso
   return (
     <>
       {fit ? <span className={`badge ${fit >= 4 ? 'ok' : fit === 3 ? 'warn' : 'plain'}`} title={reason || undefined}>Fit {fit}/5</span> : null}
-      {notCivil === 0 && <span className="badge warn" title="Claude thinks this may not be civil work. Check before relying on it.">May not be civil</span>}
+      {notCivil === 0 && <span className="badge warn" title="The AI thinks this may not be civil work. Check before relying on it.">May not be civil</span>}
     </>
   );
 }
@@ -53,7 +53,7 @@ export function AskBar({ nav }: { nav: Nav }) {
     <form className="askbar" onSubmit={submit} role="search">
       <span className="askbar-ai" aria-hidden>AI</span>
       <input value={q} onChange={(e) => setQ(e.target.value)} maxLength={500} placeholder="Ask in plain words, e.g. drainage tenders in Pune over 50 lakh closing this week" aria-label="Ask TendAI about tenders" />
-      <button className="btn primary" disabled={busy || !q.trim()}>{busy ? 'Thinking…' : 'Ask'}</button>
+      <button className="btn ai primary" disabled={busy || !q.trim()}>{busy ? 'Thinking…' : 'Ask'}</button>
     </form>
   );
 }
@@ -93,7 +93,7 @@ export const readBase64 = (file: File) => new Promise<string>((resolve, reject) 
   r.readAsDataURL(file);
 });
 
-/** Everything Claude can do for one open tender. Shown only when an API key is set. */
+/** Everything the AI assistant can do for one open tender. Shown only when an API key is set. */
 export function AiSections({ t, onChange }: { t: TenderDetail; onChange: (patch: Partial<TenderDetail>) => void }) {
   const status = useAiStatus();
   const [summary, setSummary] = useState(t.summary ?? '');
@@ -121,16 +121,16 @@ export function AiSections({ t, onChange }: { t: TenderDetail; onChange: (patch:
     <div className="ai-box">
       <div className="ai-title"><span className="askbar-ai" aria-hidden>AI</span> TendAI assistant</div>
       <div className="ai-actions">
-        <button className="btn" onClick={summarise} disabled={busy !== null}>{busy === 'summary' ? 'Reading…' : summary ? 'Summarise again' : 'Summarise'}</button>
-        <button className="btn" onClick={makeBrief} disabled={busy !== null}>{busy === 'brief' ? 'Thinking…' : brief ? 'Refresh bid brief' : 'Bid / no-bid brief'}</button>
-        <button className="btn" onClick={() => setShowDoc((v) => !v)} disabled={busy !== null} aria-expanded={showDoc}>{doc ? 'Read another document' : 'Read tender document'}</button>
+        <button className="btn ai" onClick={summarise} disabled={busy !== null}>{busy === 'summary' ? 'Reading…' : summary ? 'Summarise again' : 'Summarise'}</button>
+        <button className="btn ai" onClick={makeBrief} disabled={busy !== null}>{busy === 'brief' ? 'Thinking…' : brief ? 'Refresh bid brief' : 'Bid / no-bid brief'}</button>
+        <button className="btn ai" onClick={() => setShowDoc((v) => !v)} disabled={busy !== null} aria-expanded={showDoc}>{doc ? 'Read another document' : 'Read tender document'}</button>
       </div>
       {error && <div className="alert warn" style={{ marginTop: 10 }}>{error}</div>}
       {showDoc && (
         <div className="ai-doc">
           <label className="field">Upload the tender PDF (up to 10 MB)<input type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
           <label className="field">Or paste the text<textarea value={text} onChange={(e) => setText(e.target.value)} disabled={!!file} placeholder="Paste the NIT or key pages here" spellCheck={false} /></label>
-          <button className="btn primary" onClick={readDoc} disabled={busy !== null || (!file && !text.trim())}>{busy === 'doc' ? 'Reading document…' : 'Extract key facts'}</button>
+          <button className="btn ai primary" onClick={readDoc} disabled={busy !== null || (!file && !text.trim())}>{busy === 'doc' ? 'Reading document…' : 'Extract key facts'}</button>
         </div>
       )}
       {brief && <><h4 className="ai-h">Bid / no-bid brief</h4><BriefView b={brief} /></>}
