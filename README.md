@@ -56,6 +56,21 @@ On a bid's page, below the checklist:
 
 The BOQ data is stored in `boq.db` next to the main database (set `BOQ_DB_PATH` to change it). Lump-sum lines and PDF BOQs are not priced or read.
 
+## Tenders the app cannot collect (add by hand)
+
+Some tenders never reach the lists the app reads: a portal behind a captcha, login or OTP, a newspaper notice, an NIT sent to you.
+Press **Add a tender** (Tenders page, Bids page, or the "check these by hand" notice on the Dashboard):
+
+1. Upload the notice (PDF) or paste its text. With the AI assistant on, the Tender ID, work description, department, place, value, EMD and dates are read from it.
+2. **Check and correct the details.** Nothing is saved until you press Save. The closing date is required; a date the notice gives without a time is filled in as 17:00 and flagged.
+3. It is saved as a normal tender under the portal name **Added by hand**, marked civil, and not counted as "new since the last digest". Optionally the notice is also read for requirements and documents to submit.
+4. From there everything works as for a collected tender: Start a bid, checklist, eligibility, drafts, BOQ and risk.
+
+The notice is kept with the tender (in `vault/sources` beside the database, or under `VAULT_DIR`), so the risk step can reuse it without another upload. The same happens when you read a document on any tender.
+A Tender ID already in the app is refused, so a hand-added tender cannot duplicate a collected one. **Edit details** corrects a hand-added tender and its bid together; it can be removed once it has no bid.
+
+Limits: the app cannot see corrigenda or moved dates on a hand-added tender, because there is no portal session to re-read. The bid has a **Last checked on the portal** date and reminds you in the last five days before closing until you record a check.
+
 ## Deploy on Railway (one service)
 
 1. New Railway service from this repo. Railway builds the `Dockerfile` (React page + Python service in one image).
