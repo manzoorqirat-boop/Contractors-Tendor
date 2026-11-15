@@ -1,6 +1,7 @@
 :root {
   --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f1f3f6; --border: #e2e6ec; --text: #14181f; --muted: #5d6877;
   --accent: #2563eb; --accent-soft: #e8efff; --accent-text: #ffffff;
+  --ai: #7c3aed; --ai-soft: #f1eafe; --ai-text: #ffffff;
   --ok: #047857; --ok-soft: #e3f6ee; --warn: #b45309; --warn-soft: #fdf1dd; --bad: #b91c1c; --bad-soft: #fde8e8;
   --c1: #2563eb; --c2: #0d9488; --c3: #d97706; --c4: #7c3aed; --c5: #db2777; --c6: #64748b; --c7: #0891b2; --c8: #65a30d; --c0: #b6bdc9;
   --grid: #e5e8ee; --shadow: 0 1px 2px rgba(16, 24, 40, .06);
@@ -11,6 +12,7 @@
   :root:not([data-theme='light']) {
     --bg: #0f1218; --surface: #171b23; --surface-2: #1e232d; --border: #2a303c; --text: #e8ebf0; --muted: #98a2b3;
     --accent: #5b8cff; --accent-soft: #1b2744; --accent-text: #0b1020;
+    --ai: #a78bfa; --ai-soft: #2a2145; --ai-text: #120a24;
     --ok: #4ade80; --ok-soft: #12301f; --warn: #fbbf24; --warn-soft: #33270f; --bad: #f87171; --bad-soft: #3a1717;
     --c1: #5b8cff; --c2: #2dd4bf; --c3: #fbbf24; --c4: #a78bfa; --c5: #f472b6; --c6: #94a3b8; --c7: #22d3ee; --c8: #a3e635; --c0: #4a5262; --c7: #22d3ee; --c8: #a3e635; --c0: #4a5262;
     --grid: #2a303c; --shadow: none; color-scheme: dark;
@@ -19,6 +21,7 @@
 :root[data-theme='dark'] {
   --bg: #0f1218; --surface: #171b23; --surface-2: #1e232d; --border: #2a303c; --text: #e8ebf0; --muted: #98a2b3;
   --accent: #5b8cff; --accent-soft: #1b2744; --accent-text: #0b1020;
+  --ai: #a78bfa; --ai-soft: #2a2145; --ai-text: #120a24;
   --ok: #4ade80; --ok-soft: #12301f; --warn: #fbbf24; --warn-soft: #33270f; --bad: #f87171; --bad-soft: #3a1717;
   --c1: #5b8cff; --c2: #2dd4bf; --c3: #fbbf24; --c4: #a78bfa; --c5: #f472b6; --c6: #94a3b8; --c7: #22d3ee; --c8: #a3e635; --c0: #4a5262; --c7: #22d3ee; --c8: #a3e635; --c0: #4a5262;
   --grid: #2a303c; --shadow: none; color-scheme: dark;
@@ -326,3 +329,13 @@ main:focus { outline: none; }
 
 /* ---- top bar: set-up links ---------------------------------------------------------------------------------------- */
 .topbar .link-btn[aria-current="page"] { font-weight: 700; color: inherit; text-decoration: underline; text-underline-offset: 4px; }
+
+/* ---- AI actions use their own colour (violet) so they stand apart from normal actions ------------------------------ */
+.btn.ai { background: var(--ai-soft); border-color: var(--ai); color: var(--ai); }
+.btn.ai:hover { background: var(--ai-soft); filter: brightness(.96); }
+.btn.ai.primary { background: var(--ai); border-color: var(--ai); color: var(--ai-text); }
+.btn.ai.primary:hover { filter: brightness(.92); }
+.askbar-ai { background: var(--ai); color: var(--ai-text); }
+.askbar:focus-within { border-color: var(--ai); box-shadow: 0 0 0 3px var(--ai-soft); }
+.ai-card { border-left: 4px solid var(--ai); }
+.badge.ai { background: var(--ai-soft); color: var(--ai); }
