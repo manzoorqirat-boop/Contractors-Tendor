@@ -25,6 +25,7 @@ sys.path.insert(0, str(HERE.parent))  # the repo root, for tender_digest
 from tender_digest import ai                                            # noqa: E402
 from tender_digest.bids import BidBook, clean_patch, default_vault_dir  # noqa: E402
 from tender_digest.gepnic import Tender                                 # noqa: E402
+from tender_digest.letters import Letters                               # noqa: E402
 from tender_digest.store import SeenStore                               # noqa: E402
 from content import FACTS, PROFILE, TENDERS, VAULT_DOCS                 # noqa: E402
 
@@ -172,6 +173,11 @@ def main() -> None:
         store.ai_save([(t.key, {"work_type": wtype, "civil": True, "fit": 4, "reason": "Past work"})], ph, False)
         bid, _ = book.create_from_tender(t.key, now)
         book.update(bid["id"], clean_patch({"stage": stage, "my_value": mine, "l1_value": l1, "l1_bidder": who or "Sahyadri Infra Works (us)", "result_note": "Seeded test result"}), now)
+
+    letters = Letters(store)
+    if not letters.list():
+        letters.create("Covering letter", "To,\nThe {{organisation}}\n\nSubject: Bid for \"{{title}}\" (Tender ID {{tender_id}})\n\nDear Sir,\n\nWe submit our bid for the above work, which closes on {{closing}}.\n\nYours faithfully,\n{{today}}", "demo", now)
+        letters.create("Request for extension", "To,\nThe {{organisation}}\n\nSubject: Request to extend the closing date of Tender ID {{tender_id}}\n\nDear Sir,\n\nWe request a short extension of the closing date ({{closing}}) so that we can complete our submission.\n\n{{today}}", "demo", now)
 
     print(f"Database: {a.db}\nTenders in list: {store.count()}  |  vault entries added: {added} ({attached} with a file)  |  bids: {len(book.list())}")
     if added and not attached:

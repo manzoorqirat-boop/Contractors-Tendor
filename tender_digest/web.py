@@ -27,7 +27,7 @@ from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, alerts, appsettings, mailer, reminders
+from . import access, accounts, ai, alerts, appsettings, letters, mailer, pack, reminders
 from .accounts import AccountError, Accounts, Principal
 from . import offsite
 from .backup import Backups, BackupError
@@ -36,6 +36,7 @@ from .boq.match import ClaudeVerifier
 from .boq.portal import fetch_boq, fetch_risks
 from .boq.service import BoqError, BoqService
 from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
+from .bids import _when as stored_date
 from .gepnic import PortalError, Tender, parse_date, pick_nit
 from .config import Portal, Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell, tenders_workbook
@@ -470,6 +471,25 @@ class BulkStar(BaseModel):
     starred: bool
 
 
+class TemplateBody(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    body: str = Field(max_length=letters.MAX_BODY * 2)
+    note: str = Field(default="", max_length=200)
+
+
+class TemplateRestore(BaseModel):
+    version: int = Field(ge=1)
+
+
+class LetterFill(BaseModel):
+    template_id: int
+
+
+class Corrigendum(BaseModel):
+    note: str = Field(max_length=600)
+    closing: str | None = Field(default=None, max_length=20)
+
+
 class DocChecked(BaseModel):
     checked: bool
 
@@ -586,6 +606,7 @@ class RunBody(BaseModel):
 def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None) -> FastAPI:
     vault_dir = default_vault_dir(env.state_path)
     bids = BidBook(store, vault_dir)
+    letter_book = letters.Letters(store)
     boq = BoqService.open(env.state_path, lambda: ClaudeVerifier() if ai.configured() else None)
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     remote_cfg, remote_problem = None, ""
@@ -1668,6 +1689,114 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 facts.append({"label": label, "value": value})
         store.put_settings({"company_facts": facts})
         return {"facts": facts}
+
+    # ---- the bid pack, letter templates, comparing tenders, hand-recorded corrigenda ---------------------------------------
+
+    @app.get("/api/bids/{bid_id}/pack", dependencies=auth)
+    def bid_pack(bid_id: int):
+        """A zip of the papers this bid needs, in checklist order, with an index of what is in it and what is missing."""
+        bid = bid_or_404(bid_id)
+        path, summary = pack.build(bid, bids.with_matches(bid, now()), bids, now())
+        stem = pack.safe_name(bid.get("tender_id") or f"bid-{bid_id}", 40)
+        return FileResponse(path, media_type="application/zip", filename=f"bid-pack-{stem}.zip", background=BackgroundTask(path.unlink, missing_ok=True),
+                            headers={"X-Pack-Files": str(summary["files"]), "X-Pack-Attention": str(summary["needs_attention"])})
+
+    def template_error(e: letters.LetterError) -> HTTPException:
+        return HTTPException(422, str(e))
+
+    @app.get("/api/letter-templates", dependencies=auth)
+    def letter_templates() -> dict:
+        facts = [{"key": f"company_{letters.slug(f['label'])}", "label": f["label"]} for f in company_facts() if letters.slug(f.get("label", ""))]
+        fields = [{"key": k, "label": v} for k, v in letters.BID_FIELDS.items()]
+        return {"templates": letter_book.list(), "fields": fields + facts}
+
+    @app.post("/api/letter-templates", dependencies=auth)
+    def letter_template_create(body: TemplateBody, request: Request) -> dict:
+        try:
+            return letter_book.create(body.name, body.body, request.state.user.username, now(), body.note)
+        except letters.LetterError as e:
+            raise template_error(e) from None
+
+    @app.put("/api/letter-templates/{template_id}", dependencies=auth)
+    def letter_template_save(template_id: int, body: TemplateBody, request: Request) -> dict:
+        try:
+            return letter_book.save(template_id, body.body, request.state.user.username, now(), body.name, body.note)
+        except letters.LetterError as e:
+            raise (HTTPException(404, str(e)) if str(e) == "No such template" else template_error(e)) from None
+
+    @app.get("/api/letter-templates/{template_id}/versions", dependencies=auth)
+    def letter_template_versions(template_id: int) -> dict:
+        if not letter_book.get(template_id):
+            raise HTTPException(404, "No such template")
+        return {"versions": letter_book.versions(template_id)}
+
+    @app.post("/api/letter-templates/{template_id}/restore", dependencies=auth)
+    def letter_template_restore(template_id: int, body: TemplateRestore, request: Request) -> dict:
+        if not letter_book.get(template_id):
+            raise HTTPException(404, "No such template")
+        try:
+            return letter_book.restore(template_id, body.version, request.state.user.username, now())
+        except letters.LetterError as e:
+            raise template_error(e) from None
+
+    @app.delete("/api/letter-templates/{template_id}", dependencies=auth)
+    def letter_template_delete(template_id: int) -> dict:
+        if not letter_book.delete(template_id):
+            raise HTTPException(404, "No such template")
+        return {"removed": template_id}
+
+    @app.post("/api/bids/{bid_id}/letter", dependencies=auth)
+    def bid_letter(bid_id: int, body: LetterFill) -> dict:
+        """A template filled in from this bid and the company facts. Placeholders with no value stay in the text and are listed."""
+        bid = bid_or_404(bid_id)
+        tpl = letter_book.get(body.template_id)
+        if not tpl:
+            raise HTTPException(404, "No such template")
+        today = now()
+
+        def day(v: str | None) -> str:
+            d = stored_date(v, end_of_day=False) if v else None
+            return d.strftime("%d %b %Y" + (", %I:%M %p" if v and len(v) > 10 else "")).replace(" 0", " ") if d else ""
+
+        values = {"tender_id": bid.get("tender_id") or "", "title": bid.get("description") or bid.get("title") or "", "organisation": bid.get("organisation") or "",
+                  "portal": portal_names.get(bid.get("portal") or "", bid.get("portal") or ""), "location": bid.get("location") or "", "closing": day(bid.get("closing")),
+                  "opening": day(bid.get("opening")), "prebid": day(bid.get("prebid_date")), "emd": format_inr(bid.get("emd")) if bid.get("emd") else "",
+                  "value": format_inr(bid.get("value")) if bid.get("value") else "", "today": today.strftime("%d %b %Y").lstrip("0")}
+        for f in company_facts():
+            values[f"company_{letters.slug(f.get('label', ''))}"] = str(f.get("value", ""))
+        text, missing = letters.render(tpl["body"], values)
+        return {"text": text, "missing": missing, "template": tpl["name"], "version": tpl["version"]}
+
+    @app.get("/api/tenders/compare", dependencies=auth)
+    def tenders_compare(keys: list[str] = Query(..., max_length=4)) -> dict:
+        """Two to four tenders side by side, with the derived figures a bidder weighs (EMD as a share of value, days left)."""
+        keys = list(dict.fromkeys(keys))
+        if not 2 <= len(keys) <= 4:
+            raise HTTPException(422, "Choose two to four tenders to compare")
+        out = []
+        for k in keys:
+            row = store.get_tender(k)
+            if not row:
+                raise HTTPException(404, "One of those tenders is no longer in the list")
+            row = shape(row)
+            closing = stored_date(row.get("closing"), end_of_day=False) if row.get("closing") else None
+            value, emd = row.get("value"), row.get("emd")
+            bid_id = bids.id_for_key(k)
+            out.append({**{f: row.get(f) for f in ("key", "tender_id", "title", "description", "organisation", "portal_name", "category", "location", "work_type", "value", "value_text",
+                                                   "emd", "published", "closing", "opening", "fit", "fit_reason", "starred", "manual")},
+                        "emd_pct": round(emd / value * 100, 2) if value and emd else None,
+                        "days_left": round((closing - now()).total_seconds() / 86400, 1) if closing else None, "bid_id": bid_id})
+        return {"tenders": out}
+
+    @app.post("/api/bids/{bid_id}/corrigenda", dependencies=auth)
+    def bid_corrigendum(bid_id: int, body: Corrigendum, request: Request) -> dict:
+        """Records a corrigendum (and the closing date it set) read on the portal by hand."""
+        bid_or_404(bid_id)
+        try:
+            bids.record_corrigendum(bid_id, body.note, body.closing, now(), request.state.user.username)
+        except BidError as e:
+            raise bid_error(e) from None
+        return bid_full(bid_or_404(bid_id))
 
     # ---- teamwork: people, comments, approval -------------------------------------------------------------------
 

@@ -50,6 +50,15 @@ async function scan(page, name) {
     await visit('bid', '#/bids/1');
     for (const t of ['Checklist', 'Price', 'Letters']) await visit(`bid ${t}`, '#/bids/1', () => page.click(`[role=tab]:has-text("${t}")`));
     await visit('vault', '#/vault');
+    await visit('vault letters', '#/vault', () => page.click('[role=tab]:has-text("Letters")'));
+    await visit('bid letter filled in', '#/bids/1', async () => { await page.click('[role=tab]:has-text("Letters")'); await page.click('[aria-label=Template] button >> nth=0'); await page.waitForSelector('textarea[aria-label="The letter"]'); });
+    await visit('record a corrigendum', '#/bids/1', () => page.click('text=Record a corrigendum'));
+    await visit('compare tenders', '#/tenders', async () => {
+      await page.click('button:has-text("Table")');
+      const boxes = page.locator('table input[type=checkbox]');
+      await boxes.nth(1).check(); await boxes.nth(2).check();
+      await page.click('button:has-text("Compare")'); await page.waitForSelector('table.cmp');
+    });
     await visit('runs', '#/runs');
     for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => page.click(`[role=tab]:has-text("${t}")`));
     await visit('account', '#/dashboard', async () => { if (mobile) await page.click('.more-toggle'); await page.click('text=Account & security'); });

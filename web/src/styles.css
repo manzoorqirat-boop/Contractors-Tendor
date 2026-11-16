@@ -681,3 +681,13 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; text-align: cent
 .comments p { margin: var(--sp-1) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comment-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
 .comment-head .link-btn { margin-left: auto; }
+
+.drawer.wide { width: min(100%, 980px); }
+.cmp td, .cmp th { vertical-align: top; min-width: 150px; }
+.cmp th:first-child, .cmp td:first-child { min-width: 110px; position: sticky; left: 0; background: var(--surface); }
+.cmp .best { font-weight: 700; background: var(--ok-soft); }
+.tpl-body { width: 100%; min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip-btn { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; background: var(--surface); font-size: 12px; cursor: pointer; color: inherit; }
+.chip-btn:hover { border-color: var(--accent, #2563eb); }
+.stack-fields label.field > input:not([type=checkbox]):not([type=radio]):not([type=file]), .stack-fields label.field > textarea { display: block; width: 100%; margin-top: 4px; }

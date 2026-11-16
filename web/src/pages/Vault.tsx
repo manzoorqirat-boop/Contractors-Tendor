@@ -9,9 +9,10 @@ import { Skeleton, useToast } from '../ui';
 import { ReadOnly, useSession } from '../session';
 import { useConfirm } from '../confirm';
 import { Tabs } from '../Tabs';
+import { TemplateManager } from '../LetterTemplates';
 import type { AppConfig, CompanyFact, VaultDoc } from '../types';
 
-type Tab = 'documents' | 'company' | 'catalogue';
+type Tab = 'documents' | 'company' | 'letters' | 'catalogue';
 let lastTab: Tab = 'documents';
 
 const SUGGESTED_FACTS = ['Registration class', 'Turnover, last financial year', 'Turnover, year before', 'Turnover, two years before', 'Net worth', 'Largest similar work completed', 'Years in business', 'Bid capacity'];
@@ -45,6 +46,7 @@ export function VaultPage({ config }: { config: AppConfig }) {
         <Tabs<Tab> label="Vault sections" value={tab} onChange={setTab} tabs={[
           { key: 'documents', label: <>Documents<span className={`tab-dot ${expired > 0 ? 'bad' : ''}`} title={expired > 0 ? `${expired} expired` : undefined}>{data.documents.length}</span></> },
           { key: 'company', label: <>Company<span className="tab-dot">{data.facts.length}</span></> },
+          { key: 'letters', label: 'Letters' },
           { key: 'catalogue', label: <>Item catalogue<span className="tab-dot">{items}</span></> }]} />
       </div>
 
@@ -72,6 +74,8 @@ export function VaultPage({ config }: { config: AppConfig }) {
           <Facts facts={data.facts} />
         </div>
       )}
+
+      {tab === 'letters' && <TemplateManager />}
 
       {tab === 'catalogue' && <CatalogueCard count={items} reload={cat.reload} />}
       </ReadOnly>

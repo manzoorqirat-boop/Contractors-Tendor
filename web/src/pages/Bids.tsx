@@ -9,6 +9,8 @@ import { useLoad, useServerNow } from '../hooks';
 import { BidProgress } from '../BidProgress';
 import { AssigneeSelect, MyWork, TeamTab } from '../Team';
 import { BiddersCard, CompetitorsCard } from '../Bidders';
+import { UseTemplate } from '../LetterTemplates';
+import { CorrigendumForm } from '../Corrigenda';
 import { Skeleton, useToast } from '../ui';
 import { Only, ReadOnly } from '../session';
 import { useConfirm } from '../confirm';
@@ -286,6 +288,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           ? <p className="muted small" style={{ marginTop: 8 }}>This tender was added by hand, so the app cannot watch it for corrigenda or moved dates. Look at the portal yourself and record the day here: the bid reminds you in the last days before closing.{' '}
               <button className="link-btn" onClick={() => save({ portal_checked: new Date().toISOString().slice(0, 10) })}>Checked today</button></p>
           : <p className="muted small" style={{ marginTop: 8 }}>Each run looks at this tender again and records new corrigenda and moved dates. The daily email repeats the ones coming up.</p>}
+        <Only role="bidder"><CorrigendumForm bidId={bid.id} manual={!!bid.manual} onRecorded={(b) => setBid({ ...bid, ...b })} /></Only>
         {bid.history.length > 0 && <div className="alert warn" style={{ marginTop: 10, marginBottom: 0 }}>{bid.history.map((h) => <div key={h}>{h}</div>)}</div>}
       </section>
 
@@ -314,8 +317,9 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       )}
       {tab === 'team' && <TeamTab bid={bid} config={config} onChange={(patch) => setBid({ ...bid, ...patch })} />}
       {tab === 'letters' && <>
+        <UseTemplate bidId={bid.id} tenderId={bid.tender_id ?? ''} />
         <Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
-        {!ai?.configured && !bid.drafts && <div className="card empty">Draft letters need the AI assistant.</div>}
+        {!ai?.configured && !bid.drafts && <div className="card empty">AI-written drafts need the AI assistant. The templates above work without it.</div>}
       </>}
 
       {tab === 'result' && (['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && (
@@ -441,6 +445,7 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
         <div className="head-actions">
           {!bid.manual && <button className="btn small primary" onClick={fetchPortal} disabled={fetching}>{fetching ? 'Fetching…' : 'Fetch from portal'}</button>}
           <button className="btn small" onClick={fromDoc}>Add standard steps</button>
+          <Only role="bidder"><a className="btn small" href={api.packUrl(bid.id)} download title="One zip of the Vault papers this checklist needs, in order, with an index of what is missing">Download bid pack</a></Only>
           {aiOn && <button className="btn small" onClick={() => setShowDoc((v) => !v)} aria-expanded={showDoc}>{bid.doc ? 'Read another document' : 'Read tender document'}</button>}
         </div>
       </div>

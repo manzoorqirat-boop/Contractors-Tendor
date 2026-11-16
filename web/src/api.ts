@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -149,5 +149,15 @@ export const api = {
   calendar: () => call<{ enabled: boolean; url: string }>('/api/calendar'),
   newCalendarToken: () => call<{ enabled: boolean; url: string }>('/api/calendar/token', { method: 'POST' }),
   stopCalendar: () => call<{ enabled: boolean; url: string }>('/api/calendar', { method: 'DELETE' }),
+  packUrl: (id: number) => `/api/bids/${id}/pack`,
+  letterTemplates: () => call<{ templates: LetterTemplate[]; fields: TemplateField[] }>('/api/letter-templates'),
+  createTemplate: (name: string, body: string) => call<LetterTemplate>('/api/letter-templates', { method: 'POST', body: JSON.stringify({ name, body }) }),
+  saveTemplate: (id: number, name: string, body: string, note: string) => call<LetterTemplate>(`/api/letter-templates/${id}`, { method: 'PUT', body: JSON.stringify({ name, body, note }) }),
+  templateVersions: (id: number) => call<{ versions: TemplateVersion[] }>(`/api/letter-templates/${id}/versions`),
+  restoreTemplate: (id: number, version: number) => call<LetterTemplate>(`/api/letter-templates/${id}/restore`, { method: 'POST', body: JSON.stringify({ version }) }),
+  deleteTemplate: (id: number) => call<{ removed: number }>(`/api/letter-templates/${id}`, { method: 'DELETE' }),
+  fillLetter: (bidId: number, template_id: number) => call<FilledLetter>(`/api/bids/${bidId}/letter`, { method: 'POST', body: JSON.stringify({ template_id }) }),
+  compareTenders: (keys: string[]) => call<{ tenders: CompareTender[] }>(`/api/tenders/compare?${keys.map((k) => `keys=${encodeURIComponent(k)}`).join('&')}`),
+  recordCorrigendum: (bidId: number, note: string, closing: string) => call<BidDetail>(`/api/bids/${bidId}/corrigenda`, { method: 'POST', body: JSON.stringify({ note, closing: closing || null }) }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
 };

@@ -5,6 +5,7 @@ import type { Nav } from '../App';
 import { FitBadge } from '../ai';
 import { FilterBar } from '../FilterBar';
 import { EMPTY } from '../filters';
+import { CompareDrawer } from '../Compare';
 import { StarButton, TenderDrawer } from '../TenderDrawer';
 import { chain, fmtDate, headline, relative } from '../format';
 import { useLoad } from '../hooks';
@@ -28,6 +29,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   // Tenders ticked for a bulk action. Kept across pages; at most MAX_PICK so the download address stays short.
   const [picked, setPicked] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [comparing, setComparing] = useState(false);
   const MAX_PICK = 100;
   const isPicked = (k: string) => picked.includes(k);
   const togglePick = (k: string) => {
@@ -152,6 +154,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
               <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(false)}>Unstar</button>
               <button type="button" className="btn small primary" disabled={bulkBusy} onClick={bulkBids}>Start bids</button>
             </Only>
+            <button type="button" className="btn small" disabled={picked.length < 2 || picked.length > 4} title={picked.length < 2 || picked.length > 4 ? 'Select two to four tenders to compare them' : 'Compare side by side'} onClick={() => setComparing(true)}>Compare</button>
             <a className="btn small" href={api.exportUrl(filters, display.sort, 'xlsx', picked)} download>Excel</a>
             <a className="btn small" href={api.exportUrl(filters, display.sort, 'csv', picked)} download>CSV</a>
             <button type="button" className="btn small ghost" onClick={() => setPicked([])}>Clear</button>
@@ -159,6 +162,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
         </div>
       )}
 
+      {comparing && picked.length >= 2 && picked.length <= 4 && <CompareDrawer keys={picked} onClose={() => setComparing(false)} onOpenBid={(id) => { setComparing(false); window.dispatchEvent(new CustomEvent('open-bid', { detail: id })); }} />}
       {selected && <TenderDrawer tenderKey={selected} now={config.now} onClose={() => setSelected(null)} onStar={setStar} />}
     </>
   );

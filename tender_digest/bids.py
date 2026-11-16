@@ -698,6 +698,32 @@ class BidBook:
             self.db.execute("INSERT INTO bid_changes (bid_id, at, what, old, new) VALUES (?,?,?,?,?)", (bid_id, _iso(now), what, old, new))
             self.db.commit()
 
+    def record_corrigendum(self, bid_id: int, note: str, new_closing: str | None, now: datetime, who: str = "") -> dict:
+        """Writes down a corrigendum read on the portal by hand (for a tender the app cannot watch), optionally with the closing date it set."""
+        bid = self.get(bid_id)
+        if not bid:
+            raise BidError("No such bid")
+        note = re.sub(r"[ \t]+", " ", str(note or "")).strip()[:500]
+        if not note:
+            raise BidError("Say what the corrigendum changed")
+        closing_iso = None
+        if new_closing:
+            when = _when(str(new_closing).strip())
+            if when is None:
+                raise BidError("The new closing date looks like 2026-12-05 or 2026-12-05T15:00")
+            closing_iso = _iso(when)
+        self.add_change(bid_id, "corrigendum", None, note + (f" (noted by {who})" if who else ""), now)
+        known = list(bid.get("corrigenda") or [])
+        known.append(note)
+        self.set_json(bid_id, "corrigenda", known[-100:], now)
+        if closing_iso and closing_iso != bid.get("closing"):
+            self.add_change(bid_id, "closing", bid.get("closing"), closing_iso, now)
+            with self.lock:
+                self.db.execute("UPDATE bids SET closing = ?, updated = ? WHERE id = ?", (closing_iso, _iso(now), bid_id))
+                self.db.commit()
+            self._sync_tender_dates(bid["key"], _when(closing_iso), None, "closing")
+        return self.get(bid_id) or bid
+
     def changes(self, bid_id: int, limit: int = 50) -> list[dict]:
         with self.lock:
             rows = self.db.execute("SELECT id, at, what, old, new, seen FROM bid_changes WHERE bid_id = ? ORDER BY id DESC LIMIT ?", (bid_id, limit)).fetchall()

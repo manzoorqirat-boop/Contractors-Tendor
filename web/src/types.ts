@@ -159,3 +159,13 @@ export interface BackupStatus {
   enabled: boolean; keep_days: number; latest_day: string | null; days: string[]; storage_warning: string;
   offsite: { configured: boolean; bucket: string; endpoint: string; last_ok: string | null; last_error: string | null; last_daily: string | null; last_weekly: string | null; keep_daily: number; keep_weekly: number };
 }
+
+export interface LetterTemplate { id: number; name: string; version: number; body: string; note: string; author: string; created: string; updated: string; placeholders: string[] }
+export interface TemplateVersion { version: number; body: string; note: string | null; author: string | null; created: string }
+export interface TemplateField { key: string; label: string }
+export interface FilledLetter { text: string; missing: string[]; template: string; version: number }
+export interface CompareTender {
+  key: string; tender_id: string; title: string; description: string; organisation: string; portal_name: string; category: string; location: string; work_type: string | null;
+  value: number | null; value_text: string; emd: number | null; emd_pct: number | null; published: string | null; closing: string | null; opening: string | null;
+  days_left: number | null; fit: number | null; fit_reason: string | null; starred: boolean; manual: boolean; bid_id: number | null;
+}

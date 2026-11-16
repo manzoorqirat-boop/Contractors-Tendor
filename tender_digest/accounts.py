@@ -71,7 +71,7 @@ class Principal:
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
 
 _ADMIN_AREAS = re.compile(r"^/api/(users|audit|backup|settings|calendar)(/|$)")
-_VAULT_FILE = re.compile(r"^/api/vault/\d+/file$")
+_VAULT_FILE = re.compile(r"^/api/(vault/\d+/file|bids/\d+/pack)$")
 
 
 def required_role(method: str, path: str) -> str:
@@ -440,6 +440,13 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/account/2fa/disable"): "Turned off two-step sign-in",
     ("POST", "/api/account/sessions/end-others"): "Signed out other devices",
     ("GET", "/api/backup"): "Downloaded a backup",
+    ("GET", "/api/bids/{bid_id}/pack"): "Downloaded a bid pack",
+    ("POST", "/api/letter-templates"): "Added a letter template",
+    ("PUT", "/api/letter-templates/{template_id}"): "Saved a letter template",
+    ("POST", "/api/letter-templates/{template_id}/restore"): "Restored an earlier version of a letter template",
+    ("DELETE", "/api/letter-templates/{template_id}"): "Removed a letter template",
+    ("POST", "/api/bids/{bid_id}/letter"): "Filled in a letter template for a bid",
+    ("POST", "/api/bids/{bid_id}/corrigenda"): "Recorded a corrigendum",
     ("POST", "/api/backup/offsite-now"): "Sent a backup to the off-site bucket",
     ("GET", "/api/vault/{doc_id}/file"): "Downloaded a Vault file",
     ("GET", "/api/tenders/export"): "Downloaded the tender spreadsheet",

@@ -102,7 +102,7 @@ export function MultiSelect({ title, options, selected, onChange, allowNone = tr
 }
 
 // ---- slide-over panel --------------------------------------------------------------------------------------------
-export function Drawer({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Drawer({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -125,7 +125,7 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
   return (
     <div className="drawer-wrap">
       <div className="drawer-back" onClick={onClose} />
-      <div className="drawer" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
+      <div className={`drawer${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
         <div className="drawer-head"><h2>{title}</h2><button className="link-btn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="drawer-body">{children}</div>
       </div>
