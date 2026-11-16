@@ -35,6 +35,7 @@ SORTS = {
 NONE = "__none__"  # filter value meaning "tenders where this is not stated"
 DEPT_SQL = "(CASE WHEN instr(organisation,'||')>0 THEN substr(organisation,1,instr(organisation,'||')-1) ELSE organisation END)"
 CATEGORY_SQL = "(CASE WHEN category IS NULL OR category = '' THEN 'Not stated' ELSE category END)"
+NOT_IGNORED = f"NOT (key IN (SELECT key FROM hidden) OR COALESCE({DEPT_SQL}, '') IN (SELECT dept FROM muted_departments))"
 LOCATION_SQL = "(CASE WHEN location IS NULL OR location = '' THEN 'Not stated' ELSE location END)"
 DEPT_LABEL_SQL = "(CASE WHEN organisation IS NULL OR organisation = '' THEN 'Not stated' ELSE " + DEPT_SQL + " END)"
 VALUE_BANDS = ["Under 1 lakh", "1 to 10 lakh", "10 lakh to 1 crore", "1 to 10 crore", "Over 10 crore", "Not stated"]
@@ -203,6 +204,14 @@ class SeenStore:
             if added:
                 self._backfill()
             self.db.execute("CREATE INDEX IF NOT EXISTS seen_civil_closing ON seen (civil, closing)")
+            self.db.execute("CREATE INDEX IF NOT EXISTS seen_portal ON seen (portal)")
+            self.db.execute("CREATE INDEX IF NOT EXISTS seen_first_seen ON seen (first_seen)")
+            self.db.execute("CREATE INDEX IF NOT EXISTS seen_value ON seen (value)")
+            self.db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS hidden (key TEXT PRIMARY KEY, at TEXT NOT NULL, by TEXT);
+                CREATE TABLE IF NOT EXISTS muted_departments (dept TEXT PRIMARY KEY, at TEXT NOT NULL, by TEXT);
+                """)
             self.db.commit()
 
     def _backfill(self) -> None:
@@ -252,6 +261,7 @@ class SeenStore:
     def delete_tender(self, key: str) -> None:
         with self.lock:
             self.db.execute("DELETE FROM starred WHERE key = ?", (key,))
+            self.db.execute("DELETE FROM hidden WHERE key = ?", (key,))
             self.db.execute("DELETE FROM seen WHERE key = ?", (key,))
             self.db.commit()
 
@@ -259,14 +269,14 @@ class SeenStore:
         """Civil tenders not yet emailed and still open. Anything that failed to send is picked up again next run."""
         with self.lock:
             rows = self.db.execute(
-                "SELECT payload FROM seen WHERE civil = 1 AND emailed = 0 AND (closing IS NULL OR closing >= ?)", (now.isoformat(),)
+                f"SELECT payload FROM seen WHERE civil = 1 AND emailed = 0 AND (closing IS NULL OR closing >= ?) AND {NOT_IGNORED}", (now.isoformat(),)
             ).fetchall()
         return [_from_json(r[0]) for r in rows]
 
     def closing_soon(self, now: datetime, days: int) -> list[Tender]:
         with self.lock:
             rows = self.db.execute(
-                "SELECT payload FROM seen WHERE civil = 1 AND closing >= ? AND closing <= ?",
+                f"SELECT payload FROM seen WHERE civil = 1 AND closing >= ? AND closing <= ? AND {NOT_IGNORED}",
                 (now.isoformat(), (now + timedelta(days=days)).isoformat()),
             ).fetchall()
         return [_from_json(r[0]) for r in rows]
@@ -289,10 +299,91 @@ class SeenStore:
             self.db.executemany("UPDATE seen SET emailed = 1 WHERE key = ?", [(k,) for k in keys])
             self.db.commit()
 
-    def prune(self, now: datetime, keep_days: int = 120) -> None:
+    def prune(self, now: datetime, keep_days: int = 45) -> None:
+        """Forgets old tenders. A tender that is still open is never removed, and neither is one you starred (or a bid: it holds its own copy)."""
         with self.lock:
-            self.db.execute("DELETE FROM seen WHERE first_seen < ?", (_iso(now - timedelta(days=keep_days)),))
+            self.db.execute("DELETE FROM seen WHERE first_seen < ? AND (closing IS NULL OR closing < ?) AND key NOT IN (SELECT key FROM starred)",
+                            (_iso(now - timedelta(days=keep_days)), _iso(now)))
+            self.db.execute("DELETE FROM hidden WHERE key NOT IN (SELECT key FROM seen)")
             self.db.commit()
+
+    # ---- tenders you are not interested in ------------------------------------------------------------------------
+
+    def hide(self, keys: list[str], now: datetime, by: str = "") -> int:
+        """Marks tenders as not interesting: out of the lists, the counts and the emails until restored. Returns how many were newly hidden."""
+        n = 0
+        with self.lock:
+            for k in dict.fromkeys(keys):
+                if self.db.execute("SELECT 1 FROM seen WHERE key = ? AND civil = 1", (k,)).fetchone():
+                    n += self.db.execute("INSERT OR IGNORE INTO hidden (key, at, by) VALUES (?,?,?)", (k, _iso(now), by[:80])).rowcount
+            self.db.commit()
+        return n
+
+    def unhide(self, keys: list[str]) -> int:
+        with self.lock:
+            n = sum(self.db.execute("DELETE FROM hidden WHERE key = ?", (k,)).rowcount for k in dict.fromkeys(keys))
+            self.db.commit()
+        return n
+
+    def department_of(self, key: str) -> str:
+        with self.lock:
+            r = self.db.execute(f"SELECT {DEPT_SQL} AS d FROM seen WHERE key = ?", (key,)).fetchone()
+        return (r["d"] or "").strip() if r else ""
+
+    def mute_department(self, dept: str, now: datetime, by: str = "") -> bool:
+        dept = (dept or "").strip()[:200]
+        if not dept:
+            return False
+        with self.lock:
+            n = self.db.execute("INSERT OR IGNORE INTO muted_departments (dept, at, by) VALUES (?,?,?)", (dept, _iso(now), by[:80])).rowcount
+            self.db.commit()
+        return bool(n)
+
+    def unmute_department(self, dept: str) -> bool:
+        with self.lock:
+            n = self.db.execute("DELETE FROM muted_departments WHERE dept = ?", (dept,)).rowcount
+            self.db.commit()
+        return bool(n)
+
+    def muted_departments(self) -> list[dict]:
+        with self.lock:
+            return [dict(r) | {"tenders": self.db.execute(f"SELECT COUNT(*) FROM seen WHERE civil = 1 AND COALESCE({DEPT_SQL}, '') = ?", (r["dept"],)).fetchone()[0]}
+                    for r in self.db.execute("SELECT dept, at, by FROM muted_departments ORDER BY dept COLLATE NOCASE").fetchall()]
+
+    # ---- clean-up: what could go, shown before anything does -----------------------------------------------------
+
+    def _has_bids(self) -> bool:
+        """The bids table belongs to the bid workspace, which opens after this store: until it exists there is nothing to protect."""
+        return self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bids'").fetchone() is not None
+
+    @property
+    def _REMOVABLE(self) -> str:
+        return "civil = 1 AND closing IS NOT NULL AND closing < ? AND key NOT IN (SELECT key FROM starred)" + (" AND key NOT IN (SELECT key FROM bids)" if self._has_bids() else "")
+
+    def cleanup_preview(self, now: datetime, days: int) -> dict[str, Any]:
+        """Closed tenders that closed more than `days` ago, with no star and no bid, plus the placeholders kept for tenders judged not civil."""
+        cutoff = _iso(now - timedelta(days=days))
+        with self.lock:
+            closed = self.db.execute(f"SELECT COUNT(*) FROM seen WHERE {self._REMOVABLE}", (cutoff,)).fetchone()[0]
+            ignored = self.db.execute(f"SELECT COUNT(*) FROM seen WHERE {self._REMOVABLE} AND key IN (SELECT key FROM hidden)", (cutoff,)).fetchone()[0]
+            placeholders = self.db.execute("SELECT COUNT(*) FROM seen WHERE civil = 0 AND first_seen < ?", (cutoff,)).fetchone()[0]
+            held = "key IN (SELECT key FROM starred)" + (" OR key IN (SELECT key FROM bids)" if self._has_bids() else "")
+            protected = self.db.execute(f"SELECT COUNT(*) FROM seen WHERE civil = 1 AND closing IS NOT NULL AND closing < ? AND ({held})", (cutoff,)).fetchone()[0]
+            oldest = [dict(r) for r in self.db.execute(f"SELECT tender_id, title, closing FROM seen WHERE {self._REMOVABLE} ORDER BY closing LIMIT 5", (cutoff,))]
+            total = self.db.execute("SELECT COUNT(*) FROM seen WHERE civil = 1").fetchone()[0]
+        return {"days": days, "closed": closed, "ignored_among_them": ignored, "placeholders": placeholders, "kept_because_starred_or_bid": protected, "oldest": oldest, "tenders_now": total}
+
+    def cleanup(self, now: datetime, days: int) -> dict[str, int]:
+        """Removes what cleanup_preview counted. Starred tenders and tenders with a bid are never removed."""
+        cutoff = _iso(now - timedelta(days=days))
+        with self.lock:
+            closed = self.db.execute(f"DELETE FROM seen WHERE {self._REMOVABLE}", (cutoff,)).rowcount
+            placeholders = self.db.execute("DELETE FROM seen WHERE civil = 0 AND first_seen < ?", (cutoff,)).rowcount
+            self.db.execute("DELETE FROM hidden WHERE key NOT IN (SELECT key FROM seen)")
+            self.db.commit()
+            if closed + placeholders > 500:
+                self.db.execute("PRAGMA optimize")
+        return {"closed": closed, "placeholders": placeholders}
 
     def count(self) -> int:
         with self.lock:
@@ -342,6 +433,20 @@ class SeenStore:
         if f.get("min_fit") is not None:
             where.append("fit >= ?")
             args.append(int(f["min_fit"]))
+        # tenders you said you are not interested in, and whole departments you hid: out of every list, count and email unless asked for
+        ignored = f"(key IN (SELECT key FROM hidden) OR COALESCE({DEPT_SQL}, '') IN (SELECT dept FROM muted_departments))"
+        mode = f.get("hidden") or "exclude"
+        if mode == "only":
+            where.append(ignored)
+        elif mode != "all":
+            where.append(f"NOT {ignored}")
+        # the size of work you take: a tender with no stated value is kept, never silently dropped
+        if f.get("size_min") is not None:
+            where.append("(value IS NULL OR value >= ?)")
+            args.append(float(f["size_min"]))
+        if f.get("size_max") is not None:
+            where.append("(value IS NULL OR value <= ?)")
+            args.append(float(f["size_max"]))
 
         if f.get("q"):
             parsed = smartsearch.parse(str(f["q"]))

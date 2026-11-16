@@ -57,7 +57,7 @@ MAX_VIEWS = 30
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?)?$")
 # The settings a saved view may hold: the page's filters and display choices, nothing else.
 VIEW_KEYS = {
-    "portal", "category", "department", "location", "work_type", "min_fit", "q", "status", "min_value", "max_value", "value_lt", "no_value", "no_closing", "no_published", "starred",
+    "portal", "category", "department", "location", "work_type", "min_fit", "q", "status", "min_value", "max_value", "value_lt", "no_value", "no_closing", "no_published", "starred", "fits_me",
     "closing_from", "closing_to", "seen_from", "seen_to", "published_from", "published_to", "closing_within", "since_days", "sort",
     "group_by", "split_by", "measure", "chart", "page",
 }
@@ -491,6 +491,26 @@ class ViewItem(BaseModel):
     name: str
     filters: dict[str, Any]
     alert: bool = False  # email the new matches in the daily digest
+
+
+class HideBody(BaseModel):
+    keys: list[str] = Field(max_length=200)
+    hidden: bool = True
+    mute_department: bool = False
+
+
+class MuteBody(BaseModel):
+    department: str = Field(max_length=200)
+    muted: bool = True
+
+
+class SizeBody(BaseModel):
+    min: float | None = Field(default=None, ge=0, lt=1e13)
+    max: float | None = Field(default=None, ge=0, lt=1e13)
+
+
+class CleanupBody(BaseModel):
+    days: int = Field(ge=7, le=3650)
 
 
 class BulkStar(BaseModel):
@@ -997,6 +1017,16 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     # ---- data ------------------------------------------------------------------------------------------------
 
+    def size_limits() -> dict:
+        """The size of work this company takes, as filter values: nothing when no range has been set."""
+        saved = store.get_settings()
+        out = {}
+        for key, name in (("size_min", "size_min"), ("size_max", "size_max")):
+            v = saved.get(name)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+                out[key] = float(v)
+        return out
+
     def filter_params(
         portal: list[str] | None = Query(None), category: list[str] | None = Query(None), department: list[str] | None = Query(None),
         location: list[str] | None = Query(None), work_type: list[str] | None = Query(None), min_fit: int | None = Query(None, ge=1, le=5), q: str | None = Query(None, max_length=100), status: str = "open",
@@ -1005,9 +1035,12 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         closing_from: str | None = None, closing_to: str | None = None, seen_from: str | None = None, seen_to: str | None = None,
         published_from: str | None = None, published_to: str | None = None,
         closing_within: int | None = Query(None, ge=1, le=365), since_days: int | None = Query(None, ge=1, le=365),
+        hidden: str = "exclude", fits_me: bool = False,
     ) -> dict:
         if status not in ("open", "closing_soon", "closed", "all"):
             raise HTTPException(422, "Unknown status")
+        if hidden not in ("exclude", "only"):
+            raise HTTPException(422, "Unknown value for hidden")
         dates = dict(closing_from=closing_from, closing_to=closing_to, seen_from=seen_from, seen_to=seen_to, published_from=published_from, published_to=published_to)
         for name, value in dates.items():
             if value and not real_date(value):
@@ -1019,7 +1052,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return {
             **{k: v for k, v in lists.items() if v}, "q": q, "status": status, "min_value": min_value, "max_value": max_value, "value_lt": value_lt,
             "no_value": no_value, "no_closing": no_closing, "no_published": no_published, "starred": starred, "closing_within": closing_within, "since_days": since_days, "min_fit": min_fit,
-            "soon_days": env.closing_soon_days, **{k: v for k, v in dates.items() if v},
+            "soon_days": env.closing_soon_days, **{k: v for k, v in dates.items() if v}, "hidden": hidden, **(size_limits() if fits_me else {}),
         }
 
     fparams = Depends(filter_params)
@@ -1117,6 +1150,52 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         """Stars or unstars every ticked tender at once."""
         done = sum(1 for k in dict.fromkeys(body.keys) if store.set_starred(k, body.starred, now()))
         return {"changed": done, "starred": body.starred}
+
+    # ---- tenders you are not interested in, the size of work you take, and clean-up ---------------------------------------------
+
+    @app.post("/api/tenders/hide", dependencies=auth)
+    def hide_tenders(body: HideBody, request: Request) -> dict:
+        """Marks tenders as not interesting (or brings them back). With mute_department, everything from their departments is hidden too."""
+        user: Principal = request.state.user
+        if not body.hidden:
+            return {"changed": store.unhide(body.keys), "hidden": False, "muted": []}
+        muted = []
+        if body.mute_department:
+            for d in dict.fromkeys(store.department_of(k) for k in body.keys):
+                if d and store.mute_department(d, now(), user.username):
+                    muted.append(d)
+        return {"changed": store.hide(body.keys, now(), user.username), "hidden": True, "muted": muted}
+
+    @app.get("/api/mutes", dependencies=auth)
+    def list_mutes() -> dict:
+        return {"departments": store.muted_departments(), "hidden_tenders": store.search(now(), {"hidden": "only", "status": "all"}, "closing", 1, 0)[1]}
+
+    @app.post("/api/mutes", dependencies=auth)
+    def set_mute(body: MuteBody, request: Request) -> dict:
+        ok = store.mute_department(body.department, now(), request.state.user.username) if body.muted else store.unmute_department(body.department)
+        return {"changed": ok, "departments": store.muted_departments()}
+
+    @app.get("/api/company-size", dependencies=auth)
+    def get_company_size() -> dict:
+        lim = size_limits()
+        return {"min": lim.get("size_min"), "max": lim.get("size_max")}
+
+    @app.put("/api/company-size", dependencies=auth)
+    def put_company_size(body: SizeBody) -> dict:
+        lo, hi = body.min or None, body.max or None
+        if lo and hi and lo > hi:
+            raise HTTPException(422, "The smallest size cannot be bigger than the largest")
+        store.put_settings({"size_min": lo, "size_max": hi})
+        return {"min": lo, "max": hi}
+
+    @app.get("/api/cleanup/preview", dependencies=auth)
+    def cleanup_preview(days: int = Query(30, ge=7, le=3650)) -> dict:
+        return store.cleanup_preview(now(), days)
+
+    @app.post("/api/cleanup", dependencies=auth)
+    def cleanup_now(body: CleanupBody) -> dict:
+        """Removes closed tenders older than `days` that nobody starred and no bid uses, and the placeholders for tenders judged not civil."""
+        return store.cleanup(now(), body.days)
 
     @app.get("/api/tenders/detail", dependencies=auth)
     def tender_detail(key: str = Query(..., max_length=300)) -> dict:

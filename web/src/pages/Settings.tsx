@@ -9,7 +9,7 @@ import { Tabs } from '../Tabs';
 import { useToast } from '../ui';
 import { useConfirm } from '../confirm';
 import { ActivityPanel, UsersPanel } from '../Account';
-import { DataPrivacyCard, IntegrationsPanel } from '../Integrations';
+import { CleanupCard, DataPrivacyCard, IntegrationsPanel } from '../Integrations';
 import { ACCENTS, setCompanyAccent } from '../theme';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
@@ -338,6 +338,7 @@ function BackupPanel() {
         )}
       </section>
       <DataPrivacyCard encryption={data?.encryption} />
+      <CleanupCard />
       <section className="card">
         <h2>Automatic daily copy {data && <span className={`badge ${data.enabled && data.latest_day ? 'ok' : 'warn'}`} style={{ marginLeft: 6 }}>{data.enabled ? (data.latest_day ? 'Running' : 'Waiting for the first copy') : 'Off'}</span>}</h2>
         {error && <div className="alert bad">{error}</div>}

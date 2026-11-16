@@ -170,7 +170,8 @@ class RunManager:
                         except Exception as e:  # noqa: BLE001 - the email goes out without the intro
                             say(f"Claude intro skipped: {str(e)[:120]}")
                     try:
-                        searches = alerts.matches(self.store, now, saved.get("views", []), [t.key for t in pending], settings.closing_soon_days)
+                        searches = alerts.matches(self.store, now, saved.get("views", []), [t.key for t in pending], settings.closing_soon_days,
+                                                 size={k: float(saved[n]) for k, n in (("size_min", "size_min"), ("size_max", "size_max")) if isinstance(saved.get(n), (int, float)) and saved.get(n) > 0})
                     except Exception:  # noqa: BLE001 - the email goes out without the saved-search section
                         log.exception("saved-search section of the digest failed")
                         searches = []

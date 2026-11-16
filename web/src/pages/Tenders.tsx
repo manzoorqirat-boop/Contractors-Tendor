@@ -6,6 +6,7 @@ import { FitBadge } from '../ai';
 import { FilterBar } from '../FilterBar';
 import { EMPTY } from '../filters';
 import { CompareDrawer } from '../Compare';
+import { NotInterestedMenu } from '../Ignore';
 import { StarButton, TenderDrawer } from '../TenderDrawer';
 import { chain, fmtDate, headline, relative } from '../format';
 import { useLoad } from '../hooks';
@@ -43,6 +44,11 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   async function bulkStar(starred: boolean) {
     setBulkBusy(true);
     try { const r = await api.starBulk(picked, starred); setItems((xs) => xs.map((t) => (picked.includes(t.key) ? { ...t, starred } : t))); toast(`${starred ? tr('Starred') : 'Removed the star from'} ${r.changed} tender${r.changed === 1 ? '' : 's'}`); }
+    catch (e) { toast((e as Error).message, 'bad'); } finally { setBulkBusy(false); }
+  }
+  async function bulkRestore() {
+    setBulkBusy(true);
+    try { const r = await api.hideTenders(picked, false); toast(`Restored ${r.changed} tender${r.changed === 1 ? '' : 's'}`); setPicked([]); reload(); }
     catch (e) { toast((e as Error).message, 'bad'); } finally { setBulkBusy(false); }
   }
   async function bulkBids() {
@@ -154,6 +160,9 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
               <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(true)}>{tr('Star')}</button>
               <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(false)}>{tr('Unstar')}</button>
               <button type="button" className="btn small primary" disabled={bulkBusy} onClick={bulkBids}>{tr('Start bids')}</button>
+              {filters.hidden === 'only'
+                ? <button type="button" className="btn small" disabled={bulkBusy} onClick={bulkRestore}>{tr('Restore')}</button>
+                : <NotInterestedMenu tenders={picked.map((k) => items.find((t) => t.key === k) ?? ({ key: k, organisation: '' } as Tender))} onDone={() => { setPicked([]); reload(); }} />}
             </Only>
             <button type="button" className="btn small" disabled={picked.length < 2 || picked.length > 4} title={picked.length < 2 || picked.length > 4 ? tr('Select two to four tenders to compare them') : tr('Compare side by side')} onClick={() => setComparing(true)}>{tr('Compare')}</button>
             <a className="btn small" href={api.exportUrl(filters, display.sort, 'xlsx', picked)} download>Excel</a>

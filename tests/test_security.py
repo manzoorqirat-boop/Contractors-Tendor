@@ -420,7 +420,7 @@ def test_erasing_needs_an_administrator_and_not_yourself(sec):
 
 def test_retention_settings_are_checked_and_old_log_entries_go(sec):
     from datetime import datetime, timedelta
-    assert sec.owner.get("/api/settings").json()["audit_days"] == 365 and sec.owner.get("/api/settings").json()["tender_days"] == 120
+    assert sec.owner.get("/api/settings").json()["audit_days"] == 365 and sec.owner.get("/api/settings").json()["tender_days"] == 45
     for bad in (5, 99999, "90", True, 30.5):
         assert sec.owner.put("/api/settings", json={"audit_days": bad}).status_code == 422, bad
     assert sec.owner.put("/api/settings", json={"audit_days": 90, "tender_days": 60}).status_code == 200

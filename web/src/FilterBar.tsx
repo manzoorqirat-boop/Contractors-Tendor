@@ -86,6 +86,8 @@ export function FilterBar({ filters, display, config, facets, onChange, onApplyV
           </div>
         </Popover>
         <button type="button" className={`btn${filters.starred ? ' active' : ''}`} aria-pressed={!!filters.starred} onClick={() => set({ starred: !filters.starred })}>{filters.starred ? '★' : '☆'} Starred</button>
+        <button type="button" className={`btn${filters.fits_me ? ' active' : ''}`} aria-pressed={!!filters.fits_me} onClick={() => set({ fits_me: !filters.fits_me })} title={tr('Hide tenders outside the size range you take (Vault > Company)')}>{tr('Fits my size')}</button>
+        <button type="button" className={`btn${filters.hidden === 'only' ? ' active' : ''}`} aria-pressed={filters.hidden === 'only'} onClick={() => set({ hidden: filters.hidden === 'only' ? undefined : 'only' })} title={tr('Tenders you said you are not interested in')}>{tr('Show ignored')}</button>
         <span className="spacer" />
         <ViewsMenu filters={filters} display={display} onApply={onApplyView} />
         <button type="button" className="btn" onClick={copyLink} title="Copy a link to exactly this view">{tr('Share')}</button>
@@ -125,7 +127,8 @@ function ViewsMenu({ filters, display, onApply }: { filters: Filters; display: D
     const params = toParams(filters, Object.fromEntries(SAVED_KEYS.map((k) => [k, display[k]])) as Partial<Display>);
     const obj: Record<string, unknown> = {};
     for (const k of new Set(params.keys())) obj[k] = params.getAll(k).length > 1 || ['portal', 'category', 'department', 'location', 'work_type'].includes(k) ? params.getAll(k) : params.get(k);
-    for (const k of ['no_value', 'no_closing', 'no_published', 'starred']) if (obj[k] === 'true') obj[k] = true;
+    delete obj.hidden;  // the ignored list is not something to save as a view
+    for (const k of ['no_value', 'no_closing', 'no_published', 'starred', 'fits_me']) if (obj[k] === 'true') obj[k] = true;
     persist([...(views ?? []), { id: String(Date.now()), name: trimmed, filters: obj, alert: alertOn }], alertOn ? `Saved "${trimmed}". New matches will be in your daily email.` : `Saved view "${trimmed}"`);
     setName(''); setAlertOn(false);
   }

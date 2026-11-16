@@ -45,6 +45,12 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
     } catch (err) { toast((err as Error).message, 'bad'); }
   }
 
+  async function notInterested() {
+    if (!t) return;
+    try { await api.hideTenders([t.key], true); toast(tr('Hidden. Choose "Show ignored" in the list to bring it back.')); onClose(); window.dispatchEvent(new CustomEvent('tenders-changed')); }
+    catch (err) { toast((err as Error).message, 'bad'); }
+  }
+
   async function copy() {
     if (!t) return;
     try { await navigator.clipboard.writeText(t.tender_id); toast(tr('Tender ID copied')); } catch { toast(tr('Could not copy'), 'bad'); }
@@ -88,6 +94,7 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
             {t.search_url && <a className="btn" href={t.search_url} target="_blank" rel="noopener noreferrer">{tr('Find on portal')}</a>}
             {t.manual && <button className="btn" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('add-tender', { detail: { editKey: t.key } })); }}>{tr('Edit details')}</button>}
             {(t.bid_id || can('bidder')) && <button className="btn primary" onClick={startBid}>{t.bid_id ? tr('Open bid workspace') : tr('Start a bid')}</button>}
+            {can('bidder') && !t.bid_id && <button className="btn" onClick={notInterested} title={tr('Hide it from the list, the counts and the daily email')}>{tr('Not interested')}</button>}
           </div>
           {t.history && t.history.length > 0 && <div className="alert warn" style={{ marginTop: 12 }}>{t.history.map((h) => <div key={h}>{h}</div>)}</div>}
           <AiSections t={t} onChange={(patch) => setT((cur) => (cur ? { ...cur, ...patch } : cur))} />
