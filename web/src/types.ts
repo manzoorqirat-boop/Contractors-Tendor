@@ -1,7 +1,7 @@
 export interface PortalInfo { key: string; name: string; state: string; search_url: string }
 export interface Dimension { key: string; label: string; time: boolean }
 export interface AppConfig {
-  portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number; ai_enabled?: boolean;
+  portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number; ai_enabled?: boolean; storage_warning?: string;
 }
 
 export interface PortalReport { portal: string; name: string; departments: number; listed: number; new_civil: number; errors: string[]; failed: boolean; access?: string }
@@ -20,7 +20,7 @@ export interface Brief { recommendation: 'Bid' | 'Maybe' | 'No bid'; headline: s
 export interface DocFacts { summary: string; requirements: string[]; financial: { label: string; value: string }[]; dates: { label: string; value: string }[]; documents: string[]; penalties: string[]; red_flags: string[] }
 export interface Related { key: string; tender_id: string; title: string; closing: string | null; first_seen: string; value: number | null; similarity: number }
 export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[]; bid_id?: number | null; history?: string[]; manual?: boolean; has_source?: boolean }
-export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number }
+export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number; calls_today?: number; daily_limit?: number }
 export interface AskResult { filters: Record<string, unknown>; sort: string | null; explanation: string }
 export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[] }
 
@@ -142,3 +142,9 @@ export interface SimInput { l1_price: number | null; quoted_pct: number | null; 
 
 export interface ManualListing { tender_id: string; reference: string; title: string; description: string; organisation: string; location: string; value: number | null; emd: number | null; published: string; closing: string; opening: string; portal_name: string; form_of_contract: string }
 export interface ManualFields { tender_id?: string; title?: string; description?: string; reference?: string; organisation?: string; location?: string; value?: number | null; emd?: number | null; published?: string; closing?: string; opening?: string; portal_name?: string; clear_value?: boolean; clear_emd?: boolean }
+
+export type Role = 'viewer' | 'bidder' | 'admin';
+export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean }
+export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; created: string | null; last_login: string | null; owner: boolean }
+export interface UsersData { users: UserRow[]; roles: { key: Role; label: string; text: string }[]; min_password: number }
+export interface AuditEntry { id: number; at: string; username: string; role: string | null; action: string; target: string; detail: string; client: string }

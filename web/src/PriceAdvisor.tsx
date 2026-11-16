@@ -3,7 +3,6 @@ import { api } from './api';
 import { inr, plural } from './format';
 import { Skeleton, useToast } from './ui';
 import type { Advice } from './types';
-import './advisor.css';
 
 const sgn = (p: number) => `${p > 0 ? '+' : ''}${p.toFixed(1)}%`;
 const CONF: Record<Advice['confidence'], string> = { none: 'no history yet', rough: 'rough guide', fair: 'fair basis', good: 'good basis' };

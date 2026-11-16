@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { api } from './api';
 import { fmtDate } from './format';
 import { useLoad } from './hooks';
+import { Only } from './session';
+import { useConfirm } from './confirm';
 import type { PortalStatus } from './types';
 
 const tone = (k: PortalStatus['kind']) => (k === 'ok' ? 'ok' : k === 'unknown' ? 'plain' : 'warn');
@@ -19,7 +21,7 @@ export function ManualBanner({ onOpen }: { onOpen: () => void }) {
         {manual.map((p) => `${p.name} (${p.label})`).join(', ')}. The app cannot read {manual.length > 1 ? 'them' : 'it'} on its own, so nothing from {manual.length > 1 ? 'them' : 'it'} is in the numbers below.
       </span>
       <span style={{ display: 'flex', gap: 8 }}>
-        <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender by hand</button>
+        <Only role="bidder"><button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender by hand</button></Only>
         <button className="btn small" onClick={onOpen}>See details</button>
       </span>
     </div>
@@ -28,6 +30,7 @@ export function ManualBanner({ onOpen }: { onOpen: () => void }) {
 
 /** Add portals, see which ones the app can read, and keep the list of those that need a person. */
 export function PortalsManager({ onChange }: { onChange: () => void }) {
+  const confirm = useConfirm();
   const list = useLoad(() => api.portals(), []);
   const [form, setForm] = useState({ name: '', state: '', base_url: '' });
   const [busy, setBusy] = useState<string | null>(null);
@@ -67,7 +70,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
   }
 
   async function remove(p: PortalStatus) {
-    if (!window.confirm(`Remove ${p.name}? Tenders already collected from it stay in the app.`)) return;
+    if (!(await confirm({ title: `Remove ${p.name}?`, body: 'The portal is no longer read. Tenders already collected from it stay in the app.', confirmLabel: 'Remove portal', danger: true }))) return;
     setBusy(p.key);
     setMsg(null);
     try {

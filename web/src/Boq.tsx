@@ -4,6 +4,7 @@ import { readBase64 } from './ai';
 import { inr, plural } from './format';
 import { useLoad } from './hooks';
 import { useToast } from './ui';
+import { useConfirm } from './confirm';
 import type { BoqCandidate, BoqLine, BoqStatus, CatalogueItem, Simulation } from './types';
 
 const STATUS: Record<BoqStatus, [string, string]> = {
@@ -24,6 +25,7 @@ const pct = (v: number | null | undefined) => (v === null || v === undefined ? '
 
 export function BoqCard({ bidId }: { bidId: number }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [review, setReview] = useState(false);
   const view = useLoad(() => api.bidBoq(bidId, review), [bidId, review]);
   const other = useLoad(() => api.bidBoq(bidId, !review), [bidId, review]); // the same BOQ priced the other way, for the side-by-side totals
@@ -59,7 +61,7 @@ export function BoqCard({ bidId }: { bidId: number }) {
   const withCheckPr = review ? pr : other.data?.pricing ?? null;
   const suggested = (boq?.lines ?? []).filter((l) => l.status === 'NEEDS_REVIEW' && l.item_code);
   async function acceptAll() {
-    if (!window.confirm(`Confirm the suggested match on ${plural(suggested.length, 'line')}? You can still change any of them afterwards.`)) return;
+    if (!(await confirm({ title: `Confirm ${plural(suggested.length, 'suggested match', 'suggested matches')}?`, body: 'Each line takes the item the app suggested. You can still change any of them afterwards, and every confirmation teaches the app for next time.', confirmLabel: 'Confirm all' }))) return;
     setAccepting(true);
     try { for (const l of suggested) await api.confirmBoqLine(bidId, l.line_no, l.item_code); toast(`Confirmed ${plural(suggested.length, 'line')}`); }
     catch (e) { toast((e as Error).message, 'bad'); } finally { setAccepting(false); reloadAll(); }

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
 // ---- toasts ----------------------------------------------------------------------------------------------------
 type Toast = { id: number; text: string; tone: 'ok' | 'bad' };
@@ -10,20 +10,32 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((text: string, tone: 'ok' | 'bad' = 'ok') => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t.slice(-2), { id, text, tone }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'bad' ? 10000 : 3500); // errors stay longer
   }, []);
+  const drop = useCallback((id: number) => setToasts((xs) => xs.filter((x) => x.id !== id)), []);
   return (
     <ToastCtx.Provider value={push}>
       {children}
       <div className="toasts" role="status" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.tone}`} role={t.tone === 'bad' ? 'alert' : undefined}>
-            <span>{t.text}</span>
-            {t.tone === 'bad' && <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => setToasts((xs) => xs.filter((x) => x.id !== t.id))}>✕</button>}
-          </div>
-        ))}
+        {toasts.map((t) => <ToastItem key={t.id} toast={t} onDone={drop} />)}
       </div>
     </ToastCtx.Provider>
+  );
+}
+
+/** Disappears by itself (errors after 12 s, others after 5 s) but never while the pointer or keyboard focus is on it, so it can be read in full. */
+function ToastItem({ toast, onDone }: { toast: Toast; onDone: (id: number) => void }) {
+  const [held, setHeld] = useState(false);
+  useEffect(() => {
+    if (held) return;
+    const timer = setTimeout(() => onDone(toast.id), toast.tone === 'bad' ? 12000 : 5000);
+    return () => clearTimeout(timer);
+  }, [held, toast.id, toast.tone, onDone]);
+  return (
+    <div className={`toast ${toast.tone}`} role={toast.tone === 'bad' ? 'alert' : undefined}
+      onMouseEnter={() => setHeld(true)} onMouseLeave={() => setHeld(false)} onFocus={() => setHeld(true)} onBlur={() => setHeld(false)}>
+      <span>{toast.text}</span>
+      <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => onDone(toast.id)}>✕</button>
+    </div>
   );
 }
 
@@ -37,21 +49,27 @@ export function ChartSkeleton({ height = 240 }: { height?: number }) {
 }
 
 // ---- popover that closes on outside click or Escape ----------------------------------------------------------------
-export function Popover({ label, children, active, align = 'left' }: { label: ReactNode; children: ReactNode; active?: boolean; align?: 'left' | 'right' }) {
+export function Popover({ label, children, active, align = 'left', name }: { label: ReactNode; children: ReactNode; active?: boolean; align?: 'left' | 'right'; name?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const close = useCallback((restoreFocus: boolean) => { setOpen(false); if (restoreFocus) button.current?.focus(); }, []);
   useEffect(() => {
     if (!open) return;
-    const down = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const down = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(true); } };
     document.addEventListener('mousedown', down);
     document.addEventListener('keydown', key);
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
-  }, [open]);
+  }, [open, close]);
+  // Tab out of the panel (forwards past the last control) closes it, as with any menu.
+  const leave = (e: React.FocusEvent) => { if (open && ref.current && !ref.current.contains(e.relatedTarget as Node | null)) setOpen(false); };
   return (
-    <div className="popover" ref={ref}>
-      <button type="button" className={`btn pop-btn${active ? ' active' : ''}`} aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((o) => !o)}>{label}<span aria-hidden>▾</span></button>
-      {open && <div className={`pop-panel ${align}`}>{children}</div>}
+    <div className="popover" ref={ref} onBlur={leave}>
+      <button ref={button} type="button" className={`btn pop-btn${active ? ' active' : ''}`} aria-expanded={open} aria-controls={open ? panelId : undefined}
+        onClick={() => setOpen((o) => !o)} onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true); } }}>{label}<span aria-hidden>▾</span></button>
+      {open && <div id={panelId} role="group" aria-label={name} className={`pop-panel ${align}`}>{children}</div>}
     </div>
   );
 }
@@ -64,7 +82,7 @@ export function MultiSelect({ title, options, selected, onChange, allowNone = tr
   const shown = options.filter((o) => (o.label ?? o.value).toLowerCase().includes(text.toLowerCase()));
   const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
   return (
-    <Popover label={<>{title}{selected.length > 0 && <span className="count-pill">{selected.length}</span>}</>} active={selected.length > 0}>
+    <Popover name={title} label={<>{title}{selected.length > 0 && <span className="count-pill">{selected.length}</span>}</>} active={selected.length > 0}>
       {options.length > 8 && <input type="text" placeholder={`Search ${title.toLowerCase()}`} value={text} onChange={(e) => setText(e.target.value)} aria-label={`Search ${title}`} autoFocus />}
       <div className="opt-list" role="group" aria-label={title}>
         {allowNone && !text && (

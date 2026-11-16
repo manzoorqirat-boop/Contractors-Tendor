@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { readBase64, useAiStatus } from './ai';
-import { inr } from './format';
+import { fmtDate, inr } from './format';
 import { Drawer, Skeleton, useToast } from './ui';
+import { useConfirm } from './confirm';
 
 interface Form { tender_id: string; title: string; description: string; organisation: string; location: string; value: string; emd: string; published: string; closing: string; opening: string; portal_name: string; reference: string }
 const BLANK: Form = { tender_id: '', title: '', description: '', organisation: '', location: '', value: '', emd: '', published: '', closing: '', opening: '', portal_name: '', reference: '' };
@@ -10,6 +11,24 @@ type Step = 'start' | 'form' | 'done';
 
 /** The panel's value for a datetime-local box. A date with no time gets 17:00 (the usual closing hour) and is flagged for checking. */
 const dt = (v: string | null | undefined): [string, boolean] => (!v ? ['', false] : v.length <= 10 ? [`${v}T17:00`, true] : [v.slice(0, 16), false]);
+/** The same rules the server applies, so a mistake is caught before it is sent. The server still has the last word. */
+function validate(f: Form, editing: boolean): Record<string, string> {
+  const e: Record<string, string> = {};
+  const id = f.tender_id.trim();
+  if (!editing && !id) e.tender_id = 'The Tender ID is how you find this tender on its portal. Copy it from the notice.';
+  else if (/[<>\u0000-\u001f]/.test(id)) e.tender_id = 'The Tender ID cannot contain < or >. Copy it exactly as the portal shows it.';
+  if (!f.description.trim() && !f.title.trim()) e.description = 'Say what the work is: a description, or at least a short name.';
+  const value = money(f.value), emd = money(f.emd);
+  if (f.value.trim() && (value === null || value <= 0)) e.value = 'Enter the amount in rupees, like 12500000.';
+  if (f.emd.trim() && (emd === null || emd <= 0)) e.emd = 'Enter the amount in rupees, like 250000.';
+  if (!e.value && !e.emd && value !== null && emd !== null && emd > value) e.emd = 'The EMD is larger than the tender value. Check both amounts.';
+  if (!f.closing) e.closing = 'The closing date is needed, so deadlines and reminders work.';
+  else if (!editing && f.closing.slice(0, 10) < new Date().toISOString().slice(0, 10)) e.closing = 'This date has already passed, so bids can no longer be filed. Check the date.';
+  if (f.opening && f.closing && f.opening < f.closing) e.opening = 'Bids cannot open before the tender closes.';
+  if (f.published && f.closing && f.published > f.closing) e.published = 'The publish date is after the closing date.';
+  return e;
+}
+
 const money = (v: string): number | null => { const n = Number(v.replace(/[,\s₹]/g, '')); return v.trim() === '' || Number.isNaN(n) ? null : n; };
 
 /** Opens on the 'add-tender' event: detail {} adds a tender; detail {editKey} corrects one that was added by hand. */
@@ -26,6 +45,7 @@ export function AddTenderHost() {
 
 function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const ai = useAiStatus();
   const aiOn = !!ai?.configured;
   const [step, setStep] = useState<Step>(editKey ? 'form' : 'start');
@@ -40,6 +60,14 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
   const [existing, setExisting] = useState<{ key: string; portal_name: string; organisation: string; manual: boolean }[]>([]);
   const [result, setResult] = useState<{ key: string; doc_read: boolean; doc_error: string; source_kept: boolean } | null>(null);
   const hasNotice = !!file || !!paste.trim();
+  const [tried, setTried] = useState(false);       // Save was pressed: show every problem, not just those of fields already visited
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const errs = validate(form, !!editKey);
+  const err = (k: string) => (tried || touched[k] ? errs[k] ?? '' : '');
+  const touch = (k: string) => setTouched((t) => (t[k] ? t : { ...t, [k]: true }));
+  /** Props that tie an input to its message for screen readers. */
+  const a11y = (k: string) => ({ 'aria-invalid': !!err(k) || undefined, 'aria-describedby': err(k) ? `err-${k}` : undefined, onBlur: () => touch(k) });
+  const Msg = ({ k }: { k: string }) => (err(k) ? <span className="field-err" id={`err-${k}`}>{err(k)}</span> : null);
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
 
   useEffect(() => {
@@ -71,6 +99,13 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
   }
 
   async function save() {
+    setTried(true);
+    const first = Object.keys(errs)[0];
+    if (first) {
+      setError('');
+      document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus();
+      return;
+    }
     setBusy(true); setError('');
     try {
       const common = { description: form.description, title: form.title, organisation: form.organisation, location: form.location, closing: form.closing, opening: form.opening, published: form.published };
@@ -86,7 +121,7 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
   }
 
   async function remove() {
-    if (!editKey || !window.confirm('Remove this tender? Its saved notice is deleted too. A tender with a bid cannot be removed until the bid is.')) return;
+    if (!editKey || !(await confirm({ title: 'Remove this tender?', body: 'Its saved notice is deleted too, and this cannot be undone. A tender with a bid cannot be removed until the bid is.', confirmLabel: 'Remove tender', danger: true }))) return;
     try { await api.manualDelete(editKey); toast('Tender removed'); window.dispatchEvent(new Event('tenders-changed')); onClose(); } catch (e) { setError((e as Error).message); }
   }
 
@@ -126,26 +161,27 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
               {existing.map((x) => <div key={x.key}><button className="link-btn" onClick={() => startBid(x.key)}>Start a bid on that one</button></div>)}
             </div>
           )}
-          <label className="field">Tender ID<input value={form.tender_id} onChange={(e) => set({ tender_id: e.target.value })} onBlur={(e) => checkId(e.target.value)} maxLength={80} disabled={!!editKey} placeholder="As written on the notice" /></label>
-          <label className="field">Work description<textarea value={form.description} onChange={(e) => set({ description: e.target.value })} maxLength={500} rows={3} /></label>
+          <label className="field">Tender ID <span className="req">(required)</span><input data-field="tender_id" value={form.tender_id} onChange={(e) => set({ tender_id: e.target.value })} {...a11y('tender_id')} onBlur={(e) => { touch('tender_id'); checkId(e.target.value); }} maxLength={80} disabled={!!editKey} placeholder="As written on the notice" /><Msg k="tender_id" /></label>
+          <label className="field">Work description <span className="req">(required, or a short name below)</span><textarea data-field="description" value={form.description} onChange={(e) => set({ description: e.target.value })} {...a11y('description')} maxLength={500} rows={3} /><Msg k="description" /></label>
           <label className="field">Short name (optional)<input value={form.title} onChange={(e) => set({ title: e.target.value })} maxLength={160} /></label>
           <label className="field">Department / office<input value={form.organisation} onChange={(e) => set({ organisation: e.target.value })} maxLength={300} /></label>
           <label className="field">Place of work<input value={form.location} onChange={(e) => set({ location: e.target.value })} maxLength={120} /></label>
           <div className="ws-grid">
-            <label className="field-inline">Estimated value (₹){form.value && money(form.value) ? <span className="muted small"> {inr(money(form.value))}</span> : null}<input inputMode="decimal" value={form.value} onChange={(e) => set({ value: e.target.value })} /></label>
-            <label className="field-inline">EMD (₹)<input inputMode="decimal" value={form.emd} onChange={(e) => set({ emd: e.target.value })} /></label>
+            <label className="field-inline">Estimated value (₹){form.value && money(form.value) ? <span className="muted small"> {inr(money(form.value))}</span> : null}<input data-field="value" inputMode="decimal" value={form.value} onChange={(e) => set({ value: e.target.value })} {...a11y('value')} /><Msg k="value" /></label>
+            <label className="field-inline">EMD (₹)<input data-field="emd" inputMode="decimal" value={form.emd} onChange={(e) => set({ emd: e.target.value })} {...a11y('emd')} /><Msg k="emd" /></label>
           </div>
           <div className="ws-grid" style={{ marginTop: 10 }}>
-            <label className="field-inline">Bid closes (needed)<input type="datetime-local" value={form.closing} onChange={(e) => { set({ closing: e.target.value }); setAssumed((a) => ({ ...a, closing: false })); }} /></label>
-            <label className="field-inline">Bids open<input type="datetime-local" value={form.opening} onChange={(e) => { set({ opening: e.target.value }); setAssumed((a) => ({ ...a, opening: false })); }} /></label>
-            <label className="field-inline">Published<input type="datetime-local" value={form.published} onChange={(e) => set({ published: e.target.value })} /></label>
+            <label className="field-inline">Bid closes <span className="req">(required)</span><input data-field="closing" type="datetime-local" value={form.closing} onChange={(e) => { set({ closing: e.target.value }); setAssumed((a) => ({ ...a, closing: false })); }} {...a11y('closing')} />{form.closing && <span className="date-say" aria-hidden>{fmtDate(form.closing, true)}</span>}<Msg k="closing" /></label>
+            <label className="field-inline">Bids open<input data-field="opening" type="datetime-local" value={form.opening} onChange={(e) => { set({ opening: e.target.value }); setAssumed((a) => ({ ...a, opening: false })); }} {...a11y('opening')} />{form.opening && <span className="date-say" aria-hidden>{fmtDate(form.opening, true)}</span>}<Msg k="opening" /></label>
+            <label className="field-inline">Published<input data-field="published" type="datetime-local" value={form.published} onChange={(e) => set({ published: e.target.value })} {...a11y('published')} />{form.published && <span className="date-say" aria-hidden>{fmtDate(form.published, true)}</span>}<Msg k="published" /></label>
           </div>
           {(assumed.closing || assumed.opening) && <p className="muted small" style={{ marginTop: 8 }}>The notice gave a date without a time, so 17:00 is filled in. Please set the real time.</p>}
           {!editKey && hasNotice && aiOn && <label className="check" style={{ marginTop: 12 }}><input type="checkbox" checked={readDoc} onChange={(e) => setReadDoc(e.target.checked)} /><span>Also read the notice for requirements and documents to submit</span></label>}
           {!editKey && !hasNotice && <p className="muted small" style={{ marginTop: 10 }}>No notice attached, so the checklist will have the standard steps only. You can upload the notice later from the bid.</p>}
           {error && <div className="alert bad" style={{ marginTop: 10 }}>{error}</div>}
           <div className="d-actions">
-            <button className="btn primary" onClick={save} disabled={busy || !form.closing || (!editKey && !form.tender_id.trim()) || !(form.description.trim() || form.title.trim())}>{busy ? 'Saving…' : 'Save tender'}</button>
+            <button className="btn primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save tender'}</button>
+            {tried && Object.keys(errs).length > 0 && <span className="field-err" role="alert">{Object.keys(errs).length === 1 ? 'One thing needs fixing (shown above).' : `${Object.keys(errs).length} things need fixing (shown above).`}</span>}
             {!editKey && <button className="btn" onClick={() => setStep('start')}>Back</button>}
             {editKey && <button className="link-btn" style={{ color: 'var(--bad)' }} onClick={remove}>Remove this tender</button>}
           </div>

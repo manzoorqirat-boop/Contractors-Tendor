@@ -11,9 +11,9 @@ function greeting(): string {
 function AnalyticsArt() {
   const bars = [46, 72, 58, 96, 80, 118, 104];
   return (
-    <svg className="login-art" viewBox="0 0 420 300" role="img" aria-label="Charts showing tender trends">
+    <svg className="login-art" viewBox="0 0 420 300" aria-hidden="true" focusable="false">
       <rect x="1" y="1" width="418" height="298" rx="18" className="art-card" />
-      <text x="24" y="36" className="art-label">New tenders · last 7 days</text>
+      <text x="24" y="36" className="art-label">Sample illustration, not your data</text>
       <text x="24" y="66" className="art-num">1,284</text>
       <rect x="112" y="48" width="52" height="22" rx="11" className="art-pill" />
       <text x="138" y="63" textAnchor="middle" className="art-pill-t">+12%</text>
@@ -106,7 +106,7 @@ export function Login({ onDone }: { onDone: () => void }) {
             {forgot && (
               <div className="alert warn lf-help" role="note">
                 <strong>Reset the password</strong>
-                <span>Ask your administrator. They can set a new one in the hosting dashboard (the <code>APP_PASSWORD</code> variable), and it works after the service restarts. The username is <code>APP_USERNAME</code>.</span>
+                <span>Contact your administrator. They can set a new password for you.</span>
               </div>
             )}
 

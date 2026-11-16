@@ -5,12 +5,14 @@ These portals ask for a captcha on their "Active Tenders" search, which we never
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
+import socket
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -19,6 +21,20 @@ log = logging.getLogger("tender_digest.gepnic")
 
 USER_AGENT = "Mozilla/5.0 (compatible; TenderDigest/1.0; daily civil tender summary)"
 DATE_FORMAT = "%d-%b-%Y %I:%M %p"
+MAX_REDIRECTS = 5
+
+
+def is_public_host(host: str) -> bool:
+    """False when the name points at this machine or a private network. A name that does not resolve is left to fail normally."""
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return True
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            return False
+    return True
 
 
 @dataclass
@@ -225,6 +241,12 @@ def classify_page(html: str) -> str:
     return "different_software"
 
 
+def _bare_host(url: str) -> str:
+    """The host of an address, lower case, without a leading www. (a portal and its www. twin are the same site)."""
+    host = (urlparse(url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 class GepnicClient:
     """One polite session against one portal. A portal that is down raises PortalError and is skipped for the day."""
 
@@ -235,11 +257,34 @@ class GepnicClient:
         self.http = session or requests.Session()
         self.http.headers.setdefault("User-Agent", USER_AGENT)
         self._last = 0.0
+        self._host = _bare_host(self.base)
+        self._check_dns = session is None  # a session handed in (tests) is not a real network
 
     @property
     def search_url(self) -> str:
         """Where a person pastes a Tender ID: tender links themselves expire with the portal session."""
         return f"{self.base}/app?page=FrontEndAdvancedSearch&service=page"
+
+    def _request(self, url: str, stream: bool = False):
+        """One GET that follows redirects itself. A portal page can contain any link, and a redirect can point anywhere, so every
+        address (the first and each hop) must be https on the portal's own host and must not resolve to a private network."""
+        hops: list = []
+        for _ in range(MAX_REDIRECTS + 1):
+            parts = urlparse(url)
+            if parts.scheme != "https" or _bare_host(url) != self._host:
+                raise PortalError(f"the portal pointed us to another website ({(parts.hostname or url)[:60]}), which this app does not follow", "different_software")
+            if self._check_dns and not is_public_host(parts.hostname or ""):
+                raise PortalError("the portal's address points to a private network, so it was not contacted", "blocked")
+            kwargs = {"timeout": self.timeout, "allow_redirects": False}
+            response = self.http.get(url, stream=True, **kwargs) if stream else self.http.get(url, **kwargs)
+            location = response.headers.get("Location") if getattr(response, "status_code", 0) in (301, 302, 303, 307, 308) and hasattr(response, "headers") else None
+            if not location:
+                if hops:
+                    response.history = hops + list(getattr(response, "history", None) or [])
+                return response
+            hops.append(response)
+            url = urljoin(url, location)
+        raise PortalError("the portal redirected too many times", "unreachable")
 
     def _get(self, url: str, attempts: int = 3) -> str:
         last: PortalError | None = None
@@ -248,7 +293,7 @@ class GepnicClient:
             if wait > 0:
                 time.sleep(wait)
             try:
-                response = self.http.get(urljoin(self.base + "/", url.replace("&amp;", "&")), timeout=self.timeout)
+                response = self._request(urljoin(self.base + "/", url.replace("&amp;", "&")))
                 self._last = time.monotonic()
                 status = response.status_code
                 if status == 200 and "Stale Session" not in response.text[:3000]:
@@ -303,7 +348,7 @@ class GepnicClient:
         if wait > 0:
             time.sleep(wait)
         try:
-            r = self.http.get(urljoin(self.base + "/", href.replace("&amp;", "&")), timeout=self.timeout, stream=True)
+            r = self._request(urljoin(self.base + "/", href.replace("&amp;", "&")), stream=True)
             self._last = time.monotonic()
         except requests.RequestException as e:
             raise PortalError(str(e)[:200], "unreachable") from None

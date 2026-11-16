@@ -8,6 +8,7 @@ import { StarButton, TenderDrawer } from '../TenderDrawer';
 import { chain, fmtDate, headline, relative } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
+import { Only } from '../session';
 import type { AppConfig, Tender } from '../types';
 
 const SORTS: [string, string][] = [
@@ -50,7 +51,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
           <p className="sub">{data ? `${data.total.toLocaleString('en-IN')} civil tender${data.total === 1 ? '' : 's'}` : 'Loading…'}</p>
         </div>
         <div className="head-actions">
-          <button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender</button>
+          <Only role="bidder"><button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender</button></Only>
           <a className="btn" href={api.exportUrl(filters, display.sort)} download>Download spreadsheet</a>
         </div>
       </div>
@@ -133,7 +134,7 @@ function Card({ t, now, onOpen, onStar, onCopy, onStart }: { t: Tender; now: str
           {t.location && <span className="badge plain">{t.location}</span>}
           <span className="mono">{t.tender_id}</span>
           <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`Copy Tender ID ${t.tender_id}`}>Copy ID</button>
-          <button className="btn small primary" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start bid</button>
+          <Only role="bidder"><button className="btn small primary" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start bid</button></Only>
         </div>
       </div>
       <div className="side">
