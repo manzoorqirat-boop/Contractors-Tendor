@@ -17,7 +17,7 @@ import type { AppConfig, Tender } from '../types';
 import { tr } from '../i18n';
 
 const SORTS: [string, string][] = [
-  ['closing', tr('Closing soonest')], ['closing_desc', tr('Closing latest')], ['value', tr('Highest value')], ['value_asc', tr('Lowest value')], ['published', tr('Newest published')], ['first_seen', tr('Newly found')], ['fit', tr('Best fit')],
+  ['smart', tr('Recommended')], ['closing', tr('Closing soonest')], ['closing_desc', tr('Closing latest')], ['value', tr('Highest value')], ['value_asc', tr('Lowest value')], ['published', tr('Newest published')], ['first_seen', tr('Newly found')], ['fit', tr('Best fit')],
 ];
 const PAGE_SIZE = 25;
 
@@ -99,7 +99,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
 
       <section className="card">
         <div className="list-tools">
-          <label className="field-inline">{tr('Sort')}<select value={display.sort} onChange={(e) => sortBy(e.target.value)} aria-label={tr('Sort')}>{SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <label className="field-inline">{tr('Sort')}<select value={display.sort} onChange={(e) => sortBy(e.target.value)} aria-label={tr('Sort')}>{(filters.q ? [['relevance', tr('Best text match')], ...SORTS] : SORTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           </label>
           <div className="seg" role="group" aria-label={tr('Layout')}>
             <button type="button" className={layout === 'cards' ? 'on' : ''} aria-pressed={layout === 'cards'} onClick={() => nav.setDisplay({ layout: 'cards' })}>{tr('Cards')}</button>
@@ -113,7 +113,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
         {data && items.length === 0 && <div className="empty"><h2>{tr('No tenders match these filters')}</h2>{data.suggest && <p className="sub">{tr('Did you mean')} <button type="button" className="link-btn" onClick={() => nav.setFilters({ ...filters, q: data.suggest! })}>{data.suggest}</button>?</p>}<p className="sub">{tr('Widen the closing window or remove a filter to see more.')}</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>{tr('Clear all filters')}</button></div>}
 
         <div style={{ opacity: loading && data ? 0.55 : 1 }} aria-busy={loading}>
-          {layout === 'cards' && items.map((t) => <Card key={t.key} picked={isPicked(t.key)} onPick={() => togglePick(t.key)} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}
+          {layout === 'cards' && items.map((t) => <Card key={t.key} picked={isPicked(t.key)} onPick={() => togglePick(t.key)} t={t} now={config.now} why={display.sort === 'smart' ? t.priority_note : null} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}
           {layout === 'table' && items.length > 0 && (
             <ScrollX label={tr('Tenders')}>
               <table className="tbl">
@@ -178,7 +178,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   );
 }
 
-function Card({ t, now, picked, onPick, onOpen, onStar, onCopy, onStart }: { t: Tender; now: string; picked: boolean; onPick: () => void; onOpen: () => void; onStar: (s: boolean) => void; onCopy: () => void; onStart: () => void }) {
+function Card({ t, now, why, picked, onPick, onOpen, onStar, onCopy, onStart }: { t: Tender; now: string; why?: string | null; picked: boolean; onPick: () => void; onOpen: () => void; onStar: (s: boolean) => void; onCopy: () => void; onStart: () => void }) {
   const rel = relative(t.closing, now);
   return (
     <article className={`tender urg-${rel.tone || 'none'}`} onClick={onOpen}>
@@ -189,6 +189,7 @@ function Card({ t, now, picked, onPick, onOpen, onStar, onCopy, onStart }: { t: 
           <button className="work linkish" onClick={onOpen}>{headline(t)}</button>
         </div>
         <div className="org">{chain(t.organisation).join(' › ')}</div>
+        {why && <div className="why muted small">{tr('Why here')}: {why}</div>}
         <div className="chips">
           <span className="badge accent">{t.portal_name.split(' (')[0]}</span>
           {t.work_type && <span className="badge plain">{t.work_type}</span>}

@@ -150,6 +150,10 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
             if not isinstance(payload[flag], bool):
                 raise SettingsError(f"{flag} must be true or false")
             out[flag] = payload[flag]
+    if "learning" in payload:
+        if not isinstance(payload["learning"], bool):
+            raise SettingsError("learning must be true or false")
+        out["learning"] = payload["learning"]
     if "accent" in payload:
         if payload["accent"] not in ACCENTS:
             raise SettingsError("Choose one of the colours offered: " + ", ".join(ACCENTS))
@@ -172,7 +176,7 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
 
 DEFAULTS = {
     "send_time": "08:00", "schedule_enabled": True, "send_empty": True, "min_value": 0.0,
-    "reminders_on": True, "require_signoff": False, "webhook_url": "", "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "accent": "blue", "ai_digest_intro": True, "ai_hide_noncivil": False,
+    "reminders_on": True, "require_signoff": False, "webhook_url": "", "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "accent": "blue", "learning": True, "ai_digest_intro": True, "ai_hide_noncivil": False,
     "audit_days": 365, "tender_days": 45,
 }
 
@@ -192,6 +196,7 @@ def current(env: Settings, saved: dict[str, Any]) -> dict[str, Any]:
         "company_profile": saved.get("company_profile", DEFAULTS["company_profile"]),
         "logo_text": saved.get("logo_text", DEFAULTS["logo_text"]),
         "accent": saved.get("accent", DEFAULTS["accent"]) if saved.get("accent") in ACCENTS else DEFAULTS["accent"],
+        "learning": saved.get("learning", DEFAULTS["learning"]) is not False,
         "ai_digest_intro": saved.get("ai_digest_intro", DEFAULTS["ai_digest_intro"]),
         "ai_hide_noncivil": saved.get("ai_hide_noncivil", DEFAULTS["ai_hide_noncivil"]),
         "reminders_on": saved.get("reminders_on", DEFAULTS["reminders_on"]),

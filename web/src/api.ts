@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -168,6 +168,7 @@ export const api = {
   testHook: (id: number) => call<{ ok: boolean }>(`/api/webhooks/${id}/test`, { method: 'POST' }),
   deleteWebhook: (id: number) => call<{ removed: number }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
   hideTenders: (keys: string[], hidden: boolean, mute_department = false) => call<{ changed: number; hidden: boolean; muted: string[] }>('/api/tenders/hide', { method: 'POST', body: JSON.stringify({ keys, hidden, mute_department }) }),
+  learning: () => call<Learning>('/api/learning'),
   mutes: () => call<{ departments: MutedDepartment[]; hidden_tenders: number }>('/api/mutes'),
   setMute: (department: string, muted: boolean) => call<{ changed: boolean; departments: MutedDepartment[] }>('/api/mutes', { method: 'POST', body: JSON.stringify({ department, muted }) }),
   companySize: () => call<{ min: number | null; max: number | null }>('/api/company-size'),

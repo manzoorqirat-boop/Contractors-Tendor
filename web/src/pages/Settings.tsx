@@ -17,7 +17,7 @@ type Tab = 'email' | 'reminders' | 'portals' | 'filters' | 'ai' | 'people' | 'in
 let lastTab: Tab = 'email';
 const norm = (v: { recipients: string; extra: string; exclude: string; minValue: string; logoText: string; f: Settings }) => JSON.stringify([
   lines(v.recipients), lines(v.extra), lines(v.exclude), Number(v.minValue) || 0, v.logoText, v.f.send_time, v.f.schedule_enabled, v.f.send_empty,
-  [...v.f.portals].sort(), v.f.ai_digest_intro, v.f.ai_hide_noncivil, v.f.accent ?? 'blue']);
+  [...v.f.portals].sort(), v.f.ai_digest_intro, v.f.ai_hide_noncivil, v.f.accent ?? 'blue', v.f.learning !== false]);
 const lines = (s: string) => s.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
 
 export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => void }) {
@@ -79,7 +79,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
       const saved = await api.saveSettings({
         recipients: lines(recipients), send_time: form.send_time, schedule_enabled: form.schedule_enabled, send_empty: form.send_empty,
         portals: form.portals, min_value: Number(minValue) || 0, extra_keywords: lines(extra), exclude_words: lines(exclude),
-        logo_text: logoText, accent: form.accent ?? 'blue', ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil, reminders_on: form.reminders_on ?? true, webhook_url: form.webhook_url ?? '',
+        logo_text: logoText, accent: form.accent ?? 'blue', ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil, learning: form.learning !== false, reminders_on: form.reminders_on ?? true, webhook_url: form.webhook_url ?? '',
       });
       loadAi();
       load(saved);
@@ -206,6 +206,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
                 <textarea value={exclude} onChange={(e) => setExclude(e.target.value)} spellCheck={false} />
               </label>
             </div>
+            <label className="check" style={{ marginTop: 14 }}><input type="checkbox" checked={form.learning !== false} onChange={(e) => patch({ learning: e.target.checked })} />Let the Recommended order learn from the tenders you star, bid on, hide or drop (what it learned is shown under Vault, Company)</label>
           </section>
         )}
 

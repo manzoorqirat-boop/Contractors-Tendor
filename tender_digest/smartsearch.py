@@ -86,6 +86,46 @@ class Parsed:
         return out
 
 
+def _subtokens(text: str) -> list[str]:
+    """How the full-text index splits text: runs of letters and digits, lower case. "R&M" is r, m; "2026_PWD_1" is 2026, pwd, 1."""
+    return re.findall(r"[^\W_]+", text.lower())
+
+
+def _fts_variant(word: str) -> str | None:
+    """One word as a full-text phrase: a short word (rd, cc) must be a whole word, a longer one may continue (road finds roads, roadwork)."""
+    toks = _subtokens(word)
+    if not toks:
+        return None
+    phrase = '"' + " ".join(toks) + '"'
+    return phrase + " *" if len(toks[-1]) >= 4 and len(word) > 3 else phrase
+
+
+def fts_query(parsed: "Parsed") -> str | None:
+    """The search as a SQLite FTS5 MATCH expression, or None when it cannot be expressed (nothing but "leave this out" words), in which case
+    the row-by-row matcher is used. Every word is quoted, so nothing a person types can be read as search syntax."""
+    parts: list[str] = []
+    for term in parsed.terms:
+        variants = [v for v in (_fts_variant(w) for w in term) if v]
+        # a longer word that an earlier prefix already covers (roads after road) adds nothing, and would count twice when ranking
+        single = [v[1:-3] for v in variants if v.endswith('" *') and v.count(" ") == 1]   # one-word prefix variants, without the quotes
+        variants = [v for v in variants if not (v.endswith('" *') and v.count(" ") == 1 and any(v[1:-3] != w and v[1:-3].startswith(w) for w in single))] or variants
+        if variants:
+            parts.append("(" + " OR ".join(variants) + ")")
+    for phrase in parsed.phrases:
+        toks = _subtokens(phrase)
+        if toks:
+            parts.append('"' + " ".join(toks) + '"')
+    if not parts:
+        return None
+    expr = " AND ".join(parts)
+    out = [v for v in (_fts_variant(x) for x in parsed.excluded) if v]
+    if out:
+        expr = f"{expr} NOT ({' OR '.join(out)})"   # in FTS5, NOT binds tighter than AND: this reads "the last term, but not these"
+        if len(parts) > 1:
+            expr = " AND ".join(parts[:-1]) + f" AND ({parts[-1]} NOT ({' OR '.join(out)}))"
+    return expr
+
+
 def _amount(num: str, unit: str | None) -> float:
     return float(num.replace(",", "")) * UNITS.get((unit or "").lower(), 1.0)
 
