@@ -663,3 +663,23 @@ input.pick { width: 18px; height: 18px; margin: 0 6px 0 0; accent-color: var(--a
 
 .view-alert { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; cursor: pointer; }
 .view-save { flex-wrap: wrap; }
+
+/* ---- bid progress ---- */
+.bidprog { margin-bottom: var(--sp-4); display: grid; gap: var(--sp-4); }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--sp-1); }
+.steps li { flex: 1; position: relative; }
+.steps li + li::before { content: ''; position: absolute; left: -50%; right: 50%; top: 15px; height: 2px; background: var(--border); z-index: 0; }
+.steps li.done + li::before, .steps li.done::before { background: var(--ok); }
+.steps button { position: relative; z-index: 1; display: grid; justify-items: center; gap: var(--sp-1); width: 100%; background: none; border: 0; padding: var(--sp-1) 0; cursor: pointer; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; }
+.steps .dot { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); border: 2px solid var(--border); color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+.steps li.done .dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+.steps li.here .dot { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.steps li.done.here .dot { color: #fff; }
+.steps li.here .lbl { color: var(--text); }
+.ready-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.meter { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.meter span { display: block; height: 100%; border-radius: 999px; transition: width .3s var(--ease); }
+.meter span.ok { background: var(--ok); } .meter span.warn { background: var(--warn); } .meter span.bad { background: var(--bad); }
+.ready-todo { margin: var(--sp-2) 0 0 18px; padding: 0; color: var(--muted); font-size: var(--fs-sm); }
+.ai-check { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-sm); }
+.ai-check.warn { background: var(--warn-soft); color: var(--warn); } .ai-check.ok { background: var(--ok-soft); color: var(--ok); }

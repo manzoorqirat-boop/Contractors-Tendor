@@ -4,7 +4,8 @@ import { BriefView, readBase64, useAiStatus } from '../ai';
 import { BoqCard, RiskCard } from '../Boq';
 import { PriceAdvisor } from '../PriceAdvisor';
 import { chain, fmtDate, headline, inr, plural, relative } from '../format';
-import { useLoad } from '../hooks';
+import { useLoad, useServerNow } from '../hooks';
+import { BidProgress } from '../BidProgress';
 import { Skeleton, useToast } from '../ui';
 import { Only, ReadOnly } from '../session';
 import { useConfirm } from '../confirm';
@@ -184,6 +185,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const toast = useToast();
   const confirm = useConfirm();
   const ai = useAiStatus();
+  const nowIso = useServerNow(config.now);  // a hook: it must run on every render, before any early return
   const [bid, setBid] = useState<BidDetail | null>(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -205,7 +207,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   if (error) return <><button className="link-btn" onClick={onBack}>← All bids</button><div className="alert bad">{error}</div></>;
   if (!bid) return <><Skeleton h={28} style={{ marginBottom: 12 }} /><Skeleton h={160} /></>;
 
-  const rel = relative(bid.closing, config.now);
+  const rel = relative(bid.closing, nowIso);
   const open = ACTIVE.includes(bid.stage);
   const unseen = bid.changes.filter((c) => !c.seen);
   const tab = tabSel ?? defaultTab(bid.stage);
@@ -246,6 +248,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       )}
 
       <ReadOnly>
+      <BidProgress bid={bid} aiOn={!!ai?.configured} tab={tab} onGo={setTabSel} onChange={(patch) => setBid({ ...bid, ...patch })} />
       <NextStep bid={bid} />
 
       <section className="card" style={{ marginBottom: 14 }}>

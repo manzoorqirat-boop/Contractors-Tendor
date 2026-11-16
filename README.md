@@ -38,6 +38,8 @@ tenders, and gives you:
 TendAI does not submit bids: portals need your DSC and their own login, and the app never goes around those. It prepares everything around the filing.
 
 - **Start a bid** from any tender's panel. The **Bids** page is your pipeline (Interested, Preparing, Submitted, Bid opened, Won, Lost, Dropped) with a "Coming up" list of closing dates, EMD due, pre-bid meetings and query deadlines.
+- **Progress and readiness**: a five-step strip (Decide, Checklist, Price, Letters, Result) shows how far a bid has got, and a **Ready to submit** percentage lists what is still missing (unticked checklist items, papers missing or expired in the Vault, document not read, eligibility not checked, no price recorded). The last two days before closing are counted in hours and minutes.
+- **AI-read details need a human check**: after the AI reads a tender notice, the bid asks you to compare the details with the notice and press *I checked them against the notice*. It records who and when, and the mark is cleared if the document is read again.
 - **Checklist** per bid: standard steps plus, after *Read tender document*, the required documents and conditions. Each required document is matched to the **Vault** and flagged *Not in vault*, *Expired* or *Expires before closing*.
 - **Vault**: reusable papers (optionally with the file, up to 10 MB) with expiry dates, and **Company facts** (turnover, class, similar work) that the AI uses and never guesses.
 - **Eligibility check** (AI): each condition marked met, gap or unclear, with what to do.

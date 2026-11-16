@@ -439,6 +439,10 @@ class BulkStar(BaseModel):
     starred: bool
 
 
+class DocChecked(BaseModel):
+    checked: bool
+
+
 class BulkBids(BaseModel):
     keys: list[str] = Field(max_length=50)
 
@@ -1396,6 +1400,17 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             return {"facts": facts, "added": added, "nit": state, "message": message, "corrigenda": corrigenda, "boq": boq_out, "risks": risks_out}
         finally:
             fetch_lock.release()
+
+    @app.post("/api/bids/{bid_id}/doc-checked", dependencies=auth)
+    def bid_doc_checked(bid_id: int, body: DocChecked, request: Request) -> dict:
+        """Records that a person compared what the AI read from the tender notice with the notice itself (or takes that back)."""
+        bid = bid_or_404(bid_id)
+        if not bid.get("doc"):
+            raise HTTPException(422, "No tender document has been read for this bid yet")
+        mark = {"by": request.state.user.username, "at": now().isoformat(timespec="seconds")} if body.checked else None
+        bids.set_json(bid_id, "doc_checked", mark, now())
+        # set_json("doc_checked") must not clear itself: only a new "doc" does that
+        return {"doc_checked": mark}
 
     @app.post("/api/bids/{bid_id}/brief", dependencies=auth)
     def bid_brief(bid_id: int, body: SummaryBody) -> dict:

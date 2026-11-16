@@ -363,6 +363,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("PATCH", "/api/bids/{bid_id}/items/{item_id}"): "Changed a checklist item",
     ("DELETE", "/api/bids/{bid_id}/items/{item_id}"): "Removed a checklist item",
     ("POST", "/api/bids/{bid_id}/document"): "Read a bid's tender document with AI",
+    ("POST", "/api/bids/{bid_id}/doc-checked"): "Marked the AI-read details as checked (or unchecked)",
     ("POST", "/api/bids/{bid_id}/fetch"): "Fetched a bid's details from the portal",
     ("POST", "/api/bids/{bid_id}/eligibility"): "Ran the eligibility check",
     ("POST", "/api/bids/{bid_id}/draft"): "Drafted a letter with AI",

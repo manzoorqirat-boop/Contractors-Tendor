@@ -87,7 +87,7 @@ export interface EligibilityCheck { requirement: string; status: 'met' | 'gap' |
 export interface Eligibility { verdict: string; summary: string; checks: EligibilityCheck[]; checked?: string }
 export interface BidDetail extends Omit<BidSummary, 'has_doc'> {
   published: string | null; category: string; location: string; emd: number | null; notes: string | null; l1_bidder: string | null; result_note: string | null; search_url: string;
-  doc: DocFacts | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null; manual?: boolean; has_source?: boolean; portal_checked?: string | null;
+  doc: DocFacts | null; doc_checked?: { by: string; at: string } | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null; manual?: boolean; has_source?: boolean; portal_checked?: string | null;
   items: BidItem[]; changes: BidChange[]; unseen: number; history: string[];
 }
 export interface BidAlert { bid_id: number | null; kind: string; label: string; date: string; days_left: number; urgency: 'overdue' | 'today' | 'soon' | 'later'; title: string; tender_id: string; extra: string }

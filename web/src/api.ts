@@ -66,6 +66,7 @@ export const api = {
   tenders: (f: Filters, sort: string, page: number, pageSize = 25) => call<TenderPage>(`/api/tenders?${toParams(f)}&sort=${sort}&page=${page}&page_size=${pageSize}`),
   exportUrl: (f: Filters, sort = 'closing', format: 'csv' | 'xlsx' = 'csv', keys: string[] = []) => `/api/tenders/export?${toParams(f)}&sort=${sort}&format=${format}${keys.map((k) => `&keys=${encodeURIComponent(k)}`).join('')}`,
   starBulk: (keys: string[], starred: boolean) => call<{ changed: number; starred: boolean }>('/api/tenders/star-bulk', { method: 'POST', body: JSON.stringify({ keys, starred }) }),
+  docChecked: (id: number, checked: boolean) => call<{ doc_checked: { by: string; at: string } | null }>(`/api/bids/${id}/doc-checked`, { method: 'POST', body: JSON.stringify({ checked }) }),
   createBidsBulk: (keys: string[]) => call<{ created: number[]; existing: number[]; missing: string[] }>('/api/bids/bulk', { method: 'POST', body: JSON.stringify({ keys }) }),
   pivot: (f: Filters, groupBy: string, splitBy: string, top = 12) =>
     call<Pivot>(`/api/analytics?${toParams(f)}&group_by=${groupBy}${splitBy ? `&split_by=${splitBy}` : ''}&top=${top}`),

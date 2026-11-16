@@ -35,7 +35,11 @@ export function relative(iso: string | null, now: string): { text: string; tone:
     const d = Math.floor(-hours / 24);
     return { text: d === 0 ? 'Closed today' : `Closed ${d} day${d === 1 ? '' : 's'} ago`, tone: 'closed' };
   }
-  if (hours < 24) return { text: hours < 1 ? 'Closes within the hour' : `Closes in ${Math.floor(hours)} hour${Math.floor(hours) === 1 ? '' : 's'}`, tone: 'urgent' };
+  if (hours < 48) {  // the last two days are counted in hours and minutes: that is when it matters
+    const mins = Math.floor((asUtc(iso) - asUtc(now)) / 60_000);  // whole minutes: no floating-point drift
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return { text: h === 0 ? `Closes in ${m} min` : m === 0 ? `Closes in ${h} h` : `Closes in ${h} h ${m} min`, tone: hours < 24 ? 'urgent' : 'soon' };
+  }
   const d = Math.floor(hours / 24);
   return { text: `Closes in ${d} day${d === 1 ? '' : 's'}`, tone: d <= 3 ? 'soon' : 'ok' };
 }

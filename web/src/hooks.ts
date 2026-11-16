@@ -24,6 +24,18 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): Loaded<T> {
   return { data, error, loading, reload };
 }
 
+/** The server's clock (India time, no zone) kept moving on the page: the time it said when the page loaded, plus time since. Refreshes every 30 s. */
+export function useServerNow(serverNow: string): string {
+  const [, tick] = useState(0);
+  const base = useRef({ serverNow, loadedAt: Date.now() });
+  if (base.current.serverNow !== serverNow) base.current = { serverNow, loadedAt: Date.now() };
+  useEffect(() => { const id = setInterval(() => tick((n) => n + 1), 30000); return () => clearInterval(id); }, []);
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(base.current.serverNow);
+  if (!m) return serverNow;
+  const ms = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) + (Date.now() - base.current.loadedAt);
+  return new Date(ms).toISOString().slice(0, 19);
+}
+
 export function useDebounced<T>(value: T, ms = 350): T {
   const [v, setV] = useState(value);
   useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
