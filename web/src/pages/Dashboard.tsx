@@ -6,7 +6,8 @@ import { mergeDrill } from '../filters';
 import { chain, fmtDate, fmtDay, headline, inr, plural, relative } from '../format';
 import { useLoad } from '../hooks';
 import type { Nav } from '../App';
-import { ChartSkeleton, Skeleton } from '../ui';
+import { ChartSkeleton, Skeleton, useToast } from '../ui';
+import { useConfirm } from '../confirm';
 import { ManualBanner } from '../ManualPortals';
 import { Only, useSession } from '../session';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
@@ -129,7 +130,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
         </div>
       </div>
 
-      <SetupCard config={config} firstRunDone={!!stats.data && (stats.data.kpi.total_kept > 0 || stats.data.last_run?.status === 'ok')} go={(t) => go(t)} />
+      <SetupCard onChanged={() => stats.reload()} />
 
       <ManualBanner onOpen={() => go('settings')} />
 
@@ -180,32 +181,47 @@ function withUnit(value?: string) {
   return m ? <>{m[1]}<span className="unit">{m[2]}</span></> : value;
 }
 
-/** What an administrator still has to set up on a new install. Disappears when everything is done, or when dismissed. */
-function SetupCard({ config, firstRunDone, go }: { config: AppConfig; firstRunDone: boolean; go: (t: 'runs' | 'settings' | 'vault') => void }) {
+/** What a new installation still needs, worked out by the server from what is stored. Disappears when everything is done, or when hidden. Administrators can also try the app with sample tenders. */
+function SetupCard({ onChanged }: { onChanged: () => void }) {
   const { can } = useSession();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [hidden, setHidden] = useState(() => { try { return localStorage.getItem('setup-dismissed') === '1'; } catch { return false; } });
-  const profile = useLoad(() => (can('bidder') && config.ai_enabled ? api.companyProfile() : Promise.resolve(null)), [config.ai_enabled]);
-  if (hidden || !can('admin')) return null;
-  const steps: { done: boolean; text: string; hint: string; to: 'runs' | 'settings' | 'vault'; label: string }[] = [
-    { done: config.mail_configured && config.recipient_count > 0, text: 'Set up the daily email', hint: config.mail_configured ? 'Add the people who should receive it.' : 'Add BREVO_API_KEY and MAIL_FROM on the server, then add recipients.', to: 'settings', label: 'Open Settings' },
-    { done: firstRunDone, text: 'Collect the first tenders', hint: 'The first run reads every recent tender and takes 20 to 40 minutes. Later runs are quick.', to: 'runs', label: 'Open Runs' },
-    ...(config.ai_enabled ? [{ done: !!profile.data?.company_profile?.trim(), text: 'Describe your company', hint: 'The AI uses it to score how well each tender fits you.', to: 'vault' as const, label: 'Open the Vault' }] : []),
-  ];
-  if (profile.loading || steps.every((s) => s.done)) return null;
-  const left = steps.filter((s) => !s.done).length;
+  const [busy, setBusy] = useState(false);
+  const setup = useLoad(() => (can('admin') ? api.setup() : Promise.resolve(null)), []);
+  const d = setup.data;
+  if (hidden || !can('admin') || !d) return null;
+  const todo = d.steps.filter((s) => !s.done && !s.optional);
+  if (todo.length === 0 && !d.sample.loaded) return null;
+  async function sample(load: boolean) {
+    if (!load && !(await confirm({ title: 'Remove the sample data?', body: 'The sample tenders and any bids you started on them (with their checklists and comments) are deleted. Your real tenders and bids are not touched.', confirmLabel: 'Remove sample data', danger: true }))) return;
+    setBusy(true);
+    try {
+      if (load) { const r = await api.loadSample(); toast(`${r.added} sample tenders added. They are marked "Sample data" and never emailed.`); }
+      else { const r = await api.removeSample(); toast(`Removed ${r.tenders} sample tenders and ${r.bids} bids.`); }
+      setup.reload(); onChanged(); window.dispatchEvent(new CustomEvent('tenders-changed'));
+    } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
+  }
   return (
     <section className="card setup-card" aria-label="Finish setting up">
-      <div className="setup-head"><h2>Finish setting up <span className="badge warn">{left} to do</span></h2>
+      <div className="setup-head"><h2>Finish setting up <span className="badge warn">{todo.length > 0 ? `${d.done} of ${d.total} done` : 'Sample data is on'}</span></h2>
         <button type="button" className="link-btn" onClick={() => { try { localStorage.setItem('setup-dismissed', '1'); } catch { /* ignore */ } setHidden(true); }}>Hide</button></div>
-      <ul className="setup-list">
-        {steps.map((s) => (
-          <li key={s.text} className={s.done ? 'done' : ''}>
-            <span className="setup-mark" aria-hidden>{s.done ? '✓' : '○'}</span>
-            <div><strong>{s.text}</strong><span className="sr-only">{s.done ? ' (done)' : ' (to do)'}</span>{!s.done && <div className="muted small">{s.hint}</div>}</div>
-            {!s.done && <button type="button" className="btn small" onClick={() => go(s.to)}>{s.label}</button>}
-          </li>
-        ))}
-      </ul>
+      {todo.length > 0 && (
+        <ul className="setup-list">
+          {d.steps.map((s) => (
+            <li key={s.key} className={s.done ? 'done' : ''}>
+              <span className="setup-mark" aria-hidden>{s.done ? '✓' : '○'}</span>
+              <div><strong>{s.title}</strong><span className="sr-only">{s.done ? ' (done)' : ' (to do)'}</span>{!s.done && <div className="muted small">{s.why}</div>}</div>
+              {!s.done && <a className="btn small" href={s.href}>{s.where}</a>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {d.sample.loaded
+          ? <><span className="muted small">{d.sample.tenders} sample tenders are in the list, marked "Sample data".</span><button type="button" className="btn small" onClick={() => sample(false)} disabled={busy}>Remove sample data</button></>
+          : <><button type="button" className="btn small" onClick={() => sample(true)} disabled={busy}>Try it with sample tenders</button><span className="muted small">Adds a few fake tenders so every page has something to show. Never emailed. One button removes them.</span></>}
+      </div>
     </section>
   );
 }

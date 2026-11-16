@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -165,6 +165,9 @@ export const api = {
   newWebhookSecret: (id: number) => call<{ secret: string }>(`/api/webhooks/${id}/secret`, { method: 'POST' }),
   testHook: (id: number) => call<{ ok: boolean }>(`/api/webhooks/${id}/test`, { method: 'POST' }),
   deleteWebhook: (id: number) => call<{ removed: number }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
+  setup: () => call<SetupStatus>('/api/setup'),
+  loadSample: () => call<{ added: number; tenders: number }>('/api/sample-data', { method: 'POST' }),
+  removeSample: () => call<{ tenders: number; bids: number }>('/api/sample-data', { method: 'DELETE' }),
   packUrl: (id: number) => `/api/bids/${id}/pack`,
   letterTemplates: () => call<{ templates: LetterTemplate[]; fields: TemplateField[] }>('/api/letter-templates'),
   createTemplate: (name: string, body: string) => call<LetterTemplate>('/api/letter-templates', { method: 'POST', body: JSON.stringify({ name, body }) }),

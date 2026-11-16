@@ -1,11 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { api, setUnauthorisedHandler } from './api';
+import { api, ApiError, setUnauthorisedHandler } from './api';
 import { DISPLAY, EMPTY, fromParams, toParams } from './filters';
 import { useLoad } from './hooks';
 import { AskBar } from './ai';
 import { Dashboard } from './pages/Dashboard';
 import { AddTenderHost } from './AddTender';
 import { Login } from './pages/Login';
+import { InstallButton, OfflineBar } from './pwa';
 import { loadBranding, Logo } from './Brand';
 import { ToastProvider, Drawer } from './ui';
 import { ConfirmProvider } from './confirm';
@@ -74,7 +75,11 @@ function parseHash(): { tab: Tab; bidId: number | null; filters: Filters; displa
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined: still asking the server; null: signed out
-  const refresh = useCallback(() => api.me().then((r) => setMe(r.authenticated ? r.user : null), () => setMe(null)), []);
+  const [unreachable, setUnreachable] = useState(false);
+  const refresh = useCallback(() => api.me().then((r) => { setUnreachable(false); setMe(r.authenticated ? r.user : null); }, (e: unknown) => {
+    if (e instanceof ApiError && e.status === 0) setUnreachable(true); else setMe(null);  // no connection is not the same as signed out
+  }), []);
+  useEffect(() => { window.addEventListener('online', refresh); return () => window.removeEventListener('online', refresh); }, [refresh]);
   useEffect(() => { applyTheme(readTheme()); loadBranding(); }, []);
   useEffect(() => { setUnauthorisedHandler(() => setMe(null)); refresh(); }, [refresh]);
   const logout = () => api.logout().finally(() => setMe(null));
@@ -82,7 +87,13 @@ export function App() {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        {me === undefined ? <div className="login"><span className="spinner" aria-label="Loading" /></div>
+        {me === undefined && unreachable ? (
+          <div className="login"><main className="login-card" style={{ maxWidth: 420, margin: 'auto' }}>
+            <h1>You are offline</h1>
+            <p className="login-sub">TendAI cannot reach the server. Check your connection. The page tries again by itself when the connection returns.</p>
+            <button className="btn primary" onClick={() => { setUnreachable(false); refresh(); }}>Try again</button>
+          </main></div>)
+          : me === undefined ? <div className="login"><span className="spinner" aria-label="Loading" /></div>
           : me === null ? <Login onDone={refresh} />
           : me.must_change ? <ChangePassword forced onDone={refresh} onLogout={logout} />
           : <SessionProvider user={me}><Main onLogout={logout} refreshMe={refresh} /></SessionProvider>}
@@ -191,12 +202,14 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
             </div>
           )}
           {user && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">Account &amp; security</span></button>}
+          <InstallButton />
           <button className="link-btn" onClick={() => setHelp(true)}><span className="nav-label">Keyboard shortcuts</span></button>
           <button className="link-btn" onClick={onLogout}><span className="nav-label">Log out</span></button>
           </div>
         </div>
       </aside>
       <div className="content">
+      <OfflineBar />
       {config.error && <div className="alert bad">{config.error}</div>}
       {config.data?.storage_warning && <div className="alert bad" role="alert"><strong>Your data is not safe.</strong> {config.data.storage_warning}</div>}
       {config.data?.ai_enabled && (tab === 'dashboard' || tab === 'explore' || tab === 'tenders') && <div className="askwrap"><AskBar nav={nav} /></div>}

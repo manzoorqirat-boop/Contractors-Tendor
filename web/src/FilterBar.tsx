@@ -47,7 +47,7 @@ export function FilterBar({ filters, display, config, facets, onChange, onApplyV
   return (
     <section className="card filterbar" aria-label="Filters">
       <div className="fb-row">
-        <input ref={input} type="text" className="fb-search" placeholder="Search work, department, location or Tender ID   ( / )" aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} maxLength={100} />
+        <input ref={input} type="text" className="fb-search" placeholder="Search: road nashik, drain -paver, bridge above 2 crore   ( / )" title="Every word must match. Drain also finds nala and sewer. Use quotes for a phrase, a minus to leave a word out, and above / under with an amount." aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} maxLength={100} />
         <button type="button" className={`btn fb-toggle${more ? ' active' : ''}`} aria-expanded={more} onClick={() => setMore((m) => !m)}>Filters{chips.length ? ` (${chips.length})` : ''}</button>
         <div className={`fb-selects${more ? ' open' : ''}`}>
         {!hideStatus && (

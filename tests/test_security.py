@@ -598,3 +598,47 @@ def test_a_wrong_key_is_reported_not_silently_ignored(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_ENCRYPTION_KEY", "short")
     with pytest.raises(SealError):
         mk()
+
+
+# ---- first run and sample data ----------------------------------------------------------------------------------------
+
+def test_setup_list_reflects_what_exists(sec):
+    c = sec.owner
+    s = c.get("/api/setup").json()
+    done = {x["key"]: x["done"] for x in s["steps"]}
+    assert done["profile"] is False and done["vault"] is False and done["bid"] is False and s["total"] == 7 and s["sample"] == {"loaded": False, "tenders": 0}
+    c.put("/api/company-profile", json={"company_profile": "Class A civil contractor doing roads and bridges in Maharashtra."})
+    c.put("/api/company-facts", json={"facts": [{"label": f"F{i}", "value": "x"} for i in range(3)]})
+    for n in range(3):
+        upload(type("X", (), {"owner": c}), name=f"Paper {n}", kind="gst")
+    c.post("/api/bids", json={"key": sec.tender.key})
+    done = {x["key"]: x["done"] for x in c.get("/api/setup").json()["steps"]}
+    assert done["profile"] and done["facts"] and done["vault"] and done["bid"] and done["run"]        # the kept tender counts as a collected one
+    assert sec.person("vera", "viewer").get("/api/setup").status_code == 200
+
+
+def test_sample_data_loads_once_is_never_emailed_and_removes_cleanly(sec):
+    from datetime import datetime
+    c = sec.owner
+    assert c.post("/api/sample-data").json() == {"added": 8, "tenders": 8}
+    assert c.post("/api/sample-data").json()["added"] == 0                                       # a second press adds nothing
+    page = c.get("/api/tenders", params={"status": "all", "portal": "sample"}).json()
+    assert page["total"] == 8 and page["items"][0]["portal_name"] == "Sample data" and page["items"][0]["tender_id"].startswith("SAMPLE-")
+    assert not [t for t in sec.store.pending(datetime.now()) if t.portal == "sample"]            # not in the daily email
+    assert not [r for r in sec.store.ai_pending(datetime.now(), "x", 100) if r["portal"] == "sample"]  # and not sent to the AI
+    assert c.get("/api/setup").json()["sample"] == {"loaded": True, "tenders": 8}
+    key = page["items"][0]["key"]
+    bid = c.post("/api/bids", json={"key": key}).json()["id"]
+    c.post(f"/api/bids/{bid}/comments", json={"text": "trying it out"})
+    other = c.post("/api/bids", json={"key": sec.tender.key}).json()["id"]
+    assert [x["done"] for x in c.get("/api/setup").json()["steps"] if x["key"] == "bid"] == [True]
+    gone = c.delete("/api/sample-data").json()
+    assert gone == {"tenders": 8, "bids": 1}
+    assert c.get("/api/tenders", params={"status": "all", "portal": "sample"}).json()["total"] == 0
+    assert c.get(f"/api/bids/{bid}").status_code == 404 and c.get(f"/api/bids/{other}").status_code == 200   # real work is untouched
+    assert c.get("/api/tenders", params={"status": "all"}).json()["total"] == 1                   # the real tender is still there
+
+
+def test_sample_data_is_for_administrators(sec):
+    assert sec.person("raj", "bidder").post("/api/sample-data").status_code == 403
+    assert sec.person("vera", "viewer").delete("/api/sample-data").status_code == 403

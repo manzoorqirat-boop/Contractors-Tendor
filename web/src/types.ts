@@ -22,7 +22,7 @@ export interface Related { key: string; tender_id: string; title: string; closin
 export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[]; bid_id?: number | null; history?: string[]; manual?: boolean; has_source?: boolean }
 export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number; calls_today?: number; daily_limit?: number }
 export interface AskResult { filters: Record<string, unknown>; sort: string | null; explanation: string }
-export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[] }
+export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[]; understood?: string; suggest?: string | null }
 
 export interface Stats {
   kpi: {
@@ -175,3 +175,5 @@ export interface Device { ref: string; device: string; client: string; created: 
 export interface ApiToken { id: number; name: string; hint: string; role: 'viewer' | 'bidder'; created_by: string | null; created: string; expires: string | null; last_used: number | null; revoked: boolean }
 export interface Webhook { id: number; name: string; url: string; events: string[]; active: boolean; created: string; secret_hint: string; last_at: string | null; last_status: 'ok' | 'retrying' | 'failed' | null; last_error: string | null; waiting: number }
 export interface EraseResult { handle: string; changed: Record<string, number>; when: string; note: string }
+export interface SetupStep { key: string; title: string; why: string; done: boolean; href: string; where: string; optional?: boolean; admin?: boolean }
+export interface SetupStatus { steps: SetupStep[]; done: number; total: number; sample: { loaded: boolean; tenders: number } }

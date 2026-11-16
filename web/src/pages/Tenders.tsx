@@ -103,7 +103,8 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
 
         {error && <div className="alert bad">{error} <button className="link-btn" onClick={reload}>Try again</button></div>}
         {!data && !error && Array.from({ length: 5 }, (_, i) => <div key={i} className="tender"><div><Skeleton h={16} w="80%" style={{ marginBottom: 8 }} /><Skeleton h={12} w="55%" /></div><Skeleton h={30} w={110} /></div>)}
-        {data && items.length === 0 && <div className="empty"><h2>No tenders match these filters</h2><p className="sub">Widen the closing window or remove a filter to see more.</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>Clear all filters</button></div>}
+        {data?.understood && <p className="muted small" role="status" style={{ margin: '0 0 8px' }}>{data.understood}.</p>}
+        {data && items.length === 0 && <div className="empty"><h2>No tenders match these filters</h2>{data.suggest && <p className="sub">Did you mean <button type="button" className="link-btn" onClick={() => nav.setFilters({ ...filters, q: data.suggest! })}>{data.suggest}</button>?</p>}<p className="sub">Widen the closing window or remove a filter to see more.</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>Clear all filters</button></div>}
 
         <div style={{ opacity: loading && data ? 0.55 : 1 }} aria-busy={loading}>
           {layout === 'cards' && items.map((t) => <Card key={t.key} picked={isPicked(t.key)} onPick={() => togglePick(t.key)} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}

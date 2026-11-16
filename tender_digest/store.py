@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from . import smartsearch
 from .gepnic import Tender
 
 _DATES = ("published", "closing", "opening")
@@ -163,6 +164,7 @@ class SeenStore:
         # One connection shared by the web threads and the run thread; every use goes through the lock.
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self.db.create_function("tsmatch", 2, smartsearch.match, deterministic=True)  # the search in the tender list
         self.lock = threading.RLock()
         with self.lock:
             self.db.executescript(
@@ -269,6 +271,19 @@ class SeenStore:
             ).fetchall()
         return [_from_json(r[0]) for r in rows]
 
+    def count_portal(self, portal: str) -> int:
+        with self.lock:
+            return self.db.execute("SELECT COUNT(*) FROM seen WHERE portal = ?", (portal,)).fetchone()[0]
+
+    def delete_portal(self, portal: str) -> list[str]:
+        """Removes every tender kept from one portal (sample data). Returns their keys."""
+        with self.lock:
+            keys = [r[0] for r in self.db.execute("SELECT key FROM seen WHERE portal = ?", (portal,))]
+            self.db.execute("DELETE FROM seen WHERE portal = ?", (portal,))
+            self.db.execute("DELETE FROM starred WHERE key LIKE ?", (portal + ":%",))
+            self.db.commit()
+        return keys
+
     def mark_emailed(self, keys: list[str]) -> None:
         with self.lock:
             self.db.executemany("UPDATE seen SET emailed = 1 WHERE key = ?", [(k,) for k in keys])
@@ -329,9 +344,20 @@ class SeenStore:
             args.append(int(f["min_fit"]))
 
         if f.get("q"):
-            like = cls._like(str(f["q"]))
-            where.append("(" + " OR ".join(f"{c} LIKE ? ESCAPE '\\'" for c in ("title", "description", "organisation", "tender_id", "location", "category")) + ")")
-            args += [like] * 6
+            parsed = smartsearch.parse(str(f["q"]))
+            if parsed.min_value is not None:
+                where.append("value >= ?")
+                args.append(parsed.min_value)
+            if parsed.max_value is not None:
+                where.append("value <= ?")
+                args.append(parsed.max_value)
+            if parsed.has_text:
+                where.append("tsmatch(" + " || ' ' || ".join(f"COALESCE({c}, '')" for c in ("title", "description", "organisation", "tender_id", "location", "category")) + ", ?) = 1")
+                args.append(parsed.spec())
+            elif parsed.min_value is None and parsed.max_value is None:  # only filler words (or symbols): fall back to the plain text match
+                like = cls._like(str(f["q"]))
+                where.append("(" + " OR ".join(f"{c} LIKE ? ESCAPE '\\'" for c in ("title", "description", "organisation", "tender_id", "location", "category")) + ")")
+                args += [like] * 6
         if f.get("min_value") is not None:
             where.append("value >= ?")
             args.append(float(f["min_value"]))
@@ -406,6 +432,20 @@ class SeenStore:
         d["opening"] = json.loads(d.pop("payload") or "{}").get("opening")
         return d
 
+    _vocab: tuple[int, float, dict[str, int]] | None = None
+
+    def vocabulary(self) -> dict[str, int]:
+        """The words used in collected tenders, for suggesting a spelling. Rebuilt when the number of tenders changes, at most every ten minutes."""
+        import time
+        n, t = self.count(), time.time()
+        if self._vocab and (self._vocab[0] == n or t - self._vocab[1] < 600):
+            return self._vocab[2]
+        with self.lock:
+            texts = [f"{r[0]} {r[1]}" for r in self.db.execute("SELECT title, description FROM seen WHERE civil = 1")]
+        vocab = smartsearch.vocabulary_from(texts)
+        self._vocab = (n, t, vocab)
+        return vocab
+
     def categories(self) -> list[str]:
         with self.lock:
             return [r[0] for r in self.db.execute("SELECT DISTINCT category FROM seen WHERE civil=1 AND category <> '' ORDER BY category")]
@@ -429,7 +469,7 @@ class SeenStore:
         with self.lock:
             rows = self.db.execute(
                 "SELECT key, title, description, organisation, category, location, portal, value, emd, closing, published FROM seen "
-                "WHERE civil = 1 AND (closing IS NULL OR closing >= ?) AND (ai_profile IS NULL OR ai_profile <> ?) ORDER BY first_seen DESC LIMIT ?",
+                "WHERE civil = 1 AND portal <> 'sample' AND (closing IS NULL OR closing >= ?) AND (ai_profile IS NULL OR ai_profile <> ?) ORDER BY first_seen DESC LIMIT ?",
                 (now.isoformat(), profile_hash, limit)).fetchall()
         return [dict(r) for r in rows]
 

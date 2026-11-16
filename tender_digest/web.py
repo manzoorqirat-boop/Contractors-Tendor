@@ -27,7 +27,7 @@ from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, alerts, appsettings, events, letters, mailer, pack, privacy, reminders, sealing, tokens
+from . import access, accounts, ai, alerts, appsettings, events, letters, mailer, pack, privacy, reminders, sample, sealing, smartsearch, tokens
 from .accounts import AccountError, Accounts, Principal
 from . import offsite
 from .backup import Backups, BackupError
@@ -709,6 +709,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             d.clear()
             d.update({p.key: value(p) for p in ps})
         portal_names["manual"], portal_states["manual"] = "Added by hand", "Added by hand"
+        portal_names["sample"], portal_states["sample"] = "Sample data", "Sample data"
 
     refresh_portals()
 
@@ -998,7 +999,13 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if sort not in SORTS:
             raise HTTPException(422, "Unknown sort")
         rows, total = store.search(now(), f, sort, page_size, (page - 1) * page_size)
-        return {"items": [shape(r) for r in rows], "total": total, "page": page, "page_size": page_size, "categories": store.categories()}
+        out = {"items": [shape(r) for r in rows], "total": total, "page": page, "page_size": page_size, "categories": store.categories()}
+        if f.get("q"):
+            parsed = smartsearch.parse(str(f["q"]))
+            out["understood"] = parsed.describe() if (parsed.has_text or parsed.min_value is not None or parsed.max_value is not None) else ""
+            if total == 0 and parsed.has_text:
+                out["suggest"] = smartsearch.suggest(str(f["q"]), store.vocabulary())
+        return out
 
     @app.get("/api/tenders/export", dependencies=auth)
     def export(f: dict = fparams, sort: str = "closing", format: str = Query("csv", pattern="^(csv|xlsx)$"), keys: list[str] | None = Query(None, max_length=300)) -> Response:
@@ -2092,6 +2099,48 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         store.sessions_end_for(user.id)  # whoever had the old password is signed out
         people.log(now(), user.username, user.role, "Chose a new password from an emailed link", client=client_of(request))
         return {"ok": True}
+
+    # ---- first run: what is set up, and sample data to try the app with ------------------------------------------------------
+
+    @app.get("/api/setup", dependencies=auth)
+    def setup_status() -> dict:
+        """A short list of what a new installation still needs, worked out from what is stored. Nothing here is a setting: it only reads."""
+        cur = appsettings.current(env, store.get_settings())
+        runs = store.list_runs(1)
+        sample_rows = store.count_portal("sample")
+        steps = [
+            {"key": "profile", "title": "Describe your company", "why": "The AI assistant uses it to score tenders for fit and to write letters.", "done": len(profile().strip()) >= 20, "href": "#/vault", "where": "Vault > Company"},
+            {"key": "facts", "title": "Add your company facts", "why": "Turnover, registration class and similar figures are checked against each tender's eligibility.", "done": len(company_facts()) >= 3, "href": "#/vault", "where": "Vault > Company"},
+            {"key": "vault", "title": "Add your standard papers to the Vault", "why": "GST, PAN, registration, balance sheets: bids match their checklist to these.", "done": len(bids.vault_list()) >= 3, "href": "#/vault", "where": "Vault > Documents"},
+            {"key": "email", "title": "Choose who gets the daily email", "why": "New civil tenders arrive in the inbox each morning.", "done": bool(manager.mail_configured and cur["recipients"]), "href": "#/settings", "where": "Settings > Daily email", "admin": True},
+            {"key": "run", "title": "Collect tenders", "why": "Press Run now on the Runs page, or wait for the daily run.", "done": store.count() - sample_rows > 0 or bool(runs and runs[0]["status"] == "ok"), "href": "#/runs", "where": "Runs"},
+            {"key": "bid", "title": "Start your first bid", "why": "Open a tender and press Start bid to get the checklist, price tools and team tools.", "done": len([b for b in bids.list() if b["portal"] != "sample"]) > 0, "href": "#/tenders", "where": "Tenders"},
+            {"key": "catalogue", "title": "Load your item catalogue (optional)", "why": "Lets a BOQ be costed from your own rates.", "done": (boq.catalogue(False)["counts"].get("item_master", 0) or 0) > 0, "href": "#/vault", "where": "Vault > Item catalogue", "optional": True},
+        ]
+        return {"steps": steps, "done": sum(1 for s in steps if s["done"]), "total": len(steps), "sample": {"loaded": sample_rows > 0, "tenders": sample_rows}}
+
+    @app.post("/api/sample-data", dependencies=auth)
+    def load_sample_data() -> dict:
+        """Adds a few fake tenders so every page has something to show. Never emailed, never sent to the AI."""
+        added = 0
+        for t in sample.tenders(now()):
+            if not store.get_tender(t.key):
+                store.keep(t, now())
+                store.mark_emailed([t.key])
+                added += 1
+        return {"added": added, "tenders": store.count_portal("sample")}
+
+    @app.delete("/api/sample-data", dependencies=auth)
+    def remove_sample_data() -> dict:
+        """Removes the sample tenders and any bids (with their checklists, comments and BOQs) started on them."""
+        removed_bids = 0
+        for b in bids.list():
+            if b["portal"] == "sample":
+                boq.store.delete_boqs(b["key"])
+                bids.delete_source(b["key"])
+                removed_bids += bool(bids.delete(b["id"]))
+        keys = store.delete_portal("sample")
+        return {"tenders": len(keys), "bids": removed_bids}
 
     # ---- what is kept about a person: a copy, and erasure ---------------------------------------------------------------------
 

@@ -29,6 +29,21 @@ export function ManualBanner({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+/** Government portals that run the same software as the built-in ones. Addresses are from public knowledge and have not been tested from this server: pressing Add checks each one and says whether the app can read it. */
+const SUGGESTED = [
+  { name: 'CPWD (etender.cpwd.gov.in)', state: 'Central', base_url: 'https://etender.cpwd.gov.in/nicgep' },
+  { name: 'Kerala (etenders)', state: 'Kerala', base_url: 'https://etenders.kerala.gov.in/nicgep' },
+  { name: 'Haryana (etenders)', state: 'Haryana', base_url: 'https://etenders.hry.nic.in/nicgep' },
+  { name: 'Madhya Pradesh (MPTenders)', state: 'Madhya Pradesh', base_url: 'https://mptenders.gov.in/nicgep' },
+  { name: 'Odisha (Tenders Odisha)', state: 'Odisha', base_url: 'https://tendersodisha.gov.in/nicgep' },
+  { name: 'West Bengal (WB Tenders)', state: 'West Bengal', base_url: 'https://wbtenders.gov.in/nicgep' },
+  { name: 'Assam (Assam Tenders)', state: 'Assam', base_url: 'https://assamtenders.gov.in/nicgep' },
+  { name: 'Uttarakhand (UK Tenders)', state: 'Uttarakhand', base_url: 'https://uktenders.gov.in/nicgep' },
+  { name: 'Himachal Pradesh (HP Tenders)', state: 'Himachal Pradesh', base_url: 'https://hptenders.gov.in/nicgep' },
+  { name: 'Jammu & Kashmir (JK Tenders)', state: 'Jammu & Kashmir', base_url: 'https://jktenders.gov.in/nicgep' },
+  { name: 'Jharkhand (Jharkhand Tenders)', state: 'Jharkhand', base_url: 'https://jharkhandtenders.gov.in/nicgep' },
+];
+
 /** Add portals, see which ones the app can read, and keep the list of those that need a person. */
 export function PortalsManager({ onChange }: { onChange: () => void }) {
   const confirm = useConfirm();
@@ -148,6 +163,13 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
         <h2>Add a portal</h2>
         <p className="sub">Paste the portal's address. The app checks it straight away: if it can read it, it is switched on; if not, it goes on the check-by-hand list with the reason.</p>
         {msg && <div className={`alert ${msg.tone}`} role="alert">{msg.text}</div>}
+        <details style={{ marginBottom: 12 }}>
+          <summary>Suggestions (not tested from this server)</summary>
+          <p className="muted small">These portals run the same software as the built-in ones. Choosing one fills in the form; Add and check then tells you whether this server can read it (some portals refuse requests from data centres, and some addresses change).</p>
+          <div className="chips">
+            {SUGGESTED.filter((x) => !portals.some((p) => p.base_url === x.base_url)).map((x) => <button key={x.base_url} type="button" className="chip-btn" onClick={() => setForm(x)}>{x.name}</button>)}
+          </div>
+        </details>
         {/* A div, not a form: this card sits inside the Settings form, and a nested form would also save the settings. */}
         <div onKeyDown={(e) => { if (e.key === 'Enter' && !disabled) { e.preventDefault(); add(); } }}>
           <label className="field">Name
