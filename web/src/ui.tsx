@@ -125,10 +125,10 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
   return (
     <div className="drawer-wrap">
       <div className="drawer-back" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
+      <div className="drawer" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
         <div className="drawer-head"><h2>{title}</h2><button className="link-btn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="drawer-body">{children}</div>
-      </aside>
+      </div>
     </div>
   );
 }

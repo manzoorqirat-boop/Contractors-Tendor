@@ -1,3 +1,4 @@
+import { ScrollX } from './ScrollX';
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { Logo } from './Brand';
@@ -156,9 +157,9 @@ export function UsersPanel() {
       <section className="card" style={{ gridColumn: '1 / -1' }}>
         <h2>People who can sign in</h2>
         <p className="sub">The owner login is set on the server (APP_USERNAME and APP_PASSWORD) and always works. Everyone else is listed here.</p>
-        <div className="scroll-x">
+        <ScrollX label="People who can sign in">
           <table className="tbl">
-            <thead><tr><th>Person</th><th>Role</th><th>Last sign-in</th><th>Status</th><th /></tr></thead>
+            <thead><tr><th>Person</th><th>Role</th><th>Last sign-in</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {data.users.map((u) => (
                 <tr key={u.id}>
@@ -186,7 +187,7 @@ export function UsersPanel() {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollX>
       </section>
       <section className="card">
         <h2>Add a person</h2>
@@ -237,7 +238,7 @@ export function ActivityPanel() {
         </select>
       </label>
       {error && <div className="alert bad">{error}</div>}
-      <div className="scroll-x">
+      <ScrollX label="Activity log">
         <table className="tbl">
           <thead><tr><th>When</th><th>Who</th><th>What</th><th>On</th><th>From</th></tr></thead>
           <tbody>
@@ -253,7 +254,7 @@ export function ActivityPanel() {
             {!loading && rows.length === 0 && <tr><td colSpan={5} className="empty">Nothing recorded yet.</td></tr>}
           </tbody>
         </table>
-      </div>
+      </ScrollX>
       {next && <button type="button" className="btn" onClick={() => load(true)} disabled={loading} style={{ marginTop: 10 }}>{loading ? 'Loading…' : 'Show older'}</button>}
     </section>
   );

@@ -1,3 +1,4 @@
+import { ScrollX } from '../ScrollX';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { readBase64 } from '../ai';
@@ -53,14 +54,14 @@ export function VaultPage({ config }: { config: AppConfig }) {
           <QuickAdd kinds={data.kinds} onAdded={() => { reload(); toast('Added to the vault'); }} />
           {data.documents.length === 0 && <div className="empty"><h2>Your vault is empty</h2><p className="sub">Add your registration, GST, PAN, balance sheets, past work orders and affidavits above. Bids will match their required documents to these.</p></div>}
           {data.documents.length > 0 && (
-            <div className="scroll-x">
+            <ScrollX label="Vault documents">
               <table className="tbl">
-                <thead><tr><th>Document</th><th>Kind</th><th>Expires</th><th /></tr></thead>
+                <thead><tr><th>Document</th><th>Kind</th><th>Expires</th><th><span className="sr-only">Actions</span></th></tr></thead>
                 <tbody>
                   {data.documents.map((d) => <DocRow key={d.id} d={d} kinds={data.kinds} now={config.now} onChange={reload} />)}
                 </tbody>
               </table>
-            </div>
+            </ScrollX>
           )}
         </section>
       )}

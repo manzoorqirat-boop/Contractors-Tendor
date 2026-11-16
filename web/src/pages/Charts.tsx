@@ -1,3 +1,4 @@
+import { ScrollX } from '../ScrollX';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { fmtDay, inr, inrShort } from '../format';
 import type { Cell, Drill, Measure, Pivot } from '../types';
@@ -126,7 +127,7 @@ export function PivotTable({ pivot, measure, onSelect }: { pivot: Pivot; measure
   const max = Math.max(1, ...all);
   const shade = (v: number) => (v > 0 ? `color-mix(in srgb, var(--accent) ${Math.round(8 + (v / max) * 52)}%, transparent)` : undefined);
   return (
-    <div className="scroll-x">
+    <ScrollX label="Chart table">
       <table className="tbl heat">
         <thead>
           <tr>
@@ -162,7 +163,7 @@ export function PivotTable({ pivot, measure, onSelect }: { pivot: Pivot; measure
           </tr>
         </tfoot>
       </table>
-    </div>
+    </ScrollX>
   );
 }
 

@@ -1,3 +1,4 @@
+import { ScrollX } from '../ScrollX';
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 import { BriefView, readBase64, useAiStatus } from '../ai';
@@ -129,10 +130,10 @@ function GroupTable({ title, rows }: { title: string; rows: StatGroup[] }) {
   return (
     <section className="card" style={{ marginBottom: 14 }}>
       <h2>{title}</h2>
-      <div className="scroll-x">
+      <ScrollX label="Bids">
         <table className="tbl"><thead><tr><th>{title.replace('By ', '')}</th><th className="num">Won</th><th className="num">Lost</th><th className="num">Win rate</th><th className="num">Value won</th></tr></thead>
           <tbody>{rows.map((r) => <tr key={r.label}><td>{r.label}</td><td className="num">{r.won}</td><td className="num">{r.lost}</td><td className="num">{Math.round((100 * r.won) / (r.won + r.lost))}%</td><td className="num">{r.won_value ? inr(r.won_value) : '-'}</td></tr>)}</tbody></table>
-      </div>
+      </ScrollX>
     </section>
   );
 }
@@ -268,7 +269,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           <div className="field-inline">EMD<span className="static">{bid.emd ? inr(bid.emd, false) : '-'}</span></div>
         </div>
         {open && rel.text && <div className={`when-banner ${rel.tone}`} style={{ marginTop: 12 }}>{rel.text}</div>}
-        <h3 style={{ margin: '14px 0 6px' }}>Dates</h3>
+        <h2 className="h3-like" style={{ margin: '14px 0 6px' }}>Dates</h2>
         <div className="ws-grid">
           <DateField label="Bid closes" value={bid.closing} time onSave={(v) => save({ closing: v })} />
           <DateField label="Bids open" value={bid.opening} time onSave={(v) => save({ opening: v })} />

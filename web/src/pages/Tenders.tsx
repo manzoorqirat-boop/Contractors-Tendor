@@ -1,3 +1,4 @@
+import { ScrollX } from '../ScrollX';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { Nav } from '../App';
@@ -105,9 +106,9 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
         <div style={{ opacity: loading && data ? 0.55 : 1 }} aria-busy={loading}>
           {layout === 'cards' && items.map((t) => <Card key={t.key} picked={isPicked(t.key)} onPick={() => togglePick(t.key)} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}
           {layout === 'table' && items.length > 0 && (
-            <div className="scroll-x">
+            <ScrollX label="Tenders">
               <table className="tbl">
-                <thead><tr><th><input type="checkbox" checked={allOnPage} onChange={togglePage} aria-label="Select all tenders on this page" /></th><th aria-label="Star" /><th>Work</th>{showFit && <th>Fit</th>}<th>Department</th><th>Portal</th><th className="num">Value</th><th>Closes</th></tr></thead>
+                <thead><tr><th><input type="checkbox" checked={allOnPage} onChange={togglePage} aria-label="Select all tenders on this page" /></th><th><span className="sr-only">Star</span></th><th>Work</th>{showFit && <th>Fit</th>}<th>Department</th><th>Portal</th><th className="num">Value</th><th>Closes</th></tr></thead>
                 <tbody>
                   {items.map((t) => {
                     const rel = relative(t.closing, config.now);
@@ -126,7 +127,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
                   })}
                 </tbody>
               </table>
-            </div>
+            </ScrollX>
           )}
         </div>
 

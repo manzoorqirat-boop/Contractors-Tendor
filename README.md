@@ -248,5 +248,7 @@ cd web && npm ci && npm run dev         # page on :5173, forwards /api to :8000
 npm run build                           # then the Python service serves web/dist itself
 ```
 
+Accessibility: `npm run a11y` (in `web/`) opens every screen and dialog in light and dark, on desktop and phone, and runs axe-core (WCAG 2.2 AA). It needs a running app with demo data (`A11Y_URL`, `A11Y_PASS`) and a browser (`npx playwright install chromium`); CI runs it on every change and fails on any violation.
+
 A command-line mode still exists for headless use: `python -m tender_digest --dry-run --portals delhi --preview out.html`
 reads live and builds the email without sending; `--send-test` sends a test email.
