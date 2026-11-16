@@ -110,7 +110,7 @@ export interface BoqCandidate { code: string; name: string; spec: string; uom: s
 export interface BoqLine {
   line_no: number; sr: string | null; section: string | null; description: string; uom: string | null; uom_raw: string | null; qty: number | null;
   est_rate: number | null; est_amount: number | null; status: BoqStatus; tier: string | null; confidence: number | null; item_code: string | null; item_name: string;
-  candidates: BoqCandidate[]; reason: string | null; cost: BoqCost | null;
+  candidates: BoqCandidate[]; reason: string | null; cost: BoqCost | null; manual_cost: number | null; lump_sum: boolean;
 }
 export interface BoqPricing {
   estimate_total: number; priced_lines: number; total_lines: number; coverage_pct: number; priced_estimate: number; priced_cost: number;

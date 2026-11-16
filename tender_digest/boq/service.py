@@ -9,6 +9,7 @@ import base64
 import dataclasses
 import io
 import os
+import re
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,9 +93,13 @@ class BoqService:
 
     # ---- upload and match -------------------------------------------------------------------------------------------
 
-    def analyse(self, tender_key: str, filename: str, file_base64: str) -> dict:
+    def analyse(self, tender_key: str, filename: str, file_base64: str, pdf_reader: Callable[[str], list[list[Any]]] | None = None) -> dict:
+        """Reads an uploaded BOQ and matches it to the catalogue. `pdf_reader` (the AI assistant) is only used for a PDF whose tables cannot be read by rule."""
         raw = _decode(file_base64)
         suffix = Path(filename or "").suffix.lower() or ".csv"
+        is_pdf = suffix == ".pdf" or raw[:4] == b"%PDF"
+        if is_pdf:
+            suffix = ".pdf"
         with tempfile.TemporaryDirectory(prefix="tendai-boq-") as d:
             path = Path(d) / f"upload{suffix}"
             path.write_bytes(raw)
@@ -103,8 +108,15 @@ class BoqService:
             except RuntimeError as e:
                 raise BoqError(str(e)) from None
             except Exception:
-                raise BoqError("That file could not be read as a BOQ. Check that it is a valid .xlsx, .xlsm, .xls or .csv file.") from None
+                raise BoqError("That file could not be read as a BOQ. Check that it is a valid .xlsx, .xlsm, .xls, .csv or text-based .pdf file.") from None
+        if is_pdf and not doc.lines and pdf_reader is not None:
+            doc = parse.parse_rows(pdf_reader(file_base64))  # no table could be found by rule (a scan, or an unusual layout): the AI assistant copies the items out
+            doc.warnings.insert(0, "The AI assistant read the items from this PDF. Check every quantity, unit and rate against the original: it can misread a table.")
+        elif is_pdf and doc.lines:
+            doc.warnings.insert(0, "Read from a PDF. Check quantities, units and rates against the original: tables in a PDF can be misread.")
         if not doc.lines:
+            if is_pdf:
+                raise BoqError("No BOQ table could be found in that PDF. It may be a scan: use the Excel file, or turn on the AI assistant to read it.")
             raise BoqError(doc.warnings[0] if doc.warnings else "No items were found in that file.")
         inner = self._verifier_factory() if self._verifier_factory else None
         verifier = _Capped(inner, MAX_VERIFY_CALLS) if inner else None
@@ -119,6 +131,18 @@ class BoqService:
             warnings.append("The item catalogue is empty, so nothing could be matched. Load your item list, then upload the BOQ again.")
         self.store.delete_boqs(tender_key)
         self.store.save_boq(tender_key, (filename or "BOQ")[:200], doc.rate_type, doc.estimated_total, warnings, rows)
+        return self.view(tender_key)
+
+    # ---- your own cost for a line ---------------------------------------------------------------------------------------
+
+    def set_cost(self, tender_key: str, line_no: int, cost: float | None) -> dict:
+        """Records what a line will cost you in total (needed for lump sums and items outside the catalogue), or removes it."""
+        boq_id = self.store.latest_boq_id(tender_key)
+        if not boq_id or not any(ln["line_no"] == line_no for ln in self.store.get_boq(boq_id)["lines"]):
+            raise BoqError("That BOQ line no longer exists. Reload the page.")
+        if cost is not None and not 0 < cost < 1e13:
+            raise BoqError("The cost must be an amount above zero")
+        self.store.set_line_cost(boq_id, line_no, cost)
         return self.view(tender_key)
 
     # ---- confirm a match --------------------------------------------------------------------------------------------
@@ -160,7 +184,8 @@ class BoqService:
             return None
         lines, results = self._lines_and_results(boq)
         loc = self.store.location(state) if state else None
-        out = rates.price_boq(lines, results, self.store.items(), self.store.activity, loc, include_review)
+        manual = {i: float(ln["manual_cost"]) for i, ln in enumerate(boq["lines"]) if ln.get("manual_cost") is not None}
+        out = rates.price_boq(lines, results, self.store.items(), self.store.activity, loc, include_review, manual)
         out["lines"] = {boq["lines"][c.index]["line_no"]: dataclasses.asdict(c) for c in out["lines"]}
         out["location"] = loc
         out["include_review"] = include_review
@@ -185,7 +210,8 @@ class BoqService:
                           "uom_raw": ln["uom_raw"], "qty": ln["qty"], "est_rate": ln["est_rate"], "est_amount": ln["est_amount"],
                           "status": ln["match_status"], "tier": ln["match_tier"], "confidence": ln["confidence"], "item_code": ln["erp_item_code"],
                           "item_name": names.get(ln["erp_item_code"] or "", ""), "candidates": ln["candidates"], "reason": ln["reason"],
-                          "cost": costs.get(ln["line_no"])})
+                          "cost": costs.get(ln["line_no"]), "manual_cost": ln.get("manual_cost"),
+                          "lump_sum": bool(re.match(r"^(l\.?\s?s\.?|lump\s?-?sum|job|lot|l/s)\b", (ln["uom_raw"] or "").strip().lower()))})
         return {**base, "pricing": pricing,
                 "boq": {"id": boq["boq_id"], "source_name": boq["source_name"], "rate_type": boq["rate_type"], "estimated_total": boq["estimated_total"],
                         "warnings": boq["warnings"], "parsed_at": boq["parsed_at"], "counts": counts, "lines": lines}}

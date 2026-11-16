@@ -552,6 +552,10 @@ class BoqUpload(BaseModel):
     file_base64: str = ""
 
 
+class BoqCost(BaseModel):
+    cost: float | None = None  # what the line costs you in total; null removes it
+
+
 class BoqConfirm(BaseModel):
     item_code: str | None = None
 
@@ -1531,12 +1535,17 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def do_bid_boq_upload(bid_id: int, body: BoqUpload) -> dict:
         bid = bid_or_404(bid_id)
-        return boq_call(boq.analyse, bid["key"], body.filename, body.file_base64, uses_ai=True)
+        return boq_call(boq.analyse, bid["key"], body.filename, body.file_base64, pdf_reader=ai.read_boq_pdf if ai.configured() else None, uses_ai=True)
 
     @app.post("/api/bids/{bid_id}/boq/lines/{line_no}", dependencies=auth)
     def bid_boq_confirm(bid_id: int, line_no: int, body: BoqConfirm, request: Request) -> dict:
         bid = bid_or_404(bid_id)
         return boq_call(boq.confirm, bid["key"], line_no, body.item_code, request.state.user.username)
+
+    @app.post("/api/bids/{bid_id}/boq/lines/{line_no}/cost", dependencies=auth)
+    def bid_boq_cost(bid_id: int, line_no: int, body: BoqCost) -> dict:
+        bid = bid_or_404(bid_id)
+        return boq_call(boq.set_cost, bid["key"], line_no, body.cost)
 
     @app.get("/api/bids/{bid_id}/risks", dependencies=auth)
     def bid_risks(bid_id: int) -> dict:

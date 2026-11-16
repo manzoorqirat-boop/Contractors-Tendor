@@ -414,6 +414,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/bids/{bid_id}/draft"): "Drafted a letter with AI",
     ("POST", "/api/bids/{bid_id}/boq"): "Uploaded a BOQ",
     ("POST", "/api/bids/{bid_id}/boq/lines/{line_no}"): "Confirmed a BOQ line match",
+    ("POST", "/api/bids/{bid_id}/boq/lines/{line_no}/cost"): "Entered a cost for a BOQ line",
     ("POST", "/api/bids/{bid_id}/risks"): "Read tender risks",
     ("POST", "/api/boq/catalogue"): "Imported the item catalogue",
     ("POST", "/api/vault"): "Added a paper to the Vault",

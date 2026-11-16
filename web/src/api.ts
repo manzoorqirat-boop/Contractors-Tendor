@@ -139,6 +139,7 @@ export const api = {
   importCatalogue: (kind: string, csv_text: string) => call<CatalogueImport>('/api/boq/catalogue', { method: 'POST', body: JSON.stringify({ kind, csv_text }) }),
   bidBoq: (id: number, include_review: boolean) => call<BoqView>(`/api/bids/${id}/boq?include_review=${include_review}`),
   uploadBoq: (id: number, filename: string, file_base64: string) => job<BoqView>(`/api/bids/${id}/boq`, { method: 'POST', body: JSON.stringify({ filename, file_base64 }) }),
+  setBoqLineCost: (id: number, line: number, cost: number | null) => call<BoqView>(`/api/bids/${id}/boq/lines/${line}/cost`, { method: 'POST', body: JSON.stringify({ cost }) }),
   confirmBoqLine: (id: number, line: number, item_code: string | null) => call<BoqView>(`/api/bids/${id}/boq/lines/${line}`, { method: 'POST', body: JSON.stringify({ item_code }) }),
   bidRisks: (id: number) => call<RiskData>(`/api/bids/${id}/risks`),
   readRisks: (id: number, text: string, pdf_base64: string) => job<RiskData>(`/api/bids/${id}/risks`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),

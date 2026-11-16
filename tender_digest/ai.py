@@ -311,6 +311,38 @@ def read_listing(text: str = "", pdf_base64: str = "") -> dict:
     return clean_listing(_json(_call(LISTING_SYSTEM, content, max_tokens=1500)))
 
 
+# ---- a BOQ in a PDF whose tables cannot be read by rule (scans, unusual layouts) -------------------------------------------------
+
+BOQ_SYSTEM = (
+    "You read the bill of quantities (BOQ / schedule of items) of an Indian government tender and copy its items out, in order. " + DATA_RULE + " "
+    "Copy numbers exactly as printed; never calculate or guess. Use null for anything not shown. Skip sub-totals, totals and notes. "
+    "Return ONLY a JSON object: items, a list of objects with sr (item number as printed), description, unit, quantity (number), rate (number: the estimated rate, if printed) "
+    "and amount (number: the estimated amount, if printed)."
+)
+MAX_BOQ_ITEMS = 400
+
+
+def clean_boq_rows(raw: Any) -> list[list[Any]]:
+    """The AI's items as sheet rows (a header row, then one row per item) so the ordinary BOQ reader can take over."""
+    items = raw.get("items") if isinstance(raw, dict) else None
+    if not isinstance(items, list):
+        raise AIError("Claude's answer was not in the expected form. Try again.")
+
+    def num(v: Any) -> Any:
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < 1e13 else ""
+
+    rows: list[list[Any]] = [["Sr No", "Description", "Unit", "Quantity", "Rate", "Amount"]]
+    for it in items[:MAX_BOQ_ITEMS]:
+        if isinstance(it, dict) and isinstance(it.get("description"), str) and it["description"].strip():
+            rows.append([str(it.get("sr") or "")[:20], it["description"].strip()[:600], str(it.get("unit") or "")[:20], num(it.get("quantity")), num(it.get("rate")), num(it.get("amount"))])
+    return rows
+
+
+def read_boq_pdf(pdf_base64: str) -> list[list[Any]]:
+    content = _source_content_plain("", pdf_base64, "Copy out the items of the bill of quantities.")
+    return clean_boq_rows(_json(_call(BOQ_SYSTEM, content, max_tokens=12000)))
+
+
 # ---- an award notice: who won, at what price, and who else bid ---------------------------------------------------------------
 
 AWARD_SYSTEM = (

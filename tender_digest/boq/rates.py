@@ -95,7 +95,7 @@ def cost_line(line: Any, result: MatchResult, items_by_code: dict[str, dict], ac
 
 
 def price_boq(lines: list[Any], results: list[MatchResult], items: list[dict], activity_for: Callable[[str], dict | None] | None = None,
-              location: dict | None = None, include_review: bool = False) -> dict[str, Any]:
+              location: dict | None = None, include_review: bool = False, manual: dict[int, float] | None = None) -> dict[str, Any]:
     """Cost every line it can and say how far the result can be trusted.
 
     Unpriced lines are carried at the buyer's estimate. `break_even_pct` is the single percentage a bidder would quote
@@ -103,6 +103,13 @@ def price_boq(lines: list[Any], results: list[MatchResult], items: list[dict], a
     """
     by_code = {i["erp_item_code"]: i for i in items}
     costs = [cost_line(ln, r, by_code, activity_for, location, include_review) for ln, r in zip(lines, results)]
+    for i, cost in (manual or {}).items():  # a cost the person entered for a line (a lump sum, or an item not in the catalogue) replaces whatever was worked out
+        if 0 <= i < len(costs):
+            c, qty = costs[i], getattr(lines[i], "qty", None)
+            unit = round(cost / qty, 2) if qty else None
+            var = round((unit - c.est_rate) / c.est_rate * 100, 2) if unit is not None and c.est_rate else (round((cost - c.est_amount) / c.est_amount * 100, 2) if c.est_amount else None)
+            costs[i] = LineCost(index=c.index, item_code=c.item_code, basis="your cost", unit_cost=unit, est_rate=c.est_rate, variance_pct=var, complete=True,
+                                est_amount=c.est_amount, cost_amount=round(cost, 2), note="The cost you entered for this line.")
     est_total = sum(c.est_amount or 0.0 for c in costs)
     priced = [c for c in costs if c.complete and c.est_amount]
     priced_est = sum(c.est_amount or 0.0 for c in priced)

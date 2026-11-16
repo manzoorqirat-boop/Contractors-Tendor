@@ -3,7 +3,7 @@
 Handles the two BOQ styles: *item rate* (bidder fills a rate on every line) and *percentage rate* (buyer pre-fills the
 estimated rates and the bidder quotes one overall % above or below). Section headings and sub-totals are recognised and
 kept out of the item list. Line arithmetic (quantity x rate against amount) is checked and any mismatch is reported.
-PDF BOQs are not read here: portals publish the BOQ as .xls/.xlsx, and PDF layouts are too varied to parse reliably.
+PDF BOQs are read as far as their tables can be found (see read_pdf); layouts vary, so the caller tells the person to check them.
 """
 from __future__ import annotations
 
@@ -188,6 +188,34 @@ def read_markup(path: str | Path) -> list[list[Any]]:
     return _best_sheet([[[c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])] for tr in t.find_all("tr")] for t in soup.find_all("table")])
 
 
+MAX_PDF_PAGES = 80
+
+
+def read_pdf(path: str | Path) -> list[list[Any]]:
+    """The rows of every table in a text PDF. A table that continues over pages repeats its header row: later copies are dropped.
+    Scanned pages hold no text, so they give no rows; the caller can then ask the AI assistant to read the document instead."""
+    try:
+        import pdfplumber
+    except ImportError:
+        raise RuntimeError("Reading PDF BOQs needs the pdfplumber package. Install it with: pip install pdfplumber") from None
+    rows: list[list[Any]] = []
+    with pdfplumber.open(str(path)) as pdf:
+        if len(pdf.pages) > MAX_PDF_PAGES:
+            raise RuntimeError(f"That PDF has {len(pdf.pages)} pages. BOQs of up to {MAX_PDF_PAGES} pages are read: split it, or use the Excel file.")
+        for page in pdf.pages:
+            for table in page.extract_tables() or []:
+                for r in table:
+                    cells = [re.sub(r"\s+", " ", c).strip() if isinstance(c, str) else "" for c in r]
+                    if any(cells):
+                        rows.append(cells)
+    found = _find_header(rows)
+    if found:
+        idx = found[0]
+        head = [c.lower() for c in rows[idx]]
+        rows = rows[:idx + 1] + [r for r in rows[idx + 1:] if [c.lower() for c in r] != head]
+    return rows
+
+
 def _kind(path: Path) -> str:
     """What the file really is, whatever it is called: a renamed .xlsx is common."""
     head = path.read_bytes()[:8]
@@ -213,4 +241,6 @@ def parse_file(path: str | Path) -> BoqDocument:
         if head.startswith(b"<"):
             return parse_rows(read_markup(p))
         return parse_rows(read_csv(p))  # a tab or comma text file saved under an Excel name
-    raise RuntimeError(f"Cannot read a BOQ from a {ext or 'file without an extension'}. Use .xlsx, .xlsm, .xls or .csv.")
+    if ext == ".pdf":
+        return parse_rows(read_pdf(p))
+    raise RuntimeError(f"Cannot read a BOQ from a {ext or 'file without an extension'}. Use .xlsx, .xlsm, .xls, .csv or .pdf.")
