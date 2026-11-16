@@ -5,6 +5,7 @@ import { CataloguePanel } from '../Boq';
 import { fmtDate } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
+import { ReadOnly, useSession } from '../session';
 import { Tabs } from '../Tabs';
 import type { AppConfig, CompanyFact, VaultDoc } from '../types';
 import '../compact.css';
@@ -46,6 +47,7 @@ export function VaultPage({ config }: { config: AppConfig }) {
           { key: 'catalogue', label: <>Item catalogue<span className="tab-dot">{items}</span></> }]} />
       </div>
 
+      <ReadOnly>
       {tab === 'documents' && (
         <section className="card">
           <QuickAdd kinds={data.kinds} onAdded={() => { reload(); toast('Added to the vault'); }} />
@@ -71,20 +73,21 @@ export function VaultPage({ config }: { config: AppConfig }) {
       )}
 
       {tab === 'catalogue' && <CatalogueCard count={items} reload={cat.reload} />}
+      </ReadOnly>
     </>
   );
 }
 
 function CompanyProfile() {
   const toast = useToast();
-  const { data, error } = useLoad(() => api.settings(), []);
+  const { data, error } = useLoad(() => api.companyProfile(), []);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (data) setText(data.company_profile || ''); }, [data]);
   const dirty = !!data && text.trim() !== (data.company_profile || '').trim();
   async function save() {
     setBusy(true);
-    try { await api.saveSettings({ company_profile: text }); toast('Company profile saved. Open tenders are re-scored on the next run'); }
+    try { await api.saveCompanyProfile(text); toast('Company profile saved. Open tenders are re-scored on the next run'); }
     catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
   }
   if (error) return <div className="alert bad">{error}</div>;
@@ -112,6 +115,7 @@ function CatalogueCard({ count, reload }: { count: number; reload: () => void })
 
 function DocRow({ d, kinds, now, onChange }: { d: VaultDoc; kinds: { key: string; label: string }[]; now: string; onChange: () => void }) {
   const toast = useToast();
+  const { can } = useSession();
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({ name: d.name, kind: d.kind, expiry: d.expiry ?? '', notes: d.notes });
   useEffect(() => setForm({ name: d.name, kind: d.kind, expiry: d.expiry ?? '', notes: d.notes }), [d]);
@@ -145,7 +149,7 @@ function DocRow({ d, kinds, now, onChange }: { d: VaultDoc; kinds: { key: string
       <td>{label}</td>
       <td>{d.expiry ? <>{fmtDate(d.expiry)} <span className={`badge ${left !== null && left < 0 ? 'bad' : left !== null && left <= 30 ? 'warn' : 'plain'}`}>{left !== null && left < 0 ? 'Expired' : left !== null && left <= 30 ? `${left} day${left === 1 ? '' : 's'} left` : 'Valid'}</span></> : <span className="muted">No expiry</span>}</td>
       <td className="num">
-        {d.filename && <a className="btn small" href={api.vaultFileUrl(d.id)} download>Download</a>}{' '}
+        {d.filename && can('bidder') && <a className="btn small" href={api.vaultFileUrl(d.id)} download>Download</a>}{' '}
         <button className="btn small" onClick={() => setEdit(true)}>Edit</button>{' '}
         <button className="link-btn" aria-label={`Remove ${d.name}`} onClick={remove}>✕</button>
       </td>

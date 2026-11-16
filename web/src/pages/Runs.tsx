@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { duration, fmtDate } from '../format';
 import { useLoad } from '../hooks';
+import { ReadOnly } from '../session';
 import type { AppConfig, Run } from '../types';
 
 export function RunsPage({ config }: { config: AppConfig }) {
@@ -36,6 +37,7 @@ export function RunsPage({ config }: { config: AppConfig }) {
     <>
       <div className="page-head"><div><h1>Runs</h1><p className="sub">Collect the latest tenders now, or see what the daily run did.</p></div></div>
 
+      <ReadOnly>
       <section className="card" style={{ marginBottom: 14 }}>
         <h2>Run now</h2>
         <p className="sub">Reads the portals for tenders you have not seen yet. The first run can take 20 to 40 minutes; later ones are shorter.</p>
@@ -57,6 +59,7 @@ export function RunsPage({ config }: { config: AppConfig }) {
           </button>
         </div>
       </section>
+      </ReadOnly>
 
       {watching !== null && <Live id={watching} onDone={() => { history.reload(); }} />}
 

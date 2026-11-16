@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -47,7 +47,12 @@ async function job<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  me: () => call<{ authenticated: boolean }>('/api/me'),
+  me: () => call<{ authenticated: boolean; user: Me | null }>('/api/me'),
+  users: () => call<UsersData>('/api/users'),
+  createUser: (b: { username: string; name: string; role: string; password: string }) => call<UserRow>('/api/users', { method: 'POST', body: JSON.stringify(b) }),
+  editUser: (id: number, b: { name?: string; role?: string; active?: boolean; password?: string }) => call<UserRow>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  audit: (user: string, before?: number) => call<{ entries: AuditEntry[]; next: number | null }>(`/api/audit?limit=50${user ? `&user=${encodeURIComponent(user)}` : ''}${before ? `&before=${before}` : ''}`),
+  changePassword: (current: string, next: string) => call<{ ok: boolean }>('/api/account/password', { method: 'POST', body: JSON.stringify({ current, new: next }) }),
   login: (username: string, password: string) => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => call<{ ok: boolean }>('/api/logout', { method: 'POST' }),
   config: () => call<AppConfig>('/api/config'),
@@ -72,6 +77,8 @@ export const api = {
   runs: () => call<{ runs: Run[]; running: number | null }>('/api/runs'),
   run: (id: number) => call<Run>(`/api/runs/${id}`),
   startRun: (portals: string[], sendEmail: boolean) => call<{ id: number }>('/api/runs', { method: 'POST', body: JSON.stringify({ portals, send_email: sendEmail }) }),
+  companyProfile: () => call<{ company_profile: string }>('/api/company-profile'),
+  saveCompanyProfile: (company_profile: string) => call<{ company_profile: string }>('/api/company-profile', { method: 'PUT', body: JSON.stringify({ company_profile }) }),
   settings: () => call<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => call<Settings>('/api/settings', { method: 'PUT', body: JSON.stringify(s) }),
   branding: () => call<{ logo_text: string }>('/api/branding'),

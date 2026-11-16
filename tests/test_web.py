@@ -84,14 +84,14 @@ def test_everything_but_health_and_login_needs_a_login(ctx):
         assert ctx.client.get(path).status_code == 401, path
     assert ctx.client.post("/api/runs", json={}).status_code == 401
     assert ctx.client.put("/api/settings", json={}).status_code == 401
-    assert ctx.client.get("/api/me").json() == {"authenticated": False}
+    assert ctx.client.get("/api/me").json() == {"authenticated": False, "user": None}
 
 
 def test_login_sets_a_strict_httponly_cookie_and_logout_clears_it(ctx):
     r = ctx.client.post("/api/login", json={"password": PASSWORD})
     cookie = r.headers["set-cookie"].lower()
     assert "httponly" in cookie and "samesite=strict" in cookie
-    assert ctx.client.get("/api/me").json() == {"authenticated": True}
+    assert ctx.client.get("/api/me").json()["authenticated"] is True
     ctx.client.post("/api/logout")
     assert ctx.client.get("/api/stats").status_code == 401
 

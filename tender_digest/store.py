@@ -178,12 +178,14 @@ class SeenStore:
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS starred (key TEXT PRIMARY KEY, created TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0);
-                CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, created REAL NOT NULL, last_seen REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, created REAL NOT NULL, last_seen REAL NOT NULL, user_id INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS portal_status (
                   key TEXT PRIMARY KEY, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', checked TEXT NOT NULL,
                   departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
                 """
             )
+            if "user_id" not in {r["name"] for r in self.db.execute("PRAGMA table_info(sessions)")}:
+                self.db.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")  # sessions made before accounts existed belong to the owner (0)
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(seen)")}
             added = False
             for name, kind in _TENDER_COLUMNS.items():
@@ -711,25 +713,32 @@ class SeenStore:
 
     # ---- login sessions: kept here so that logging out, or going idle, really ends them ------------------------
 
-    def session_start(self, sid: str, now: float, keep_seconds: float) -> None:
+    def session_start(self, sid: str, now: float, keep_seconds: float, user_id: int = 0) -> None:
         with self.lock:
             self.db.execute("DELETE FROM sessions WHERE created < ?", (now - keep_seconds,))
-            self.db.execute("INSERT OR REPLACE INTO sessions (sid, created, last_seen) VALUES (?, ?, ?)", (sid, now, now))
+            self.db.execute("INSERT OR REPLACE INTO sessions (sid, created, last_seen, user_id) VALUES (?, ?, ?, ?)", (sid, now, now, user_id))
             self.db.commit()
 
-    def session_touch(self, sid: str, now: float, idle_seconds: float) -> bool:
-        """True when the session exists and was used within `idle_seconds`. Records the use (not more than about once a minute)."""
+    def session_touch(self, sid: str, now: float, idle_seconds: float) -> int | None:
+        """The session's user id (0 = the owner login) when it exists and was used within `idle_seconds`, else None.
+        Records the use (not more than about once a minute)."""
         with self.lock:
-            row = self.db.execute("SELECT last_seen FROM sessions WHERE sid = ?", (sid,)).fetchone()
+            row = self.db.execute("SELECT last_seen, user_id FROM sessions WHERE sid = ?", (sid,)).fetchone()
             if not row or now - row["last_seen"] > idle_seconds:
                 if row:
                     self.db.execute("DELETE FROM sessions WHERE sid = ?", (sid,))
                     self.db.commit()
-                return False
+                return None
             if now - row["last_seen"] > min(60, idle_seconds / 4):
                 self.db.execute("UPDATE sessions SET last_seen = ? WHERE sid = ?", (now, sid))
                 self.db.commit()
-            return True
+            return int(row["user_id"])
+
+    def sessions_end_for(self, user_id: int, except_sid: str | None = None) -> None:
+        """Signs a user out everywhere (a password reset, a deactivation), optionally keeping the session making the change."""
+        with self.lock:
+            self.db.execute("DELETE FROM sessions WHERE user_id = ? AND sid != ?", (user_id, except_sid or ""))
+            self.db.commit()
 
     def session_end(self, sid: str) -> None:
         with self.lock:

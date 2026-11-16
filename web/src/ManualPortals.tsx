@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from './api';
 import { fmtDate } from './format';
 import { useLoad } from './hooks';
+import { Only } from './session';
 import type { PortalStatus } from './types';
 
 const tone = (k: PortalStatus['kind']) => (k === 'ok' ? 'ok' : k === 'unknown' ? 'plain' : 'warn');
@@ -19,7 +20,7 @@ export function ManualBanner({ onOpen }: { onOpen: () => void }) {
         {manual.map((p) => `${p.name} (${p.label})`).join(', ')}. The app cannot read {manual.length > 1 ? 'them' : 'it'} on its own, so nothing from {manual.length > 1 ? 'them' : 'it'} is in the numbers below.
       </span>
       <span style={{ display: 'flex', gap: 8 }}>
-        <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender by hand</button>
+        <Only role="bidder"><button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender by hand</button></Only>
         <button className="btn small" onClick={onOpen}>See details</button>
       </span>
     </div>

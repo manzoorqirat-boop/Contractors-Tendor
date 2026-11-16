@@ -6,10 +6,11 @@ import { resetAiStatus } from '../ai';
 import { PortalsManager } from '../ManualPortals';
 import { setLogoText } from '../Brand';
 import { Tabs } from '../Tabs';
+import { ActivityPanel, UsersPanel } from '../Account';
 import type { AiStatus, AppConfig, Settings } from '../types';
 import '../compact.css';
 
-type Tab = 'email' | 'portals' | 'filters' | 'ai' | 'backup';
+type Tab = 'email' | 'portals' | 'filters' | 'ai' | 'people' | 'activity' | 'backup';
 let lastTab: Tab = 'email';
 const norm = (v: { recipients: string; extra: string; exclude: string; minValue: string; logoText: string; f: Settings }) => JSON.stringify([
   lines(v.recipients), lines(v.extra), lines(v.exclude), Number(v.minValue) || 0, v.logoText, v.f.send_time, v.f.schedule_enabled, v.f.send_empty,
@@ -130,8 +131,8 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
         <div className="set-bar">
           <Tabs<Tab> label="Settings sections" value={tab} onChange={setTab} tabs={[
             { key: 'email', label: 'Daily email' }, { key: 'portals', label: <>Portals<span className="tab-dot">{form.portals.length}</span></> },
-            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }, { key: 'backup', label: 'Backup' }]} />
-          {SaveBar}
+            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }, { key: 'people', label: 'People' }, { key: 'activity', label: 'Activity' }, { key: 'backup', label: 'Backup' }]} />
+          {['email', 'portals', 'filters', 'ai'].includes(tab) && SaveBar}
         </div>
         {msg && <div className={`alert ${msg.tone}`} role="status">{msg.text}</div>}
 
@@ -228,8 +229,10 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
           </div>
         )}
 
-        {tab === 'backup' && <BackupPanel />}
-      </form>
+              </form>
+      {tab === 'people' && <UsersPanel />}
+      {tab === 'activity' && <ActivityPanel />}
+      {tab === 'backup' && <BackupPanel />}
     </>
   );
 }

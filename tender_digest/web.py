@@ -26,7 +26,8 @@ from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel
 
-from . import access, ai, appsettings, mailer
+from . import access, accounts, ai, appsettings, mailer
+from .accounts import AccountError, Accounts, Principal
 from .backup import Backups, BackupError
 from .boq import advisor
 from .boq.match import ClaudeVerifier
@@ -363,6 +364,25 @@ def storage_ok(store: SeenStore, state_path: str) -> bool:
     return state_path == ":memory:" or os.access(Path(state_path).expanduser().resolve().parent, os.W_OK)
 
 
+class NewUser(BaseModel):
+    username: str
+    name: str = ""
+    role: str = "viewer"
+    password: str
+
+
+class UserEdit(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    active: bool | None = None
+    password: str | None = None
+
+
+class PasswordChange(BaseModel):
+    current: str
+    new: str
+
+
 class LoginBody(BaseModel):
     username: str = ""
     password: str
@@ -504,6 +524,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     scheduler = Scheduler(manager, housekeeping=backups.daily) if config.run_scheduler else None
     limiter = LoginLimiter()
     jobs = Jobs()
+    people = Accounts(store)
 
     def run_job(kind: str, key: str | None, fn: Callable[[], Any]):
         """Runs `fn` now (tests) or in the background (the service). In the background the answer is a ticket the page polls at /api/jobs/<id>."""
@@ -577,6 +598,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+            record_activity(request, response.status_code)
         return response
 
     app.add_middleware(BodyLimit)  # added last, so it is the outermost layer and refuses a big body before anything reads it
@@ -590,14 +612,56 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             return chain[-hops]
         return (request.client.host if request.client else "") or "?"
 
-    def session_ok(request: Request) -> bool:
+    owner = Principal(accounts.OWNER_ID, config.username or "admin", "Owner", "admin")
+
+    def session_id(request: Request) -> str | None:
         claims = token_claims(signing_key, request.cookies.get(COOKIE))
         sid = claims.get("sid") if claims else None
-        return bool(isinstance(sid, str) and store.session_touch(sid, time.time(), config.idle_seconds))
+        return sid if isinstance(sid, str) else None
+
+    def current_user(request: Request) -> Principal | None:
+        """Who is signed in on this request, or None. Roles are read fresh each time, so a change or a deactivation applies at once."""
+        sid = session_id(request)
+        uid = store.session_touch(sid, time.time(), config.idle_seconds) if sid else None
+        if uid is None:
+            return None
+        if uid == accounts.OWNER_ID:
+            return owner
+        user = people.get(uid)
+        if not user and sid:
+            store.session_end(sid)
+        return user
 
     def require_login(request: Request) -> None:
-        if not session_ok(request):
+        user = current_user(request)
+        if not user:
             raise HTTPException(401, "Please log in")
+        request.state.user = user
+        needed = accounts.required_role(request.method, request.url.path)
+        if not user.can(needed):
+            raise HTTPException(403, "Your account is view-only, so it cannot change anything. Ask an administrator for the bidder role." if needed == "bidder"
+                                else "Only an administrator can do that.")
+        if user.must_change and request.url.path != "/api/account/password":
+            raise HTTPException(403, "Choose a new password before you continue.")
+
+    def record_activity(request: Request, status: int) -> None:
+        """Writes who did what to the activity log: every change that went through, every refusal, and the downloads of private files."""
+        try:
+            user = getattr(request.state, "user", None)
+            route = request.scope.get("route")
+            if not user or route is None:
+                return
+            what = accounts.describe_action(request.method, route.path)
+            if request.method in ("GET", "HEAD", "OPTIONS") and what.startswith(request.method):
+                return  # ordinary reading is not logged; only the named downloads
+            if status == 403:
+                what = "Refused: " + what
+            elif status >= 400:
+                return
+            target = ", ".join(f"{k}={v}" for k, v in {**request.path_params, **({"key": request.query_params["key"]} if "key" in request.query_params else {})}.items())
+            people.log(now(), user.username, user.role, what, target, client=client_of(request))
+        except Exception:  # noqa: BLE001 - the log must never break a request
+            log.exception("activity log write failed")
 
     auth = [Depends(require_login)]
 
@@ -627,22 +691,31 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             raise HTTPException(429, "Too many wrong attempts. Wait a few minutes and try again.")
         if limiter.under_attack():
             time.sleep(limiter.slow_seconds)  # many wrong guesses from many addresses: slow everyone down, lock nobody out
-        user_ok = not config.username or hmac.compare_digest(body.username.strip().lower().encode(), config.username.lower().encode())
-        pass_ok = hmac.compare_digest(body.password.encode(), config.password.encode())
-        if not (user_ok and pass_ok):
+        typed = body.username.strip().lower()
+        owner_name_ok = not config.username or hmac.compare_digest(typed.encode(), config.username.lower().encode())
+        owner_pass_ok = hmac.compare_digest(body.password.encode(), config.password.encode())
+        who = owner if (owner_name_ok and owner_pass_ok) else people.authenticate(typed, body.password)
+        if not who:
             limiter.failed(client)
+            people.log(now(), typed[:80] or "?", None, "Failed sign-in", client=client)
             raise HTTPException(401, "Wrong username or password")
         limiter.succeeded(client)
         sid = secrets.token_urlsafe(24)
-        store.session_start(sid, time.time(), SESSION_SECONDS)
+        store.session_start(sid, time.time(), SESSION_SECONDS, who.id)
+        if not who.owner:
+            people.record_login(who.id, now())
+        people.log(now(), who.username, who.role, "Signed in", client=client)
         response.set_cookie(COOKIE, make_token(signing_key, sid=sid), max_age=SESSION_SECONDS, httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
         return {"ok": True}
 
     @app.post("/api/logout")
     def logout(request: Request, response: Response) -> dict:
-        claims = token_claims(signing_key, request.cookies.get(COOKIE))
-        if claims and isinstance(claims.get("sid"), str):
-            store.session_end(claims["sid"])  # the cookie stops working for good, even if someone copied it
+        who = current_user(request)
+        if who:
+            people.log(now(), who.username, who.role, "Signed out", client=client_of(request))
+        sid = session_id(request)
+        if sid:
+            store.session_end(sid)  # the cookie stops working for good, even if someone copied it
         response.delete_cookie(COOKIE, path="/")
         return {"ok": True}
 
@@ -653,7 +726,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     @app.get("/api/me")
     def me(request: Request) -> dict:
-        return {"authenticated": session_ok(request)}
+        who = current_user(request)
+        return {"authenticated": who is not None, "user": who.public() if who else None}
 
     # ---- data ------------------------------------------------------------------------------------------------
 
@@ -1306,9 +1380,9 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return boq_call(boq.analyse, bid["key"], body.filename, body.file_base64, uses_ai=True)
 
     @app.post("/api/bids/{bid_id}/boq/lines/{line_no}", dependencies=auth)
-    def bid_boq_confirm(bid_id: int, line_no: int, body: BoqConfirm) -> dict:
+    def bid_boq_confirm(bid_id: int, line_no: int, body: BoqConfirm, request: Request) -> dict:
         bid = bid_or_404(bid_id)
-        return boq_call(boq.confirm, bid["key"], line_no, body.item_code, "you")
+        return boq_call(boq.confirm, bid["key"], line_no, body.item_code, request.state.user.username)
 
     @app.get("/api/bids/{bid_id}/risks", dependencies=auth)
     def bid_risks(bid_id: int) -> dict:
@@ -1405,6 +1479,20 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         path, name = found
         return FileResponse(path, media_type="application/octet-stream", filename=name)
 
+    @app.get("/api/company-profile", dependencies=auth)
+    def get_company_profile() -> dict:
+        """The company description the AI uses for fit scores and drafts. Its own route, so bidders can keep it without access to the rest of Settings."""
+        return {"company_profile": profile()}
+
+    @app.put("/api/company-profile", dependencies=auth)
+    def put_company_profile(body: dict[str, Any]) -> dict:
+        try:
+            cleaned = appsettings.clean({"company_profile": body.get("company_profile")}, list(portal_names))
+        except appsettings.SettingsError as e:
+            raise HTTPException(422, str(e)) from None
+        store.put_settings({"company_profile": cleaned["company_profile"]})
+        return {"company_profile": profile()}
+
     @app.put("/api/company-facts", dependencies=auth)
     def put_company_facts(body: dict[str, Any]) -> dict:
         raw = body.get("facts")
@@ -1417,6 +1505,54 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 facts.append({"label": label, "value": value})
         store.put_settings({"company_facts": facts})
         return {"facts": facts}
+
+    # ---- people: accounts, passwords, activity ------------------------------------------------------------------
+
+    @app.post("/api/account/password", dependencies=auth)
+    def change_password(body: PasswordChange, request: Request) -> dict:
+        user: Principal = request.state.user
+        if user.owner:
+            raise HTTPException(422, "The owner login is set by the server's APP_PASSWORD variable. Change it there")
+        try:
+            people.change_own_password(user.id, body.current, body.new)
+        except AccountError as e:
+            raise HTTPException(422, str(e)) from None
+        store.sessions_end_for(user.id, except_sid=session_id(request))  # every other device is signed out
+        return {"ok": True}
+
+    @app.get("/api/users", dependencies=auth)
+    def list_users() -> dict:
+        owner_row = {"id": accounts.OWNER_ID, "username": owner.username, "name": "Owner (server login)", "role": "admin", "active": True, "must_change": False,
+                     "created": None, "last_login": None, "owner": True}
+        return {"users": [owner_row, *({**u, "owner": False} for u in people.list())],
+                "roles": [{"key": r, "label": r.capitalize(), "text": accounts.ROLE_TEXT[r]} for r in accounts.ROLES], "min_password": accounts.MIN_PASSWORD}
+
+    @app.post("/api/users", dependencies=auth)
+    def create_user(body: NewUser) -> dict:
+        try:
+            return people.create(body.username, body.name, body.role, body.password, now(), reserved=config.username)
+        except AccountError as e:
+            raise HTTPException(422, str(e)) from None
+
+    @app.patch("/api/users/{user_id}", dependencies=auth)
+    def edit_user(user_id: int, body: UserEdit, request: Request) -> dict:
+        me: Principal = request.state.user
+        if user_id == accounts.OWNER_ID:
+            raise HTTPException(422, "The owner login is set by the server's variables and cannot be changed here")
+        if user_id == me.id and (body.active is False or (body.role is not None and body.role != me.role)):
+            raise HTTPException(422, "You cannot remove your own access or change your own role. Ask another administrator")
+        try:
+            out = people.update(user_id, name=body.name, role=body.role, active=body.active, password=body.password)
+        except AccountError as e:
+            raise HTTPException(404 if "No such" in str(e) else 422, str(e)) from None
+        if body.active is False or body.password is not None:
+            store.sessions_end_for(user_id)  # signed out everywhere, now
+        return out
+
+    @app.get("/api/audit", dependencies=auth)
+    def activity_log(limit: int = Query(100, ge=1, le=500), user: str = Query("", max_length=80), before: int | None = Query(None, ge=1)) -> dict:
+        rows = people.activity(limit, user, before)
+        return {"entries": rows, "next": rows[-1]["id"] if len(rows) == limit else None}
 
     # ---- backup ----------------------------------------------------------------------------------------------
 

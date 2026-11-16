@@ -6,6 +6,7 @@ import { PriceAdvisor } from '../PriceAdvisor';
 import { chain, fmtDate, headline, inr, plural, relative } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
+import { Only, ReadOnly } from '../session';
 import type { AppConfig, BidAlert, BidDetail, BidItem, BidStats, BidSummary, MatchStatus, Stage, StatGroup, VaultDoc } from '../types';
 
 type WsTab = 'decide' | 'checklist' | 'price' | 'letters' | 'result';
@@ -49,7 +50,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
       <div className="page-head">
         <div><h1>Bids</h1><p className="sub">{data ? `${plural(activeCount, 'bid')} in progress` : 'Loading…'}</p></div>
         <div className="head-actions">
-        <button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender</button>
+        <Only role="bidder"><button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender</button></Only>
         <div className="seg" role="group" aria-label="Bids view">
           <button type="button" className={mode === 'pipeline' ? 'on' : ''} aria-pressed={mode === 'pipeline'} onClick={() => setMode('pipeline')}>Pipeline</button>
           <button type="button" className={mode === 'results' ? 'on' : ''} aria-pressed={mode === 'results'} onClick={() => setMode('results')}>Results</button>
@@ -241,6 +242,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         </div>
       )}
 
+      <ReadOnly>
       <NextStep bid={bid} />
 
       <section className="card" style={{ marginBottom: 14 }}>
@@ -325,6 +327,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       </section>}
       {tab === 'result' && !(['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && <p className="muted small">The result form appears once the bid is Submitted.</p>}
       <button className="link-btn" style={{ color: 'var(--bad)' }} onClick={remove}>Remove this bid</button>
+      </ReadOnly>
     </>
   );
 }

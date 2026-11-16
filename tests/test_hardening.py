@@ -21,7 +21,7 @@ def test_a_copied_cookie_stops_working_after_logout(ctx):
     ctx.client.post("/api/logout")
     stolen = TestClient(ctx.app, cookies={"td_session": cookie})
     assert stolen.get("/api/stats").status_code == 401
-    assert stolen.get("/api/me").json() == {"authenticated": False}
+    assert stolen.get("/api/me").json()["authenticated"] is False
 
 
 def test_each_login_is_its_own_session(ctx):
@@ -49,11 +49,11 @@ def test_a_token_without_a_session_is_refused(ctx):
 def test_an_idle_session_ends_but_use_keeps_it_alive():
     store = SeenStore(":memory:")
     store.session_start("a", 1000.0, 10_000)
-    assert store.session_touch("a", 1000.0 + 50, 100)           # used within the idle window
-    assert store.session_touch("a", 1000.0 + 140, 100)          # 90 s since the last use: still fine
-    assert not store.session_touch("a", 1000.0 + 140 + 101, 100)  # idle too long
-    assert not store.session_touch("a", 1000.0 + 140 + 102, 100)  # and it is gone, not just refused once
-    assert not store.session_touch("never", 5.0, 100)
+    assert store.session_touch("a", 1000.0 + 50, 100) == 0         # used within the idle window (0 = the owner login)
+    assert store.session_touch("a", 1000.0 + 140, 100) == 0        # 90 s since the last use: still fine
+    assert store.session_touch("a", 1000.0 + 140 + 101, 100) is None  # idle too long
+    assert store.session_touch("a", 1000.0 + 140 + 102, 100) is None  # and it is gone, not just refused once
+    assert store.session_touch("never", 5.0, 100) is None
 
 
 # ---- login limiter ---------------------------------------------------------------------------------------------

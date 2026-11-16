@@ -142,3 +142,9 @@ export interface SimInput { l1_price: number | null; quoted_pct: number | null; 
 
 export interface ManualListing { tender_id: string; reference: string; title: string; description: string; organisation: string; location: string; value: number | null; emd: number | null; published: string; closing: string; opening: string; portal_name: string; form_of_contract: string }
 export interface ManualFields { tender_id?: string; title?: string; description?: string; reference?: string; organisation?: string; location?: string; value?: number | null; emd?: number | null; published?: string; closing?: string; opening?: string; portal_name?: string; clear_value?: boolean; clear_emd?: boolean }
+
+export type Role = 'viewer' | 'bidder' | 'admin';
+export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean }
+export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; created: string | null; last_login: string | null; owner: boolean }
+export interface UsersData { users: UserRow[]; roles: { key: Role; label: string; text: string }[]; min_password: number }
+export interface AuditEntry { id: number; at: string; username: string; role: string | null; action: string; target: string; detail: string; client: string }

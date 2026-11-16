@@ -8,6 +8,7 @@ import { useLoad } from '../hooks';
 import type { Nav } from '../App';
 import { ChartSkeleton, Skeleton } from '../ui';
 import { ManualBanner } from '../ManualPortals';
+import { Only } from '../session';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
 import { BarBlock, labelFor, metricOf, MEASURES } from './Charts';
 
@@ -120,7 +121,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
           <div className="seg" role="group" aria-label="Chart measure">
             {(['count', 'value'] as Measure[]).map((m) => <button key={m} type="button" aria-pressed={measure === m} className={measure === m ? 'on' : ''} onClick={() => nav.setDisplay({ measure: m })}>{m === 'count' ? 'Tenders' : 'Value'}</button>)}
           </div>
-          <button className="btn primary" onClick={() => go('runs')}>Run now</button>
+          <Only role="bidder"><button className="btn primary" onClick={() => go('runs')}>Run now</button></Only>
         </div>
       </div>
 

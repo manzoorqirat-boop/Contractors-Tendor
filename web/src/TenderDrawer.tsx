@@ -3,10 +3,12 @@ import { api } from './api';
 import { chain, fmtDate, headline, inr, relative } from './format';
 import { AiSections, FitBadge, RelatedNote } from './ai';
 import { Drawer, Skeleton, useToast } from './ui';
+import { useSession } from './session';
 import type { Tender, TenderDetail } from './types';
 
 export function StarButton({ t, onChange }: { t: Pick<Tender, 'key' | 'starred'>; onChange: (starred: boolean) => void }) {
   const toast = useToast();
+  const { can } = useSession();
   const [busy, setBusy] = useState(false);
   async function toggle(e: React.MouseEvent) {
     e.stopPropagation();
@@ -17,11 +19,12 @@ export function StarButton({ t, onChange }: { t: Pick<Tender, 'key' | 'starred'>
     catch (err) { onChange(!next); toast((err as Error).message, 'bad'); }
     finally { setBusy(false); }
   }
-  return <button type="button" className={`star${t.starred ? ' on' : ''}`} onClick={toggle} disabled={busy} aria-pressed={t.starred} aria-label={t.starred ? 'Remove star' : 'Star this tender'} title={t.starred ? 'Starred' : 'Star to keep an eye on it'}>{t.starred ? '★' : '☆'}</button>;
+  return <button type="button" className={`star${t.starred ? ' on' : ''}`} onClick={toggle} disabled={busy || !can('bidder')} aria-pressed={t.starred} aria-label={t.starred ? 'Remove star' : 'Star this tender'} title={t.starred ? 'Starred' : 'Star to keep an eye on it'}>{t.starred ? '★' : '☆'}</button>;
 }
 
 export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: string; now: string; onClose: () => void; onStar: (key: string, starred: boolean) => void }) {
   const toast = useToast();
+  const { can } = useSession();
   const [t, setT] = useState<TenderDetail | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -83,7 +86,7 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
             <button className="btn" onClick={copy}>Copy Tender ID</button>
             {t.search_url && <a className="btn" href={t.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>}
             {t.manual && <button className="btn" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('add-tender', { detail: { editKey: t.key } })); }}>Edit details</button>}
-            <button className="btn primary" onClick={startBid}>{t.bid_id ? 'Open bid workspace' : 'Start a bid'}</button>
+            {(t.bid_id || can('bidder')) && <button className="btn primary" onClick={startBid}>{t.bid_id ? 'Open bid workspace' : 'Start a bid'}</button>}
           </div>
           {t.history && t.history.length > 0 && <div className="alert warn" style={{ marginTop: 12 }}>{t.history.map((h) => <div key={h}>{h}</div>)}</div>}
           <AiSections t={t} onChange={(patch) => setT((cur) => (cur ? { ...cur, ...patch } : cur))} />

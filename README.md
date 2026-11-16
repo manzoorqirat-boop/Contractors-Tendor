@@ -145,6 +145,22 @@ Set `ANTHROPIC_API_KEY` and these appear. Fill in **Settings > AI assistant > Ab
 Labelling runs after each collection, newest tenders first, up to `AI_MAX_PER_RUN`. **Label tenders now** in Settings does 45 at a time.
 AI can be wrong: check every figure and date on the portal before bidding.
 
+## People and roles
+
+Sign in with a username and password. Administrators add people in **Settings > People** and give each a role:
+
+| Role | Can do |
+|---|---|
+| **Viewer** | Look at everything (tenders, bids, charts, the Vault list). Change nothing. Cannot download Vault files. |
+| **Bidder** | Everything a viewer can, plus star, start and edit bids, use the Vault and the AI assistant, add tenders by hand, run a collection, keep the company profile and facts. |
+| **Admin** | Everything, plus Settings, portals, people, backups and the Activity log. |
+
+- The login in the server variables (`APP_USERNAME` / `APP_PASSWORD`) is the **owner**: always an admin, always able to sign in, and the way back in if every other account is lost. It is not stored in the database and is changed only on the server.
+- A password an administrator sets is temporary: the person must choose their own (12 or more characters) before doing anything else. Resetting a password or switching a person off signs them out at once; a role change applies at their next click.
+- Passwords are stored as salted scrypt hashes. Signing in has the same limits as before (per address, never a lock-out of the owner).
+- **Settings > Activity** records who signed in, what each person changed, refusals ("view-only account tried to ...") and downloads of backups, Vault files and the spreadsheet. Reading pages is not logged. The last 20,000 entries are kept.
+- Rules are enforced on the server (one table, `required_role` in `tender_digest/accounts.py`); the page only hides what a person cannot use.
+
 ## Security
 
 - Everything except the login and a health check needs the password. Cookies are `HttpOnly`, `SameSite=Strict` and signed.
