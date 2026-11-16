@@ -46,27 +46,27 @@ def build(bid: dict[str, Any], items: list[dict[str, Any]], book: Any, now: date
                     problems += 1
                     lines.append(f"{label}\n      -> {note}")
                     continue
-                found = book.vault_file(m["vault_id"])
+                found = book.vault_bytes(m["vault_id"])
                 if found is None:
                     problems += 1
                     lines.append(f"{label}\n      -> '{m['name']}' is in the Vault without a file attached, so it is not in the pack")
                     continue
-                path, shown = found
+                content, shown = found
                 if m["vault_id"] in used_docs:  # the same paper answers two lines: one copy in the zip
                     lines.append(f"{label}\n      -> {used_docs[m['vault_id']]} (already in the pack)")
                     continue
                 n += 1
-                arc = f"{n:02d}-{safe_name(it['text'])}{path.suffix.lower()}"
-                z.write(path, arc)
+                arc = f"{n:02d}-{safe_name(it['text'])}{Path(shown).suffix.lower()}"
+                z.writestr(arc, content)
                 used_docs[m["vault_id"]] = arc
                 included += 1
                 if status != "ok":
                     problems += 1
                 exp = f", expires {m['expiry']}" if m.get("expiry") else ""
                 lines.append(f"{label}\n      -> {arc}  ({m['name']}{exp}; {note})")
-            source = _source_file(book, bid["key"])
+            source = book.source_bytes(bid["key"])
             if source:
-                z.write(source, f"tender-notice{source.suffix}")
+                z.writestr(f"tender-notice{source[0]}", source[1])
             for kind, text in sorted((bid.get("drafts") or {}).items()):
                 if isinstance(text, str) and text.strip():
                     z.writestr(f"drafts/{safe_name(kind)}.txt", text)
@@ -79,11 +79,3 @@ def build(bid: dict[str, Any], items: list[dict[str, Any]], book: Any, now: date
         out.unlink(missing_ok=True)
         raise
     return out, {"files": included, "needs_attention": problems, "lines": len(lines)}
-
-
-def _source_file(book: Any, key: str) -> Path | None:
-    for kind in ("pdf", "txt"):
-        p = book._source_path(key, kind)
-        if p and p.is_file():
-            return p
-    return None

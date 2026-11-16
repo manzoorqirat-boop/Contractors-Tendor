@@ -27,7 +27,7 @@ from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, alerts, appsettings, letters, mailer, pack, reminders
+from . import access, accounts, ai, alerts, appsettings, events, letters, mailer, pack, privacy, reminders, sealing, tokens
 from .accounts import AccountError, Accounts, Principal
 from . import offsite
 from .backup import Backups, BackupError
@@ -427,6 +427,32 @@ class LoginBody(BaseModel):
     code: str = ""
 
 
+class EraseBody(BaseModel):
+    confirm: str = Field(max_length=80)
+
+
+class TokenBody(BaseModel):
+    name: str = Field(max_length=80)
+    role: str = "viewer"
+    days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class HookBody(BaseModel):
+    name: str | None = Field(default=None, max_length=80)
+    url: str | None = Field(default=None, max_length=500)
+    events: list[str] | None = Field(default=None, max_length=20)
+    active: bool | None = None
+
+
+class ResetRequest(BaseModel):
+    who: str = Field(max_length=120)
+
+
+class ResetConfirm(BaseModel):
+    token: str = Field(max_length=200)
+    password: str = Field(max_length=300)
+
+
 class WebhookTest(BaseModel):
     url: str = ""
 
@@ -605,7 +631,8 @@ class RunBody(BaseModel):
 
 def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None) -> FastAPI:
     vault_dir = default_vault_dir(env.state_path)
-    bids = BidBook(store, vault_dir)
+    sealer = sealing.Sealer.from_env()  # raises with a clear message when the key is too short: better than quietly storing things unencrypted
+    bids = BidBook(store, vault_dir, sealer)
     letter_book = letters.Letters(store)
     boq = BoqService.open(env.state_path, lambda: ClaudeVerifier() if ai.configured() else None)
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
@@ -616,9 +643,19 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         remote_problem = str(e)
         log.warning("off-site backup is not active: %s", e)
     backups = Backups(store, boq.store, env.state_path, vault_dir, keep_days=max(1, _int_env("BACKUP_KEEP_DAYS", 7)), remote=remote_cfg, remote_problem=remote_problem)
+    audit_pruned = {"day": ""}
+
+    def prune_audit_daily(now: datetime) -> None:
+        """Once a day, drops activity-log entries older than the retention period set in Settings."""
+        day = now.date().isoformat()
+        if audit_pruned["day"] == day:
+            return
+        audit_pruned["day"] = day
+        people.prune_audit(now, appsettings.current(env, store.get_settings())["audit_days"])
+
     def housekeeping(now: datetime) -> None:
         """Run by the scheduler every half minute: the daily backup, then any deadline reminders that are due. One failing never stops the other."""
-        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url)):
+        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hooks.deliver(now), lambda: prune_audit_daily(now)):
             try:
                 job()
             except Exception:  # noqa: BLE001
@@ -627,7 +664,21 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     scheduler = Scheduler(manager, housekeeping=housekeeping) if config.run_scheduler else None
     limiter = LoginLimiter(store=store)
     jobs = Jobs()
-    people = Accounts(store)
+    people = Accounts(store, sealer)
+    api_tokens = tokens.ApiTokens(store)
+    hooks = events.Events(store, sealer)
+    encryption_problem = ""
+    if sealer.enabled:  # bring everything stored before the key was set (or under an older key) up to date
+        try:
+            files = bids.seal_existing()
+            secrets_done = people.seal_existing() + hooks.seal_existing()
+            log.info("encryption at rest: %s files sealed, %s re-keyed, %s secrets written, %s failed", files["sealed"], files["rotated"], secrets_done, files["failed"])
+            if files["failed"]:
+                encryption_problem = f"{files['failed']} stored file(s) could not be encrypted. See the server log."
+        except Exception:  # noqa: BLE001
+            log.exception("encrypting stored data failed")
+            encryption_problem = "Encrypting the stored data failed. See the server log."
+    bids.on_event = lambda event, data: hooks.emit(event, data, now())
 
     def run_job(kind: str, key: str | None, fn: Callable[[], Any]):
         """Runs `fn` now (tests) or in the background (the service). In the background the answer is a ticket the page polls at /api/jobs/<id>."""
@@ -729,6 +780,16 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def current_user(request: Request) -> Principal | None:
         """Who is signed in on this request, or None. Roles are read fresh each time, so a change or a deactivation applies at once."""
+        header = request.headers.get("authorization", "")
+        if header[:7].lower() == "bearer ":  # a program using an API token (negative ids are tokens)
+            client = client_of(request)
+            if limiter.blocked(client):
+                raise HTTPException(429, "Too many wrong attempts. Wait a few minutes and try again.")
+            found = api_tokens.lookup(header[7:].strip(), now())
+            if not found:
+                limiter.failed(client)
+                return None
+            return Principal(-found["id"], f"token:{found['name']}", f"API token: {found['name']}", found["role"])
         sid = session_id(request)
         uid = store.session_touch(sid, time.time(), config.idle_seconds) if sid else None
         if uid is None:
@@ -749,6 +810,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if not user.can(needed):
             raise HTTPException(403, "Your account is view-only, so it cannot change anything. Ask an administrator for the bidder role." if needed == "bidder"
                                 else "Only an administrator can do that.")
+        if user.id < 0 and request.url.path.startswith("/api/account"):
+            raise HTTPException(403, "An API token cannot use account settings.")
         if user.must_change and request.url.path != "/api/account/password":
             raise HTTPException(403, "Choose a new password before you continue.")
 
@@ -824,7 +887,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 raise HTTPException(401, "That code is not right. Wait for a new one from the app and try again.")
         limiter.succeeded(client)
         sid = secrets.token_urlsafe(24)
-        store.session_start(sid, time.time(), SESSION_SECONDS, who.id)
+        store.session_start(sid, time.time(), SESSION_SECONDS, who.id, client, accounts.describe_agent(request.headers.get("user-agent", "")))
         if not who.owner:
             people.record_login(who.id, now())
         people.log(now(), who.username, who.role, "Signed in", client=client)
@@ -1657,11 +1720,14 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     @app.get("/api/vault/{doc_id}/file", dependencies=auth)
     def vault_file(doc_id: int):
-        found = bids.vault_file(doc_id)
+        try:
+            found = bids.vault_bytes(doc_id)
+        except sealing.SealError as e:
+            raise HTTPException(500, str(e)) from None
         if not found:
             raise HTTPException(404, "No file is stored for that document")
-        path, name = found
-        return FileResponse(path, media_type="application/octet-stream", filename=name)
+        content, name = found
+        return Response(content, media_type="application/octet-stream", headers={"Content-Disposition": 'attachment; filename="' + re.sub(r'[^\w.\- ()]', "_", name) + '"'})
 
     @app.get("/api/company-profile", dependencies=auth)
     def get_company_profile() -> dict:
@@ -1810,7 +1876,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
         def send() -> None:
             try:
-                body = "<p>" + html_escape(text).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+                body = "<p>" + re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', html_escape(text)).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
                 manager.sender(env.brevo_api_key, env.mail_from, env.mail_from_name, emails, f"TendAI: {subject}", body, text)
             except Exception:  # noqa: BLE001
                 log.exception("notification email failed")
@@ -1971,6 +2037,171 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         store.sessions_end_for(request.state.user.id, except_sid=session_id(request))
         return {"ok": True}
 
+    @app.get("/api/account/sessions", dependencies=auth)
+    def my_sessions(request: Request) -> dict:
+        """The devices this person is signed in on."""
+        mine = session_id(request)
+        rows = store.sessions_of(request.state.user.id, time.time(), config.idle_seconds)
+        return {"sessions": [{"ref": r["ref"], "device": r["agent"] or "Unknown device", "client": r["client"], "created": r["created"], "last_seen": r["last_seen"],
+                              "current": r["sid"] == mine} for r in rows]}
+
+    @app.delete("/api/account/sessions/{ref}", dependencies=auth)
+    def end_session(ref: str, request: Request) -> dict:
+        if not store.session_end_ref(request.state.user.id, ref):
+            raise HTTPException(404, "That sign-in is already over")
+        return {"ok": True}
+
+    # ---- forgotten password: public, so each step is throttled and says the same thing whoever asks ---------------------
+
+    reset_hits: dict[str, list[float]] = {}
+
+    def reset_throttle(client: str, kind: str, limit: int) -> None:
+        t = time.time()
+        hits = [x for x in reset_hits.get(f"{kind}:{client}", []) if t - x < 900]
+        if len(hits) >= limit:
+            reset_hits[f"{kind}:{client}"] = hits
+            raise HTTPException(429, "Too many tries. Wait a few minutes and try again.")
+        hits.append(t)
+        reset_hits[f"{kind}:{client}"] = hits
+        if len(reset_hits) > 5000:  # never grows without bound
+            for k in [k for k, v in reset_hits.items() if not v or t - v[-1] > 900]:
+                reset_hits.pop(k, None)
+
+    @app.post("/api/password-reset/request")
+    def password_reset_request(body: ResetRequest, request: Request) -> dict:
+        reset_throttle(client_of(request), "ask", 6)
+        if not manager.mail_configured:
+            raise HTTPException(503, "Email is not set up on this server, so a reset link cannot be sent. Ask an administrator to set a new password for you.")
+        found = people.reset_request(body.who, time.time())
+        if found:
+            user, token = found
+            link = f"{public_base(request)}/#/reset/{token}"
+            notify([user.email], "Reset your password",
+                   f"Someone asked to reset the password for {user.username}.\n\nOpen this link to choose a new one (it works once and stops working in {people.RESET_MINUTES} minutes):\n{link}\n\n"
+                   "If you did not ask for this, ignore this email: your password has not changed.")
+            people.log(now(), user.username, user.role, "Asked for a password reset link", client=client_of(request))
+        return {"ok": True, "message": "If that matches an account with an email address, a link to choose a new password is on its way."}
+
+    @app.post("/api/password-reset/confirm")
+    def password_reset_confirm(body: ResetConfirm, request: Request) -> dict:
+        reset_throttle(client_of(request), "use", 10)
+        try:
+            user = people.reset_confirm(body.token, body.password, time.time())
+        except AccountError as e:
+            raise HTTPException(422, str(e)) from None
+        store.sessions_end_for(user.id)  # whoever had the old password is signed out
+        people.log(now(), user.username, user.role, "Chose a new password from an emailed link", client=client_of(request))
+        return {"ok": True}
+
+    # ---- what is kept about a person: a copy, and erasure ---------------------------------------------------------------------
+
+    def download(data: dict, name: str) -> Response:
+        return Response(json.dumps(data, indent=2, ensure_ascii=False, default=str), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{name}.json"'})
+
+    @app.get("/api/account/export", dependencies=auth)
+    def export_own_data(request: Request):
+        user: Principal = request.state.user
+        if user.owner:
+            raise HTTPException(422, "The owner login is set by the server's variables and has no stored account")
+        return download(privacy.export_person(people, bids, user.id), f"my-tendai-data-{user.username}")
+
+    @app.get("/api/users/{user_id}/export", dependencies=auth)
+    def export_person_data(user_id: int):
+        if user_id == accounts.OWNER_ID:
+            raise HTTPException(422, "The owner login is set by the server's variables and has no stored account")
+        try:
+            data = privacy.export_person(people, bids, user_id)
+        except privacy.PrivacyError as e:
+            raise HTTPException(404, str(e)) from None
+        return download(data, f"tendai-data-{data['account']['username']}")
+
+    @app.post("/api/users/{user_id}/erase", dependencies=auth)
+    def erase_person_data(user_id: int, body: EraseBody, request: Request) -> dict:
+        """Removes who a person was (name, email, password, sign-ins, and their name on comments and the activity log). The person must be deactivated first."""
+        me: Principal = request.state.user
+        if user_id == accounts.OWNER_ID or user_id == me.id:
+            raise HTTPException(422, "You cannot erase your own account or the owner login")
+        with people.lock:
+            row = people.db.execute("SELECT username, active FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "No such person")
+        if row["active"]:
+            raise HTTPException(422, "Turn the account off first (Active off), then erase it")
+        if body.confirm.strip().lower() != row["username"]:
+            raise HTTPException(422, "Type the person's username exactly to confirm")
+        try:
+            out = privacy.erase_person(people, bids, store, user_id, now())
+        except privacy.PrivacyError as e:
+            raise HTTPException(422, str(e)) from None
+        return out
+
+    # ---- integrations: API tokens and outgoing webhooks (administrators) -----------------------------------------------------
+
+    @app.get("/api/tokens", dependencies=auth)
+    def list_tokens() -> dict:
+        return {"tokens": api_tokens.list(), "roles": list(tokens.ROLES)}
+
+    @app.post("/api/tokens", dependencies=auth)
+    def create_token(body: TokenBody, request: Request) -> dict:
+        try:
+            record, raw = api_tokens.create(body.name, body.role, body.days, request.state.user.username, now())
+        except tokens.TokenError as e:
+            raise HTTPException(422, str(e)) from None
+        return {"token": record, "secret": raw}
+
+    @app.delete("/api/tokens/{token_id}", dependencies=auth)
+    def revoke_token(token_id: int) -> dict:
+        if not api_tokens.revoke(token_id):
+            raise HTTPException(404, "No such active token")
+        return {"revoked": token_id}
+
+    def hook_error(e: events.HookError) -> HTTPException:
+        return HTTPException(404 if "No such" in str(e) else 422, str(e))
+
+    @app.get("/api/webhooks", dependencies=auth)
+    def list_webhooks() -> dict:
+        return {"webhooks": hooks.list(), "events": [{"key": k, "label": v} for k, v in events.EVENTS.items() if k != "test"]}
+
+    @app.post("/api/webhooks", dependencies=auth)
+    def create_webhook(body: HookBody) -> dict:
+        try:
+            hook, secret = hooks.create(body.name or "", body.url or "", body.events or [], now())
+        except events.HookError as e:
+            raise hook_error(e) from None
+        return {"webhook": hook, "secret": secret}
+
+    @app.patch("/api/webhooks/{hook_id}", dependencies=auth)
+    def edit_webhook(hook_id: int, body: HookBody) -> dict:
+        try:
+            return hooks.update(hook_id, name=body.name, url=body.url, events=body.events, active=body.active)
+        except events.HookError as e:
+            raise hook_error(e) from None
+
+    @app.post("/api/webhooks/{hook_id}/secret", dependencies=auth)
+    def new_webhook_secret(hook_id: int) -> dict:
+        try:
+            return {"secret": hooks.new_secret(hook_id)}
+        except events.HookError as e:
+            raise hook_error(e) from None
+
+    @app.post("/api/webhooks/{hook_id}/test", dependencies=auth)
+    def test_webhook_hook(hook_id: int) -> dict:
+        """Sends a test message to this webhook right now and says how it went."""
+        if not hooks.get(hook_id):
+            raise HTTPException(404, "No such webhook")
+        hooks.emit("test", {"message": "This is a test from TendAI."}, now(), only_hook=hook_id)
+        hooks.deliver(now(), timeout=8)
+        state = hooks.get(hook_id) or {}
+        if state.get("last_status") != "ok":
+            raise HTTPException(502, state.get("last_error") or "The test message could not be delivered")
+        return {"ok": True, "webhook": state}
+
+    @app.delete("/api/webhooks/{hook_id}", dependencies=auth)
+    def delete_webhook(hook_id: int) -> dict:
+        if not hooks.delete(hook_id):
+            raise HTTPException(404, "No such webhook")
+        return {"removed": hook_id}
+
     @app.get("/api/users", dependencies=auth)
     def list_users() -> dict:
         owner_row = {"id": accounts.OWNER_ID, "username": owner.username, "name": "Owner (server login)", "role": "admin", "active": True, "must_change": False,
@@ -2009,7 +2240,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     @app.get("/api/backup/status", dependencies=auth)
     def backup_status() -> dict:
-        return {**backups.status(), "storage_warning": storage_note}
+        return {**backups.status(), "storage_warning": storage_note,
+                "encryption": sealing.describe(sealer, encryption_problem, bids.plain_files() if sealer.enabled else 0, people.plain_secrets() if sealer.enabled else 0)}
 
     @app.post("/api/backup/offsite-now", dependencies=auth)
     def backup_offsite_now():

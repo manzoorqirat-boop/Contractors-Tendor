@@ -9,9 +9,10 @@ import { Tabs } from '../Tabs';
 import { useToast } from '../ui';
 import { useConfirm } from '../confirm';
 import { ActivityPanel, UsersPanel } from '../Account';
+import { DataPrivacyCard, IntegrationsPanel } from '../Integrations';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
-type Tab = 'email' | 'reminders' | 'portals' | 'filters' | 'ai' | 'people' | 'activity' | 'backup';
+type Tab = 'email' | 'reminders' | 'portals' | 'filters' | 'ai' | 'people' | 'integrations' | 'activity' | 'backup';
 let lastTab: Tab = 'email';
 const norm = (v: { recipients: string; extra: string; exclude: string; minValue: string; logoText: string; f: Settings }) => JSON.stringify([
   lines(v.recipients), lines(v.extra), lines(v.exclude), Number(v.minValue) || 0, v.logoText, v.f.send_time, v.f.schedule_enabled, v.f.send_empty,
@@ -133,7 +134,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
         <div className="set-bar">
           <Tabs<Tab> label="Settings sections" value={tab} onChange={setTab} tabs={[
             { key: 'email', label: 'Daily email' }, { key: 'reminders', label: 'Reminders' }, { key: 'portals', label: <>Portals<span className="tab-dot">{form.portals.length}</span></> },
-            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }, { key: 'people', label: 'People' }, { key: 'activity', label: 'Activity' }, { key: 'backup', label: 'Backup' }]} />
+            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }, { key: 'people', label: 'People' }, { key: 'integrations', label: 'Integrations' }, { key: 'activity', label: 'Activity' }, { key: 'backup', label: 'Backup' }]} />
           {['email', 'reminders', 'portals', 'filters', 'ai'].includes(tab) && SaveBar}
         </div>
         {msg && <div className={`alert ${msg.tone}`} role="status">{msg.text}</div>}
@@ -236,6 +237,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
 
               </form>
       {tab === 'people' && <UsersPanel />}
+      {tab === 'integrations' && <IntegrationsPanel />}
       {tab === 'activity' && <ActivityPanel />}
       {tab === 'backup' && <BackupPanel />}
     </>
@@ -325,6 +327,7 @@ function BackupPanel() {
           </>
         )}
       </section>
+      <DataPrivacyCard encryption={data?.encryption} />
       <section className="card">
         <h2>Automatic daily copy {data && <span className={`badge ${data.enabled && data.latest_day ? 'ok' : 'warn'}`} style={{ marginLeft: 6 }}>{data.enabled ? (data.latest_day ? 'Running' : 'Waiting for the first copy') : 'Off'}</span>}</h2>
         {error && <div className="alert bad">{error}</div>}

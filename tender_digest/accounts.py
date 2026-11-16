@@ -21,8 +21,10 @@ import struct
 import time
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
+
+from .sealing import Sealer
 
 ROLES = ("viewer", "bidder", "admin")
 RANK = {r: i for i, r in enumerate(ROLES)}
@@ -70,7 +72,7 @@ class Principal:
 
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
 
-_ADMIN_AREAS = re.compile(r"^/api/(users|audit|backup|settings|calendar)(/|$)")
+_ADMIN_AREAS = re.compile(r"^/api/(users|audit|backup|settings|calendar|tokens|webhooks)(/|$)")
 _VAULT_FILE = re.compile(r"^/api/(vault/\d+/file|bids/\d+/pack)$")
 
 
@@ -85,6 +87,16 @@ def required_role(method: str, path: str) -> str:
     if path.startswith("/api/portals"):
         return "admin"
     return "bidder"
+
+
+def describe_agent(ua: str) -> str:
+    """"Chrome on Windows" from a browser's user-agent text: enough to recognise a device, nothing that identifies a person."""
+    u = ua or ""
+    browser = next((n for k, n in (("Edg/", "Edge"), ("OPR/", "Opera"), ("Firefox/", "Firefox"), ("Chrome/", "Chrome"), ("Safari/", "Safari")) if k in u), "")
+    system = next((n for k, n in (("Windows", "Windows"), ("Android", "Android"), ("iPhone", "iPhone"), ("iPad", "iPad"), ("Mac OS X", "Mac"), ("Linux", "Linux")) if k in u), "")
+    if browser and system:
+        return f"{browser} on {system}"
+    return browser or system or "Unknown device"
 
 
 # ---- passwords -------------------------------------------------------------------------------------------------------
@@ -169,7 +181,8 @@ class AccountError(Exception):
 
 
 class Accounts:
-    def __init__(self, store: Any):
+    def __init__(self, store: Any, sealer: Sealer | None = None):
+        self.sealer = sealer or Sealer()
         self.db, self.lock = store.db, store.lock
         with self.lock:
             self.db.executescript(
@@ -180,6 +193,8 @@ class Accounts:
                 CREATE TABLE IF NOT EXISTS audit (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, username TEXT NOT NULL, role TEXT, action TEXT NOT NULL, target TEXT, detail TEXT, client TEXT);
                 CREATE INDEX IF NOT EXISTS audit_at ON audit (id DESC);
+                CREATE TABLE IF NOT EXISTS password_resets (
+                  token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created REAL NOT NULL, expires REAL NOT NULL);
                 """)
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(users)")}
             for col, kind in (("totp_secret", "TEXT"), ("totp_on", "INTEGER NOT NULL DEFAULT 0"), ("totp_last", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT NOT NULL DEFAULT ''")):
@@ -238,14 +253,14 @@ class Accounts:
         """Makes a new secret for the person to add to their authenticator app. It is not required at sign-in until they confirm a code."""
         secret = new_totp_secret()
         with self.lock:
-            self.db.execute("UPDATE users SET totp_secret = ?, totp_on = 0, totp_last = 0 WHERE id = ?", (secret, user_id))
+            self.db.execute("UPDATE users SET totp_secret = ?, totp_on = 0, totp_last = 0 WHERE id = ?", (self.sealer.seal_text(secret), user_id))
             self.db.commit()
         return secret
 
     def totp_enable(self, user_id: int, code: str, now: float | None = None) -> None:
         with self.lock:
             r = self.db.execute("SELECT totp_secret FROM users WHERE id = ?", (user_id,)).fetchone()
-        step = totp_match(r["totp_secret"], code, now) if r and r["totp_secret"] else None
+        step = totp_match(self.sealer.open_text(r["totp_secret"]), code, now) if r and r["totp_secret"] else None
         if step is None:
             raise AccountError("That code is not right. Check the app, wait for a new code, and try again")
         with self.lock:
@@ -266,7 +281,7 @@ class Accounts:
             return False
         with self.lock:
             r = self.db.execute("SELECT totp_secret, totp_last FROM users WHERE id = ? AND totp_on = 1", (user_id,)).fetchone()
-            step = totp_match(r["totp_secret"], code, t, r["totp_last"]) if r else None
+            step = totp_match(self.sealer.open_text(r["totp_secret"]), code, t, r["totp_last"]) if r else None
             if step is not None:
                 self.db.execute("UPDATE users SET totp_last = ? WHERE id = ?", (step, user_id))
                 self.db.commit()
@@ -275,6 +290,24 @@ class Accounts:
             return False
         self._code_fails[user_id] = []
         return True
+
+    def seal_existing(self) -> int:
+        """Encrypts two-step secrets stored before a key was set (and re-encrypts under a new key). Returns how many were written."""
+        if not self.sealer.enabled:
+            return 0
+        n = 0
+        with self.lock:
+            for r in self.db.execute("SELECT id, totp_secret FROM users WHERE totp_secret IS NOT NULL AND totp_secret != ''").fetchall():
+                new = self.sealer.rotate_text(r["totp_secret"]) if self.sealer.has_old or not self.sealer.is_sealed_text(r["totp_secret"]) else r["totp_secret"]
+                if new != r["totp_secret"]:
+                    self.db.execute("UPDATE users SET totp_secret = ? WHERE id = ?", (new, r["id"]))
+                    n += 1
+            self.db.commit()
+        return n
+
+    def plain_secrets(self) -> int:
+        with self.lock:
+            return sum(1 for r in self.db.execute("SELECT totp_secret FROM users WHERE totp_secret IS NOT NULL AND totp_secret != ''") if not self.sealer.is_sealed_text(r["totp_secret"]))
 
     def record_login(self, user_id: int, now: datetime) -> None:
         with self.lock:
@@ -355,6 +388,52 @@ class Accounts:
             self.db.execute("UPDATE users SET pw_hash = ?, must_change = 0 WHERE id = ?", (hash_password(new), user_id))
             self.db.commit()
 
+    # -- forgotten passwords: a link by email, good for an hour and for one use --
+
+    RESET_MINUTES = 60
+    RESET_PER_HOUR = 3
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def reset_request(self, who: str, now: float) -> tuple[Principal, str] | None:
+        """Makes a reset link for the active person whose username or email is `who`. None when there is no such person, they have no email,
+        or they have already asked three times this hour (the caller says the same thing in every case, so nobody learns which)."""
+        who = (who or "").strip().lower()[:120]
+        if not who:
+            return None
+        with self.lock:
+            self.db.execute("DELETE FROM password_resets WHERE expires < ?", (now,))
+            r = self.db.execute("SELECT * FROM users WHERE active = 1 AND email != '' AND (username = ? OR email = ?) ORDER BY (username = ?) DESC LIMIT 1", (who, who, who)).fetchone()
+            if not r:
+                self.db.commit()
+                return None
+            recent = self.db.execute("SELECT COUNT(*) FROM password_resets WHERE user_id = ? AND created > ?", (r["id"], now - 3600)).fetchone()[0]
+            if recent >= self.RESET_PER_HOUR:
+                self.db.commit()
+                return None
+            token = secrets.token_urlsafe(32)
+            self.db.execute("INSERT INTO password_resets (token_hash, user_id, created, expires) VALUES (?,?,?,?)", (self._token_hash(token), r["id"], now, now + self.RESET_MINUTES * 60))
+            self.db.commit()
+        return self._principal(r), token
+
+    def reset_confirm(self, token: str, new_password: str, now: float) -> Principal:
+        """Sets the new password if the link is still good. The link, and any other link for that person, stops working."""
+        with self.lock:
+            row = self.db.execute("SELECT user_id, expires FROM password_resets WHERE token_hash = ?", (self._token_hash(token or ""),)).fetchone()
+            u = self.db.execute("SELECT * FROM users WHERE id = ? AND active = 1", (row["user_id"],)).fetchone() if row else None
+        if not row or not u or row["expires"] < now:
+            raise AccountError("This link has expired or was already used. Ask for a new one on the sign-in page")
+        problem = password_problem(new_password, u["username"])
+        if problem:
+            raise AccountError(problem)
+        with self.lock:
+            self.db.execute("UPDATE users SET pw_hash = ?, must_change = 0 WHERE id = ?", (hash_password(new_password), u["id"]))
+            self.db.execute("DELETE FROM password_resets WHERE user_id = ?", (u["id"],))
+            self.db.commit()
+        return self._principal(self.db.execute("SELECT * FROM users WHERE id = ?", (u["id"],)).fetchone())
+
     # -- activity log --
 
     def log(self, when: datetime, username: str, role: str | None, action: str, target: str = "", detail: str = "", client: str = "") -> None:
@@ -365,6 +444,14 @@ class Accounts:
             if self._audit_writes % 200 == 0:  # keep the table from growing without end
                 self.db.execute("DELETE FROM audit WHERE id <= (SELECT MAX(id) FROM audit) - ?", (MAX_AUDIT_ROWS,))
             self.db.commit()
+
+    def prune_audit(self, now: datetime, keep_days: int) -> int:
+        """Removes activity-log entries older than `keep_days`. Returns how many went."""
+        cutoff = (now - timedelta(days=keep_days)).isoformat(timespec="seconds")
+        with self.lock:
+            cur = self.db.execute("DELETE FROM audit WHERE at < ?", (cutoff,))
+            self.db.commit()
+        return cur.rowcount
 
     def activity(self, limit: int = 100, username: str = "", before: int | None = None) -> list[dict[str, Any]]:
         sql, args = "SELECT id, at, username, role, action, target, detail, client FROM audit", []
@@ -440,6 +527,17 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/account/2fa/disable"): "Turned off two-step sign-in",
     ("POST", "/api/account/sessions/end-others"): "Signed out other devices",
     ("GET", "/api/backup"): "Downloaded a backup",
+    ("GET", "/api/account/export"): "Downloaded own data",
+    ("GET", "/api/users/{user_id}/export"): "Downloaded a person's data",
+    ("POST", "/api/users/{user_id}/erase"): "Erased a person's data",
+    ("POST", "/api/tokens"): "Made an API token",
+    ("DELETE", "/api/tokens/{token_id}"): "Revoked an API token",
+    ("POST", "/api/webhooks"): "Set up an outgoing webhook",
+    ("PATCH", "/api/webhooks/{hook_id}"): "Changed an outgoing webhook",
+    ("POST", "/api/webhooks/{hook_id}/secret"): "Made a new webhook secret",
+    ("POST", "/api/webhooks/{hook_id}/test"): "Tested an outgoing webhook",
+    ("DELETE", "/api/webhooks/{hook_id}"): "Removed an outgoing webhook",
+    ("DELETE", "/api/account/sessions/{ref}"): "Signed out one device",
     ("GET", "/api/bids/{bid_id}/pack"): "Downloaded a bid pack",
     ("POST", "/api/letter-templates"): "Added a letter template",
     ("PUT", "/api/letter-templates/{template_id}"): "Saved a letter template",

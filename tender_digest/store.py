@@ -186,6 +186,10 @@ class SeenStore:
                   departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
                 """
             )
+            have_s = {r["name"] for r in self.db.execute("PRAGMA table_info(sessions)")}
+            for col in ("client", "agent"):
+                if col not in have_s:
+                    self.db.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")  # which device each sign-in came from
             if "user_id" not in {r["name"] for r in self.db.execute("PRAGMA table_info(sessions)")}:
                 self.db.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")  # sessions made before accounts existed belong to the owner (0)
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(seen)")}
@@ -719,11 +723,34 @@ class SeenStore:
 
     # ---- login sessions: kept here so that logging out, or going idle, really ends them ------------------------
 
-    def session_start(self, sid: str, now: float, keep_seconds: float, user_id: int = 0) -> None:
+    def session_start(self, sid: str, now: float, keep_seconds: float, user_id: int = 0, client: str = "", agent: str = "") -> None:
         with self.lock:
             self.db.execute("DELETE FROM sessions WHERE created < ?", (now - keep_seconds,))
-            self.db.execute("INSERT OR REPLACE INTO sessions (sid, created, last_seen, user_id) VALUES (?, ?, ?, ?)", (sid, now, now, user_id))
+            self.db.execute("INSERT OR REPLACE INTO sessions (sid, created, last_seen, user_id, client, agent) VALUES (?, ?, ?, ?, ?, ?)", (sid, now, now, user_id, client[:64], agent[:200]))
             self.db.commit()
+
+    @staticmethod
+    def session_ref(sid: str) -> str:
+        """A short name for a session that is safe to show and send back (the session id itself is the credential and never leaves the server)."""
+        import hashlib
+        return hashlib.sha256(sid.encode()).hexdigest()[:16]
+
+    def sessions_of(self, user_id: int, now: float, idle_seconds: float) -> list[dict]:
+        """The sign-ins of one person that are still alive, newest use first."""
+        with self.lock:
+            rows = self.db.execute("SELECT sid, created, last_seen, client, agent FROM sessions WHERE user_id = ? AND last_seen >= ? ORDER BY last_seen DESC",
+                                   (user_id, now - idle_seconds)).fetchall()
+        return [{"ref": self.session_ref(r["sid"]), "sid": r["sid"], "created": r["created"], "last_seen": r["last_seen"], "client": r["client"], "agent": r["agent"]} for r in rows]
+
+    def session_end_ref(self, user_id: int, ref: str) -> bool:
+        """Ends one of this person's sign-ins by its short name. False when it is not theirs or is already gone."""
+        with self.lock:
+            for r in self.db.execute("SELECT sid FROM sessions WHERE user_id = ?", (user_id,)).fetchall():
+                if self.session_ref(r["sid"]) == ref:
+                    self.db.execute("DELETE FROM sessions WHERE sid = ?", (r["sid"],))
+                    self.db.commit()
+                    return True
+        return False
 
     def session_touch(self, sid: str, now: float, idle_seconds: float) -> int | None:
         """The session's user id (0 = the owner login) when it exists and was used within `idle_seconds`, else None.

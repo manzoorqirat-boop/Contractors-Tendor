@@ -51,7 +51,7 @@ export interface NewPortal { name: string; state: string; base_url: string }
 
 export interface Settings {
   recipients: string[]; send_time: string; schedule_enabled: boolean; send_empty: boolean; portals: string[]; min_value: number;
-  extra_keywords: string[]; exclude_words: string[]; company_profile: string; require_signoff?: boolean; reminders_on?: boolean; webhook_url?: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string;
+  extra_keywords: string[]; exclude_words: string[]; company_profile: string; require_signoff?: boolean; reminders_on?: boolean; webhook_url?: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; audit_days?: number; tender_days?: number; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string;
 }
 
 export type Status = 'open' | 'closing_soon' | 'closed' | 'all';
@@ -157,6 +157,7 @@ export interface AuditEntry { id: number; at: string; username: string; role: st
 
 export interface BackupStatus {
   enabled: boolean; keep_days: number; latest_day: string | null; days: string[]; storage_warning: string;
+  encryption?: { enabled: boolean; problem: string; plain_files: number; plain_secrets: number; rotating: boolean };
   offsite: { configured: boolean; bucket: string; endpoint: string; last_ok: string | null; last_error: string | null; last_daily: string | null; last_weekly: string | null; keep_daily: number; keep_weekly: number };
 }
 
@@ -169,3 +170,8 @@ export interface CompareTender {
   value: number | null; value_text: string; emd: number | null; emd_pct: number | null; published: string | null; closing: string | null; opening: string | null;
   days_left: number | null; fit: number | null; fit_reason: string | null; starred: boolean; manual: boolean; bid_id: number | null;
 }
+
+export interface Device { ref: string; device: string; client: string; created: number; last_seen: number; current: boolean }
+export interface ApiToken { id: number; name: string; hint: string; role: 'viewer' | 'bidder'; created_by: string | null; created: string; expires: string | null; last_used: number | null; revoked: boolean }
+export interface Webhook { id: number; name: string; url: string; events: string[]; active: boolean; created: string; secret_hint: string; last_at: string | null; last_status: 'ok' | 'retrying' | 'failed' | null; last_error: string | null; waiting: number }
+export interface EraseResult { handle: string; changed: Record<string, number>; when: string; note: string }

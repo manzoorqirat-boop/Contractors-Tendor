@@ -30,6 +30,14 @@ async function scan(page, name) {
     await page.goto(URL_);
     await page.waitForSelector('input[autocomplete=username]');
     await scan(page, `${mode} sign-in`);
+    await page.click('button:has-text("Forgot password?")');
+    await page.waitForSelector('text=Email me a link');
+    await scan(page, `${mode} sign-in, forgot password`);
+    await page.goto('about:blank'); await page.goto(URL_ + '#/reset/' + 'a1b2c3d4'.repeat(4));
+    await page.waitForSelector('text=Choose a new password');
+    await scan(page, `${mode} choose a new password`);
+    await page.goto('about:blank'); await page.goto(URL_);
+    await page.waitForSelector('input[autocomplete=username]');
     await page.fill('input[autocomplete=username]', USER);
     await page.fill('input[autocomplete=current-password]', PASS);
     await page.click('button.login-submit');
@@ -60,7 +68,7 @@ async function scan(page, name) {
       await page.click('button:has-text("Compare")'); await page.waitForSelector('table.cmp');
     });
     await visit('runs', '#/runs');
-    for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => page.click(`[role=tab]:has-text("${t}")`));
+    for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Integrations', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => page.click(`[role=tab]:has-text("${t}")`));
     await visit('account', '#/dashboard', async () => { if (mobile) await page.click('.more-toggle'); await page.click('text=Account & security'); });
     await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?'));
     await visit('add a tender', '#/tenders', async () => { await page.click('text=Add a tender'); await page.click('button:has-text("Continue"), button:has-text("Type the details myself")'); });

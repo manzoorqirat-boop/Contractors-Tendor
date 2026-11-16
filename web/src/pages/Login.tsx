@@ -44,7 +44,13 @@ export function Login({ onDone }: { onDone: () => void }) {
   const [needCode, setNeedCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(false);
+  const [who, setWho] = useState('');
+  const [sent, setSent] = useState('');
   const [online, setOnline] = useState<boolean | null>(null);
+  const [resetToken, setResetToken] = useState(() => /^#\/reset\/([\w-]{20,200})$/.exec(location.hash)?.[1] ?? '');
+  const [newPassword, setNewPassword] = useState('');
+  const [again, setAgain] = useState('');
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -71,6 +77,23 @@ export function Login({ onDone }: { onDone: () => void }) {
     }
   }
 
+  async function askReset(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy || !who.trim()) return;
+    setBusy(true); setError('');
+    try { setSent((await api.requestReset(who.trim())).message); }
+    catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+  }
+  async function chooseNew(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    if (newPassword !== again) { setError('The two passwords do not match.'); return; }
+    setBusy(true); setError('');
+    try { await api.confirmReset(resetToken, newPassword); setDone(true); history.replaceState(null, '', location.pathname + location.search); }
+    catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+  }
+  function backToSignIn() { setResetToken(''); setDone(false); setNewPassword(''); setAgain(''); setError(''); }
+
   return (
     <div className="login">
       <div className="login-shell">
@@ -84,6 +107,26 @@ export function Login({ onDone }: { onDone: () => void }) {
           <AnalyticsArt />
         </aside>
 
+        {resetToken ? (
+          <main className="login-card">
+            <h1>{done ? 'Password changed' : 'Choose a new password'}</h1>
+            {done ? (
+              <>
+                <p className="login-sub">You can now sign in with your new password.</p>
+                <button className="btn primary login-submit" onClick={backToSignIn}>Go to sign in</button>
+              </>
+            ) : (
+              <form onSubmit={chooseNew} noValidate>
+                <p className="login-sub">Use at least 12 characters. A few random words joined together is easy to remember and hard to guess.</p>
+                {error && <div className="alert bad" role="alert">{error}</div>}
+                <label className="lf"><span>New password</span><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" autoFocus /></label>
+                <label className="lf"><span>Type it again</span><input type="password" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" /></label>
+                <button className="btn primary login-submit" disabled={busy || !newPassword || !again}>{busy ? 'Saving…' : 'Save new password'}</button>
+                <p style={{ marginTop: 12 }}><button type="button" className="link-btn" onClick={backToSignIn}>Back to sign in</button></p>
+              </form>
+            )}
+          </main>
+        ) : (
         <main className="login-card">
           <h1>Welcome back</h1>
           <p className="login-sub">{greeting()}. Sign in to TendAI by QMSofts.</p>
@@ -115,21 +158,30 @@ export function Login({ onDone }: { onDone: () => void }) {
               </label>
             )}
 
-            {forgot && (
-              <div className="alert warn lf-help" role="note">
-                <strong>Reset the password</strong>
-                <span>Contact your administrator. They can set a new password for you.</span>
-              </div>
-            )}
-
             <button className="btn primary login-submit" disabled={busy || !username.trim() || !password || (needCode && code.replace(/\s/g, '').length < 6)}>{busy ? 'Signing in…' : 'Sign in'}</button>
           </form>
+
+          {forgot && (
+            <form onSubmit={askReset} className="lf-help" style={{ marginTop: 14 }}>
+              <strong>Forgot your password?</strong>
+              {sent ? <div className="alert ok" role="status">{sent}</div> : (
+                <>
+                  <span className="muted small">Type your username or the email address on your account and a link to choose a new password is sent to it.</span>
+                  {error && <div className="alert bad" role="alert">{error}</div>}
+                  <label className="lf"><span>Username or email</span><input type="text" value={who} onChange={(e) => setWho(e.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} /></label>
+                  <button className="btn" disabled={busy || !who.trim()}>{busy ? 'Sending…' : 'Email me a link'}</button>
+                  <span className="muted small">No email on your account, or none arrives? Ask your administrator to set a new password for you.</span>
+                </>
+              )}
+            </form>
+          )}
 
           <p className="login-status">
             <span className={`dot ${online === null ? '' : online ? 'up' : 'down'}`} aria-hidden />
             {online === null ? 'Checking server…' : online ? 'Server online' : 'Server unreachable'}
           </p>
         </main>
+        )}
       </div>
       <footer className="login-foot">© {new Date().getFullYear()} TendAI by QMSofts</footer>
     </div>

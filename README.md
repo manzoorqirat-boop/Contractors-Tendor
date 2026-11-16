@@ -144,6 +144,8 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `BACKUP_KEEP_DAYS` | Optional | Default `7`. How many days of automatic database copies to keep on the volume. |
 | `OWNER_TOTP_SECRET` | Optional | A base32 secret (for example from an authenticator app's "setup key"). When set, the owner login also needs the 6-digit code from the app. Secret. To lose the requirement, remove the variable. |
 | `APP_URL` | Optional | This site's public address, for example `https://tend.example.com`. Used for the "Open the bid" links in reminder emails and the calendar. |
+| `DATA_ENCRYPTION_KEY` | Optional | A long private phrase (16+ characters). When set, two-step and webhook secrets and every uploaded file (the Vault and saved tender notices) are stored encrypted, and anything stored earlier is encrypted at the next start. **Keep it somewhere other than the server: without it those files, and a restored backup, cannot be read.** Secret. |
+| `DATA_ENCRYPTION_KEY_OLD` | Optional | To change the key: set the new one in `DATA_ENCRYPTION_KEY` and the old one here, restart, then remove this. Commas separate several old keys. |
 | `ALLOW_EPHEMERAL_STORAGE` | Optional | Set `true` to silence the "no volume" warning on Railway (not recommended: a redeploy then loses all data). |
 | `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
 | `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
@@ -184,8 +186,13 @@ Sign in with a username and password. Administrators add people in **Settings > 
 - A password an administrator sets is temporary: the person must choose their own (12 or more characters) before doing anything else. Resetting a password or switching a person off signs them out at once; a role change applies at their next click.
 - Passwords are stored as salted scrypt hashes. Signing in has the same limits as before (per address, never a lock-out of the owner).
 - **Two-step sign-in** (optional): each person can turn it on under **Account & security** with any authenticator app (Google/Microsoft Authenticator, Authy, 1Password): add the setup key shown, then type a code to confirm. At sign-in a right password is followed by a request for the current code; each code works once. An administrator can reset a lost phone in Settings > People. The secret is stored in the database, so keep backups private. For the owner login set `OWNER_TOTP_SECRET`.
-- **Sign out other devices** (Account & security) ends every other session of your account.
-- **Settings > Activity** records who signed in, what each person changed, refusals ("view-only account tried to ...") and downloads of backups, Vault files and the spreadsheet. Reading pages is not logged. The last 20,000 entries are kept.
+- **Devices** (Account & security) lists where you are signed in ("Chrome on Windows", last used) and signs out any one of them, or all the others.
+- **Forgot password**: on the sign-in page, a person types their username or email and gets a link (works once, for an hour) to choose a new password. Needs email set up and an email address on the account (Settings > People); three links an hour per person, and the page says the same thing whether or not the account exists. Using the link signs the person out everywhere. The owner login is changed only on the server. Two-step sign-in is not bypassed by a reset.
+- **API tokens** (Settings > Integrations, administrators): for a script or another system. Sent as `Authorization: Bearer tnd_...`. A token is view-only or bidder, never admin, can expire, can be revoked, cannot use account settings, and its actions appear in the Activity log as `token:<name>`. Only a hash is stored; the token is shown once. Wrong tokens count against the same per-address limit as wrong passwords.
+- **Outgoing webhooks** (Settings > Integrations): TendAI POSTs a JSON message when a bid is started, changes stage, has a date or corrigendum change, or has its bidders recorded. Each webhook has its own secret and signs every message: `X-TendAI-Signature: sha256=` + HMAC-SHA256(secret, `X-TendAI-Timestamp` + `.` + body). Deliveries wait in a queue and are retried after 1 minute, 5 minutes, 30 minutes and 2 hours before giving up. The address must be https and public; redirects are not followed. Check the timestamp is recent when verifying, to refuse replays.
+- **Your data**: anyone can download what is kept about them (Account & security), and an administrator can download or erase a person's data (Settings > People). Erasing needs the account switched off first and the username typed to confirm: it removes the name, email, password, two-step secret and sign-ins, and replaces the person's name on comments, tasks, approvals and the activity log with `erased-N`. The company's records (bids, comments, the log) stay. Names typed by hand into notes are not changed.
+- **Retention** (Settings > Backup): how many days the activity log (default 365) and collected tenders (default 120) are kept.
+- **Settings > Activity** records who signed in, what each person changed, refusals ("view-only account tried to ...") and downloads of backups, Vault files and the spreadsheet. Reading pages is not logged. Entries are kept for the retention period (default 365 days), and at most the last 20,000.
 - Rules are enforced on the server (one table, `required_role` in `tender_digest/accounts.py`); the page only hides what a person cannot use.
 
 ## Security
@@ -202,7 +209,8 @@ Sign in with a username and password. Administrators add people in **Settings > 
 - `/api/health` fails (503) when the database cannot be read or its folder is not writable, so Railway restarts the service. On Railway, the page shows a red notice if the database is not on a mounted volume.
 - Spreadsheet downloads neutralise cells that start with `=`, `+`, `-` or `@`, since tender text comes from outside.
 - Words typed in Settings are escaped, never used as patterns.
-- It is a single shared password, not per-user accounts. Do not put it in chat; set it only as a Railway variable.
+- The owner login is one shared server password; give everyone else their own account. Do not put the owner password in chat; set it only as a Railway variable.
+- **Encryption at rest** is on when `DATA_ENCRYPTION_KEY` is set (see the variable above). It covers secrets and uploaded files, not the databases themselves, so use a Railway volume on an encrypted disk (the platform's job) and keep backups private. Settings > Backup shows whether it is on and whether anything is still unencrypted.
 
 ## How "civil" is decided
 

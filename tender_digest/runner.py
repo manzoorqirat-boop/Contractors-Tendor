@@ -185,7 +185,7 @@ class RunManager:
                     emailed = len(accepted)
                     say(f"Email accepted for {emailed} of {len(settings.recipients)} recipient(s)")
             failed = reports and all(r.failed for r in reports)
-            self.store.prune(now)
+            self.store.prune(now, appsettings.current(self.env, self.store.get_settings())["tender_days"])
             self.store.update_run(
                 run_id, status="failed" if failed else "ok", finished=local_now(self.tz_name).isoformat(timespec="seconds"),
                 reports=summary, new_civil=sum(r.new_civil for r in reports), emailed_count=emailed,

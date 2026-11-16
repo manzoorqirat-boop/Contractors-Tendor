@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -149,6 +149,22 @@ export const api = {
   calendar: () => call<{ enabled: boolean; url: string }>('/api/calendar'),
   newCalendarToken: () => call<{ enabled: boolean; url: string }>('/api/calendar/token', { method: 'POST' }),
   stopCalendar: () => call<{ enabled: boolean; url: string }>('/api/calendar', { method: 'DELETE' }),
+  requestReset: (who: string) => call<{ ok: boolean; message: string }>('/api/password-reset/request', { method: 'POST', body: JSON.stringify({ who }) }),
+  confirmReset: (token: string, password: string) => call<{ ok: boolean }>('/api/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token, password }) }),
+  mySessions: () => call<{ sessions: Device[] }>('/api/account/sessions'),
+  endSession: (ref: string) => call<{ ok: boolean }>(`/api/account/sessions/${ref}`, { method: 'DELETE' }),
+  exportOwnUrl: '/api/account/export',
+  exportPersonUrl: (id: number) => `/api/users/${id}/export`,
+  erasePerson: (id: number, confirm: string) => call<EraseResult>(`/api/users/${id}/erase`, { method: 'POST', body: JSON.stringify({ confirm }) }),
+  tokens: () => call<{ tokens: ApiToken[]; roles: string[] }>('/api/tokens'),
+  createToken: (name: string, role: string, days: number | null) => call<{ token: ApiToken; secret: string }>('/api/tokens', { method: 'POST', body: JSON.stringify({ name, role, days }) }),
+  revokeToken: (id: number) => call<{ revoked: number }>(`/api/tokens/${id}`, { method: 'DELETE' }),
+  webhooks: () => call<{ webhooks: Webhook[]; events: { key: string; label: string }[] }>('/api/webhooks'),
+  createWebhook: (name: string, url: string, events: string[]) => call<{ webhook: Webhook; secret: string }>('/api/webhooks', { method: 'POST', body: JSON.stringify({ name, url, events }) }),
+  editWebhook: (id: number, patch: { name?: string; url?: string; events?: string[]; active?: boolean }) => call<Webhook>(`/api/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  newWebhookSecret: (id: number) => call<{ secret: string }>(`/api/webhooks/${id}/secret`, { method: 'POST' }),
+  testHook: (id: number) => call<{ ok: boolean }>(`/api/webhooks/${id}/test`, { method: 'POST' }),
+  deleteWebhook: (id: number) => call<{ removed: number }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
   packUrl: (id: number) => `/api/bids/${id}/pack`,
   letterTemplates: () => call<{ templates: LetterTemplate[]; fields: TemplateField[] }>('/api/letter-templates'),
   createTemplate: (name: string, body: string) => call<LetterTemplate>('/api/letter-templates', { method: 'POST', body: JSON.stringify({ name, body }) }),

@@ -15,9 +15,10 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .gepnic import parse_date
+from .sealing import Sealer
 from .store import SeenStore, _from_json, _iso, _to_json
 
 log = logging.getLogger("tender_digest.bids")
@@ -250,10 +251,12 @@ def looks_like(ext: str, data: bytes) -> bool:
 
 
 class BidBook:
-    def __init__(self, store: SeenStore, vault_dir: str | Path | None = None):
+    def __init__(self, store: SeenStore, vault_dir: str | Path | None = None, sealer: Sealer | None = None):
+        self.sealer = sealer or Sealer()
         self.store = store
         self.db, self.lock = store.db, store.lock
         self.vault_dir = Path(vault_dir) if vault_dir else None
+        self.on_event: Callable[[str, dict[str, Any]], None] | None = None  # told when something happens on a bid (outgoing webhooks listen here)
         with self.lock:
             self.db.executescript(
                 """
@@ -288,6 +291,17 @@ class BidBook:
                 if col not in have:
                     self.db.execute(f"ALTER TABLE bids ADD COLUMN {col} TEXT")  # added after the first release
             self.db.commit()
+
+    def _emit(self, event: str, bid_id: int, **extra: Any) -> None:
+        """Tells the listener (if any) what happened to a bid. A failing listener never breaks the action that caused the event."""
+        if not self.on_event:
+            return
+        try:
+            b = self.get(bid_id) or {}
+            self.on_event(event, {"bid_id": bid_id, "tender_id": b.get("tender_id"), "title": (b.get("description") or b.get("title") or "")[:200],
+                                  "organisation": b.get("organisation"), "stage": b.get("stage"), "closing": b.get("closing"), **extra})
+        except Exception:  # noqa: BLE001
+            log.exception("event %s could not be sent on", event)
 
     # ---- bids ------------------------------------------------------------------------------------------------------
 
@@ -326,6 +340,7 @@ class BidBook:
             )
             self.db.commit()
             bid_id = cur.lastrowid
+        self._emit("bid.created", bid_id)
         return self.get(bid_id) or {}, True
 
     def get(self, bid_id: int) -> dict | None:
@@ -369,6 +384,8 @@ class BidBook:
         with self.lock:
             self.db.execute(f"UPDATE bids SET {cols} WHERE id = ?", [*sets.values(), bid_id])
             self.db.commit()
+        if "stage" in patch and patch["stage"] != bid["stage"]:
+            self._emit("bid.stage_changed", bid_id, previous_stage=bid["stage"])
         return self.get(bid_id) or bid
 
     def set_json(self, bid_id: int, field: str, value: Any, now: datetime) -> None:
@@ -395,7 +412,7 @@ class BidBook:
         kind = "pdf" if isinstance(data, bytes) else "txt"
         path = self._source_path(key, kind)
         path.parent.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
-        path.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))  # type: ignore[union-attr]
+        self.sealer.write_file(path, data if isinstance(data, bytes) else data.encode("utf-8"))  # type: ignore[arg-type]
 
     def load_source(self, key: str) -> tuple[str, str]:
         """(text, pdf_base64): whichever was kept, else two empty strings."""
@@ -403,10 +420,18 @@ class BidBook:
 
         pdf, txt = self._source_path(key, "pdf"), self._source_path(key, "txt")
         if pdf and pdf.is_file():
-            return "", base64.b64encode(pdf.read_bytes()).decode("ascii")
+            return "", base64.b64encode(self.sealer.read_file(pdf)).decode("ascii")
         if txt and txt.is_file():
-            return txt.read_text(encoding="utf-8", errors="ignore"), ""
+            return self.sealer.read_file(txt).decode("utf-8", errors="ignore"), ""
         return "", ""
+
+    def source_bytes(self, key: str) -> tuple[str, bytes] | None:
+        """(file extension, content) of the kept tender notice, or None."""
+        for kind in ("pdf", "txt"):
+            p = self._source_path(key, kind)
+            if p and p.is_file():
+                return f".{kind}", self.sealer.read_file(p)
+        return None
 
     def has_source(self, key: str) -> bool:
         return any(p and p.is_file() for p in (self._source_path(key, "pdf"), self._source_path(key, "txt")))
@@ -557,6 +582,7 @@ class BidBook:
             patch["my_value"] = mine[1]
         if patch:
             self.update(bid_id, patch, now)
+        self._emit("bid.result", bid_id, bidders=[{"name": r[0], "price": r[1], "rank": r[2], "status": r[3], "mine": bool(r[4])} for r in rows])
         return patch
 
     @staticmethod
@@ -697,6 +723,7 @@ class BidBook:
         with self.lock:
             self.db.execute("INSERT INTO bid_changes (bid_id, at, what, old, new) VALUES (?,?,?,?,?)", (bid_id, _iso(now), what, old, new))
             self.db.commit()
+        self._emit("bid.changed", bid_id, change=what, old=old, new=new)
 
     def record_corrigendum(self, bid_id: int, note: str, new_closing: str | None, now: datetime, who: str = "") -> dict:
         """Writes down a corrigendum read on the portal by hand (for a tender the app cannot watch), optionally with the closing date it set."""
@@ -966,7 +993,7 @@ class BidBook:
                 raise BidError(f"That file does not look like a real {ext} file. Check that you chose the right one")
             self.vault_dir.mkdir(parents=True, exist_ok=True)
             stored = uuid.uuid4().hex + ext
-            (self.vault_dir / stored).write_bytes(data)
+            self.sealer.write_file(self.vault_dir / stored, data)
             size, shown = len(data), re.sub(r"[^\w.\- ()]", "_", Path(filename).name)[:120]
         with self.lock:
             cur = self.db.execute(
@@ -1009,6 +1036,44 @@ class BidBook:
         if self.vault_dir.resolve() not in path.parents or not path.is_file():
             return None
         return path, d["filename"] or d["stored"]
+
+    def vault_bytes(self, doc_id: int) -> tuple[bytes, str] | None:
+        """(content, file name) of a Vault file, decrypted. None when there is no file."""
+        found = self.vault_file(doc_id)
+        return (self.sealer.read_file(found[0]), found[1]) if found else None
+
+    def seal_existing(self) -> dict[str, int]:
+        """Encrypts files stored before a key was set, and re-encrypts files stored under an old key. Run at start. Returns how many of each."""
+        done = {"sealed": 0, "rotated": 0, "failed": 0}
+        if not self.sealer.enabled or not self.vault_dir or not self.vault_dir.is_dir():
+            return done
+        with self.lock:
+            stored = [r["stored"] for r in self.db.execute("SELECT stored FROM vault WHERE stored IS NOT NULL AND stored != ''")]
+        files = [self.vault_dir / n for n in stored]
+        if (self.vault_dir / "sources").is_dir():
+            files += sorted((self.vault_dir / "sources").glob("*"))
+        for f in files:
+            if not f.is_file() or f.name.endswith(".part"):
+                continue
+            try:
+                what = self.sealer.rotate_file(f)
+            except Exception:  # noqa: BLE001 - one unreadable file must not stop the rest
+                log.exception("could not encrypt %s", f.name)
+                done["failed"] += 1
+                continue
+            if what:
+                done[what] += 1
+        return done
+
+    def plain_files(self) -> int:
+        """How many stored files are not encrypted (what Settings shows once a key is set)."""
+        n = 0
+        if self.vault_dir and self.vault_dir.is_dir():
+            for f in self.vault_dir.rglob("*"):
+                if f.is_file() and not f.name.endswith(".part"):
+                    with open(f, "rb") as fh:
+                        n += 0 if fh.read(len(b"TNDENC1\n")) == b"TNDENC1\n" else 1
+        return n
 
 
 def default_vault_dir(state_path: str) -> Path:
