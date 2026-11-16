@@ -152,6 +152,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       </aside>
       <div className="content">
       {config.error && <div className="alert bad">{config.error}</div>}
+      {config.data?.storage_warning && <div className="alert bad" role="alert"><strong>Your data is not safe.</strong> {config.data.storage_warning}</div>}
       {config.data?.ai_enabled && (tab === 'dashboard' || tab === 'explore' || tab === 'tenders') && <div className="askwrap"><AskBar nav={nav} /></div>}
       <main id="main" tabIndex={-1}>
         {config.data && (

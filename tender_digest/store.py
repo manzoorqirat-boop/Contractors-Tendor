@@ -177,6 +177,7 @@ class SeenStore:
                   error TEXT, log TEXT NOT NULL DEFAULT '[]');
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS starred (key TEXT PRIMARY KEY, created TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, created REAL NOT NULL, last_seen REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS portal_status (
                   key TEXT PRIMARY KEY, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', checked TEXT NOT NULL,
                   departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
@@ -694,6 +695,38 @@ class SeenStore:
             return cur.rowcount
 
     # ---- saved settings ---------------------------------------------------------------------------------------
+
+    # ---- login sessions: kept here so that logging out, or going idle, really ends them ------------------------
+
+    def session_start(self, sid: str, now: float, keep_seconds: float) -> None:
+        with self.lock:
+            self.db.execute("DELETE FROM sessions WHERE created < ?", (now - keep_seconds,))
+            self.db.execute("INSERT OR REPLACE INTO sessions (sid, created, last_seen) VALUES (?, ?, ?)", (sid, now, now))
+            self.db.commit()
+
+    def session_touch(self, sid: str, now: float, idle_seconds: float) -> bool:
+        """True when the session exists and was used within `idle_seconds`. Records the use (not more than about once a minute)."""
+        with self.lock:
+            row = self.db.execute("SELECT last_seen FROM sessions WHERE sid = ?", (sid,)).fetchone()
+            if not row or now - row["last_seen"] > idle_seconds:
+                if row:
+                    self.db.execute("DELETE FROM sessions WHERE sid = ?", (sid,))
+                    self.db.commit()
+                return False
+            if now - row["last_seen"] > min(60, idle_seconds / 4):
+                self.db.execute("UPDATE sessions SET last_seen = ? WHERE sid = ?", (now, sid))
+                self.db.commit()
+            return True
+
+    def session_end(self, sid: str) -> None:
+        with self.lock:
+            self.db.execute("DELETE FROM sessions WHERE sid = ?", (sid,))
+            self.db.commit()
+
+    def ping(self) -> None:
+        """Raises when the database cannot be read."""
+        with self.lock:
+            self.db.execute("SELECT 1 FROM settings LIMIT 1").fetchone()
 
     def get_settings(self) -> dict[str, Any]:
         with self.lock:

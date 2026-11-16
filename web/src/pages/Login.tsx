@@ -106,7 +106,7 @@ export function Login({ onDone }: { onDone: () => void }) {
             {forgot && (
               <div className="alert warn lf-help" role="note">
                 <strong>Reset the password</strong>
-                <span>Ask your administrator. They can set a new one in the hosting dashboard (the <code>APP_PASSWORD</code> variable), and it works after the service restarts. The username is <code>APP_USERNAME</code>.</span>
+                <span>Contact your administrator. They can set a new password for you.</span>
               </div>
             )}
 

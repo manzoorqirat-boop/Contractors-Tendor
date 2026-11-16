@@ -166,11 +166,17 @@ function Card({ title, sub, children, explore, loading }: { title: string; sub: 
   );
 }
 
+/** "₹70.50 crore" is shown as a big amount with a smaller unit, so a long figure fits its card instead of being cut off. */
+function withUnit(value?: string) {
+  const m = value?.match(/^(.+?)\s+(crore|lakh)$/);
+  return m ? <>{m[1]}<span className="unit">{m[2]}</span></> : value;
+}
+
 function Kpi({ label, value, note, onClick, tone, loading }: { label: string; value?: string; note?: string; onClick?: () => void; tone?: 'warn' | 'good'; loading?: boolean }) {
   const body = loading ? <><div className="label">{label}</div><Skeleton h={30} w="60%" style={{ margin: '6px 0' }} /><Skeleton h={12} w="80%" /></> : (
     <>
       <div className="label">{label}</div>
-      <div className="num" style={tone === 'warn' ? { color: 'var(--warn)' } : undefined}>{value}</div>
+      <div className="num" style={tone === 'warn' ? { color: 'var(--warn)' } : undefined}>{withUnit(value)}</div>
       <div className={`note${tone === 'good' ? ' good' : ''}`}>{note}</div>
     </>
   );

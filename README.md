@@ -103,6 +103,9 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `MAIL_FROM_NAME` | Optional | Default `TendAI by QMSofts`. |
 | `COOKIE_SECURE` | Optional | Default `true`. Set `false` only for local testing without HTTPS. |
 | `TZ_NAME` | Optional | Default `Asia/Kolkata`. |
+| `SESSION_IDLE_HOURS` | Optional | Default `24`. A login unused for this long ends. Logins always end after 7 days. |
+| `TRUSTED_PROXY_HOPS` | Optional | Default `1` (Railway). How many proxies sit in front of the app; the caller's address is taken that many entries from the END of `X-Forwarded-For`. `0` ignores the header. |
+| `ALLOW_EPHEMERAL_STORAGE` | Optional | Set `true` to silence the "no volume" warning on Railway (not recommended: a redeploy then loses all data). |
 | `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
 | `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
 
@@ -130,8 +133,11 @@ AI can be wrong: check every figure and date on the portal before bidding.
 
 ## Security
 
-- Everything except the login and a health check needs the password. Cookies are `HttpOnly`, `SameSite=Strict`, signed, 7 days.
-- Wrong-password attempts are rate limited. Writes from other sites are refused.
+- Everything except the login and a health check needs the password. Cookies are `HttpOnly`, `SameSite=Strict` and signed.
+- Logins are kept on the server: **Log out ends the session for good** (a copied cookie stops working), a login unused for `SESSION_IDLE_HOURS` ends, and **changing `APP_PASSWORD` signs everyone out**.
+- Wrong-password attempts are limited per address (8 in 10 minutes). Many wrong guesses from many addresses only slow logins down; they never lock the owner out. Use a password of 12 or more characters.
+- Request bodies are capped: 16 MB on upload routes (a 10 MB file), 1 MB elsewhere. Writes from other sites are refused.
+- `/api/health` fails (503) when the database cannot be read or its folder is not writable, so Railway restarts the service. On Railway, the page shows a red notice if the database is not on a mounted volume.
 - Spreadsheet downloads neutralise cells that start with `=`, `+`, `-` or `@`, since tender text comes from outside.
 - Words typed in Settings are escaped, never used as patterns.
 - It is a single shared password, not per-user accounts. Do not put it in chat; set it only as a Railway variable.

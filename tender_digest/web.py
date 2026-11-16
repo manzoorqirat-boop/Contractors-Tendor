@@ -18,9 +18,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel
 
 from . import access, ai, appsettings, mailer
@@ -39,6 +41,10 @@ log = logging.getLogger("tender_digest.web")
 COOKIE = "td_session"
 SESSION_SECONDS = 7 * 24 * 3600
 MAX_EXPORT_ROWS = 20_000
+# Request size limits. Uploads travel as base64 inside JSON (a 10 MB file is about 13.4 MB), so those routes get more room; everything else is small.
+MAX_UPLOAD_BODY = 16 * 1024 * 1024
+MAX_JSON_BODY = 1024 * 1024
+UPLOAD_PATH_RE = re.compile(r"^/api/(vault|boq/catalogue|tenders/(document|manual(/read)?)|bids/\d+/(document|boq|risks))$")
 MAX_VIEWS = 30
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?)?$")
 # The settings a saved view may hold: the page's filters and display choices, nothing else.
@@ -87,12 +93,23 @@ class AppConfig:
     static_dir: Path | None = None
     run_scheduler: bool = True
     username: str = ""  # empty = any username accepted (tests); config_from_env defaults it to "admin"
+    idle_seconds: int = 24 * 3600  # a session unused for this long ends; it also ends after SESSION_SECONDS whatever happens
+    trusted_proxy_hops: int = 1  # how many reverse proxies sit in front (Railway: 1). 0 = ignore X-Forwarded-For
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
 
 
 def config_from_env() -> AppConfig:
     password = os.environ.get("APP_PASSWORD", "")
     if len(password) < 8:
         raise SystemExit("APP_PASSWORD must be set to a password of at least 8 characters. It protects the dashboard and the Run now button.")
+    if len(password) < 12:
+        log.warning("APP_PASSWORD is shorter than 12 characters. Use a longer one: it is the only thing between the internet and your bids.")
     key = os.environ.get("SECRET_KEY", "")
     if not key:
         key = secrets.token_hex(32)
@@ -100,6 +117,7 @@ def config_from_env() -> AppConfig:
     return AppConfig(
         password=password, secret_key=key, username=os.environ.get("APP_USERNAME", "admin").strip(), cookie_secure=os.environ.get("COOKIE_SECURE", "true").lower() not in ("0", "false", "no"),
         tz_name=os.environ.get("TZ_NAME", "Asia/Kolkata"),
+        idle_seconds=max(1, _int_env("SESSION_IDLE_HOURS", 24)) * 3600, trusted_proxy_hops=max(0, _int_env("TRUSTED_PROXY_HOPS", 1)),
         static_dir=Path(os.environ.get("STATIC_DIR") or Path(__file__).resolve().parent.parent / "web" / "dist"),
     )
 
@@ -110,28 +128,41 @@ def _sign(secret: str, payload: str) -> str:
     return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def make_token(secret: str, now: float | None = None) -> str:
-    payload = base64.urlsafe_b64encode(json.dumps({"exp": int((now or time.time()) + SESSION_SECONDS)}).encode()).decode()
+def make_token(secret: str, now: float | None = None, sid: str | None = None) -> str:
+    claims: dict[str, Any] = {"exp": int((now or time.time()) + SESSION_SECONDS)}
+    if sid:
+        claims["sid"] = sid
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode()
     return f"{payload}.{_sign(secret, payload)}"
 
 
-def valid_token(secret: str, token: str | None, now: float | None = None) -> bool:
+def token_claims(secret: str, token: str | None, now: float | None = None) -> dict[str, Any] | None:
+    """The token's contents when its signature is right and it has not expired, else None."""
     if not token or "." not in token:
-        return False
+        return None
     payload, sig = token.rsplit(".", 1)
     if not hmac.compare_digest(sig, _sign(secret, payload)):
-        return False
+        return None
     try:
-        return json.loads(base64.urlsafe_b64decode(payload.encode()))["exp"] > (now or time.time())
+        claims = json.loads(base64.urlsafe_b64decode(payload.encode()))
+        return claims if claims["exp"] > (now or time.time()) else None
     except (ValueError, KeyError, TypeError):
-        return False
+        return None
+
+
+def valid_token(secret: str, token: str | None, now: float | None = None) -> bool:
+    return token_claims(secret, token, now) is not None
 
 
 class LoginLimiter:
-    """Slows password guessing: per client address, and overall, since an address header can be faked."""
+    """Slows password guessing. One address that fails too often is blocked for a while.
 
-    def __init__(self, per_client: int = 8, overall: int = 40, window: int = 600):
-        self.per_client, self.overall, self.window = per_client, overall, window
+    Failures across all addresses only add a delay (`slow_seconds`) and never block: a block that anyone on the internet can
+    trigger would also lock the owner out.
+    """
+
+    def __init__(self, per_client: int = 8, overall: int = 40, window: int = 600, slow_seconds: float = 1.5):
+        self.per_client, self.overall, self.window, self.slow_seconds = per_client, overall, window, slow_seconds
         self.fails: list[tuple[float, str]] = []
 
     def _recent(self, now: float) -> list[tuple[float, str]]:
@@ -139,15 +170,100 @@ class LoginLimiter:
         return self.fails
 
     def blocked(self, client: str, now: float | None = None) -> bool:
-        now = now or time.time()
-        recent = self._recent(now)
-        return len(recent) >= self.overall or sum(1 for _, c in recent if c == client) >= self.per_client
+        return sum(1 for _, c in self._recent(now or time.time()) if c == client) >= self.per_client
+
+    def under_attack(self, now: float | None = None) -> bool:
+        return len(self._recent(now or time.time())) >= self.overall
 
     def failed(self, client: str, now: float | None = None) -> None:
         self.fails.append((now or time.time(), client))
 
     def succeeded(self, client: str) -> None:
         self.fails = [(t, c) for t, c in self.fails if c != client]
+
+
+class BodyLimit:
+    """Refuses oversized request bodies before they are read into memory (by Content-Length, and by counting when there is none)."""
+
+    class TooLarge(BaseException):  # not an Exception: FastAPI turns those, raised while it reads a body, into a vague 400
+        pass
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["method"] in ("GET", "HEAD", "OPTIONS"):
+            return await self.app(scope, receive, send)
+        limit = MAX_UPLOAD_BODY if UPLOAD_PATH_RE.match(scope["path"]) else MAX_JSON_BODY
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None:
+            try:
+                too_big = int(declared) > limit
+            except ValueError:
+                return await self._refuse(send, 400, "Bad Content-Length")
+            if too_big:
+                return await self._refuse(send, 413, f"That request is too large (the limit here is {limit // (1024 * 1024) or 1} MB)")
+        seen, started = 0, False
+
+        async def counted() -> Message:
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > limit:
+                    raise BodyLimit.TooLarge
+            return message
+
+        async def watched(message: Message) -> None:
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, counted, watched)
+        except BaseException as e:  # noqa: BLE001 - also reached through an ExceptionGroup from the framework's task group
+            if not _holds(e, BodyLimit.TooLarge):
+                raise
+            if not started:
+                await self._refuse(send, 413, "That request is too large")
+
+    @staticmethod
+    async def _refuse(send: Send, status: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}).encode()
+        await send({"type": "http.response.start", "status": status, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()), (b"x-content-type-options", b"nosniff")]})
+        await send({"type": "http.response.body", "body": body})
+
+
+def _holds(exc: BaseException, kind: type[BaseException]) -> bool:
+    if isinstance(exc, kind):
+        return True
+    return any(_holds(e, kind) for e in getattr(exc, "exceptions", ()))
+
+
+def storage_warning(state_path: str, environ: dict[str, str] | None = None) -> str:
+    """On Railway, says so when the database is not on a mounted volume: it would be wiped by every redeploy. Empty when all is well."""
+    environ = os.environ if environ is None else environ
+    if state_path == ":memory:" or environ.get("ALLOW_EPHEMERAL_STORAGE", "").lower() in ("1", "true", "yes"):
+        return ""
+    if not any(k.startswith("RAILWAY_") for k in environ):
+        return ""
+    mount = environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+    if not mount:
+        return "No volume is attached to this service, so tenders, bids and vault files are lost at every redeploy. Add a Railway Volume mounted at /data."
+    try:
+        Path(state_path).expanduser().resolve().relative_to(Path(mount).resolve())
+    except ValueError:
+        return f"The database is not stored on the volume mounted at {mount}, so it is lost at every redeploy. Set STATE_PATH to a file under {mount}."
+    return ""
+
+
+def storage_ok(store: SeenStore, state_path: str) -> bool:
+    """Can the database be read, and is its folder writable?"""
+    try:
+        store.ping()
+    except Exception:  # noqa: BLE001
+        return False
+    return state_path == ":memory:" or os.access(Path(state_path).expanduser().resolve().parent, os.W_OK)
 
 
 class LoginBody(BaseModel):
@@ -289,6 +405,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     scheduler = Scheduler(manager) if config.run_scheduler else None
     limiter = LoginLimiter()
+    # Cookies are signed with the secret AND the password, so changing APP_PASSWORD signs everyone out.
+    signing_key = hashlib.sha256(f"{config.secret_key}\0{config.password}".encode()).hexdigest()
+    storage_note = storage_warning(env.state_path)
+    if storage_note:
+        log.warning(storage_note)
     probe = prober or access.probe
     builtin_keys = {p.key for p in env.portals}
     # Portals typed into the page are saved in the database, so these lookups are refilled (in place) whenever they change.
@@ -346,12 +467,24 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    app.add_middleware(BodyLimit)  # added last, so it is the outermost layer and refuses a big body before anything reads it
+
     def client_of(request: Request) -> str:
-        fwd = request.headers.get("x-forwarded-for", "")
-        return (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "?")) or "?"
+        """The caller's address. Each proxy in front appends the address it saw, so the entry to trust is counted from the END of
+        X-Forwarded-For; anything a caller puts at the start of the header is ignored."""
+        hops = config.trusted_proxy_hops
+        chain = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if hops and len(chain) >= hops:
+            return chain[-hops]
+        return (request.client.host if request.client else "") or "?"
+
+    def session_ok(request: Request) -> bool:
+        claims = token_claims(signing_key, request.cookies.get(COOKIE))
+        sid = claims.get("sid") if claims else None
+        return bool(isinstance(sid, str) and store.session_touch(sid, time.time(), config.idle_seconds))
 
     def require_login(request: Request) -> None:
-        if not valid_token(config.secret_key, request.cookies.get(COOKIE)):
+        if not session_ok(request):
             raise HTTPException(401, "Please log in")
 
     auth = [Depends(require_login)]
@@ -362,7 +495,10 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     # ---- auth ------------------------------------------------------------------------------------------------
 
     @app.get("/api/health")
-    def health() -> dict:
+    def health():
+        # Public, so it says only yes or no. Railway restarts the service when this fails.
+        if not storage_ok(store, env.state_path):
+            return JSONResponse({"ok": False}, status_code=503)
         return {"ok": True}
 
     @app.post("/api/login")
@@ -370,17 +506,24 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         client = client_of(request)
         if limiter.blocked(client):
             raise HTTPException(429, "Too many wrong attempts. Wait a few minutes and try again.")
+        if limiter.under_attack():
+            time.sleep(limiter.slow_seconds)  # many wrong guesses from many addresses: slow everyone down, lock nobody out
         user_ok = not config.username or hmac.compare_digest(body.username.strip().lower().encode(), config.username.lower().encode())
         pass_ok = hmac.compare_digest(body.password.encode(), config.password.encode())
         if not (user_ok and pass_ok):
             limiter.failed(client)
             raise HTTPException(401, "Wrong username or password")
         limiter.succeeded(client)
-        response.set_cookie(COOKIE, make_token(config.secret_key), max_age=SESSION_SECONDS, httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
+        sid = secrets.token_urlsafe(24)
+        store.session_start(sid, time.time(), SESSION_SECONDS)
+        response.set_cookie(COOKIE, make_token(signing_key, sid=sid), max_age=SESSION_SECONDS, httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
         return {"ok": True}
 
     @app.post("/api/logout")
-    def logout(response: Response) -> dict:
+    def logout(request: Request, response: Response) -> dict:
+        claims = token_claims(signing_key, request.cookies.get(COOKIE))
+        if claims and isinstance(claims.get("sid"), str):
+            store.session_end(claims["sid"])  # the cookie stops working for good, even if someone copied it
         response.delete_cookie(COOKIE, path="/")
         return {"ok": True}
 
@@ -391,7 +534,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     @app.get("/api/me")
     def me(request: Request) -> dict:
-        return {"authenticated": valid_token(config.secret_key, request.cookies.get(COOKIE))}
+        return {"authenticated": session_ok(request)}
 
     # ---- data ------------------------------------------------------------------------------------------------
 
@@ -430,7 +573,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             "mail_configured": manager.mail_configured, "recipient_count": len(cur["recipients"]),
             "now": now().isoformat(timespec="seconds"), "timezone": config.tz_name,
             "dimensions": [{"key": k, "label": d["label"], "time": isinstance(d["order"], str) and d["order"] in ("first", "last")} for k, d in DIMENSIONS.items()],
-            "soon_days": env.closing_soon_days, "ai_enabled": ai.configured(),
+            "soon_days": env.closing_soon_days, "ai_enabled": ai.configured(), "storage_warning": storage_note,
         }
 
     @app.get("/api/stats", dependencies=auth)
@@ -565,7 +708,22 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             raise HTTPException(422, f"{label} should look like 2026-12-02 15:00") from None
         if not 2000 <= d.year <= 2100:
             raise HTTPException(422, f"{label} is not a believable date")
+        if d.tzinfo is not None:  # "...Z" or "+00:00": convert to local time, do not just drop the offset
+            d = d.astimezone(ZoneInfo(config.tz_name))
         return d.replace(tzinfo=None)
+
+    def check_listing(published: datetime | None, closing: datetime | None, opening: datetime | None, value: float | None, emd: float | None) -> None:
+        """Rules between the fields of a hand-added tender. Each message says what to change."""
+        if published and closing and published > closing:
+            raise HTTPException(422, "The publish date is after the closing date. Check both dates")
+        if opening and closing and opening < closing:
+            raise HTTPException(422, "Bids cannot open before the tender closes. Check the opening and closing dates")
+        if value is not None and emd is not None and emd > value:
+            raise HTTPException(422, "The EMD is larger than the tender value. Check both amounts")
+
+    def check_tender_id(tid: str) -> None:
+        if re.search(r"[<>\x00-\x1f\x7f]", tid):
+            raise HTTPException(422, "The Tender ID cannot contain < or > or control characters. Copy it exactly as the portal shows it")
 
     def clean_money(v: float | None, label: str) -> float | None:
         if v is None:
@@ -595,13 +753,19 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         closing = when_or_422(body.closing, "The closing date")
         if closing is None:
             raise HTTPException(422, "The closing date is needed, so deadlines and reminders work")
+        check_tender_id(tid)
+        if closing <= now():
+            raise HTTPException(422, "The closing date has already passed. Bids can no longer be filed, so check the date")
         if store.find_by_tender_id(tid):
             raise HTTPException(409, "A tender with this ID is already in the app. Open it from the Tenders page instead of adding it again")
         desc = body.description.strip()[:500]
+        published, opening = when_or_422(body.published, "The publish date"), when_or_422(body.opening, "The opening date")
+        value, emd = clean_money(body.value, "The value"), clean_money(body.emd, "The EMD")
+        check_listing(published, closing, opening, value, emd)
         t = Tender(portal="manual", tender_id=tid, title=(body.title.strip() or desc)[:160], reference=body.reference.strip()[:120], organisation=body.organisation.strip()[:300],
-                   published=when_or_422(body.published, "The publish date"), closing=closing, opening=when_or_422(body.opening, "The opening date"),
-                   description=desc or body.title.strip()[:500], category="", value=clean_money(body.value, "The value"), location=body.location.strip()[:120],
-                   emd=clean_money(body.emd, "The EMD"), extra={"portal_name": body.portal_name.strip()[:80]})
+                   published=published, closing=closing, opening=opening,
+                   description=desc or body.title.strip()[:500], category="", value=value, location=body.location.strip()[:120],
+                   emd=emd, extra={"portal_name": body.portal_name.strip()[:80]})
         store.keep(t, now())
         store.mark_emailed([t.key])  # you added it yourself: it does not belong in "new since the last digest"
         keep_source(t.key, body.text, body.pdf_base64)
@@ -627,6 +791,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.patch("/api/tenders/manual", dependencies=auth)
     def manual_edit(body: ManualEdit, key: str = Query(..., max_length=300)) -> dict:
         t = manual_or_404(key)
+        old_closing = t.closing
         changed: dict[str, Any] = {}
         for f in ("title", "description", "reference", "organisation", "location"):
             v = getattr(body, f)
@@ -650,6 +815,9 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 changed[f] = getattr(t, f)
         if not (t.title or t.description):
             raise HTTPException(422, "Give the work a name or description")
+        if t.closing != old_closing and t.closing and t.closing <= now():
+            raise HTTPException(422, "The closing date has already passed. Bids can no longer be filed, so check the date")
+        check_listing(t.published, t.closing, t.opening, t.value, t.emd)
         store.keep(t, now())
         bids.sync_listing(key, changed)
         return {"key": key}
@@ -1229,7 +1397,7 @@ def main() -> None:
     store = SeenStore(env.state_path)
     app = create_app(config, env, store)
     # One worker only: the scheduler and the run lock live in this process.
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), proxy_headers=True, forwarded_allow_ips="*", log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), proxy_headers=False, log_level="info")  # X-Forwarded-For is read (from the end) by client_of
 
 
 if __name__ == "__main__":
