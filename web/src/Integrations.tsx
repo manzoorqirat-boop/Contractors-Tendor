@@ -155,8 +155,34 @@ function WebhooksCard() {
   );
 }
 
+function SsoCard() {
+  const toast = useToast();
+  const info = useLoad(() => api.ssoInfo(), []);
+  const d = info.data;
+  async function copy(text: string) { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch { toast('Could not copy', 'bad'); } }
+  return (
+    <section className="card" style={{ gridColumn: '1 / -1' }}>
+      <h2>Single sign-on {d && <span className={`badge ${d.enabled ? 'ok' : 'plain'}`} style={{ marginLeft: 6 }}>{d.enabled ? 'On' : 'Not set up'}</span>}</h2>
+      {info.loading && !d && <Skeleton h={40} />}
+      {d?.problem && <div className="alert bad" role="alert">Single sign-on is not active: {d.problem}.</div>}
+      {d && !d.enabled && !d.problem && (
+        <p className="sub">Lets people sign in with the company's Google Workspace, Microsoft Entra ID, Okta or Keycloak account instead of a separate password. Your administrator sets <code>SSO_ISSUER</code>, <code>SSO_CLIENT_ID</code>, <code>SSO_CLIENT_SECRET</code> and <code>SSO_ALLOWED_DOMAINS</code> on the server (see the README). The owner login always keeps working with its password.</p>
+      )}
+      {d?.enabled && (
+        <>
+          <p className="sub">People at <strong>{d.allowed_domains.join(', ') || 'no domain yet (set SSO_ALLOWED_DOMAINS)'}</strong> can sign in through <strong>{d.issuer}</strong>. A new person is created as <strong>{d.default_role}</strong>; change their role in People. The provider's own sign-in (and its two-step check) replaces this app's password and code for them. Switching a person off here keeps them out.</p>
+          <dl className="facts">
+            <dt>Redirect address to register with the provider</dt><dd className="mono">{d.redirect_uri} <button type="button" className="link-btn" onClick={() => copy(d.redirect_uri)}>Copy</button></dd>
+            <dt>Client ID</dt><dd className="mono">{d.client_id}</dd>
+          </dl>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function IntegrationsPanel() {
-  return <div className="set-grid"><TokensCard /><WebhooksCard /></div>;
+  return <div className="set-grid"><SsoCard /><TokensCard /><WebhooksCard /></div>;
 }
 
 /** How long data is kept, and whether files and secrets are encrypted. Retention saves on its own button. */

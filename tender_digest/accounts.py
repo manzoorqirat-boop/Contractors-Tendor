@@ -72,7 +72,7 @@ class Principal:
 
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
 
-_ADMIN_AREAS = re.compile(r"^/api/(users|audit|backup|settings|calendar|tokens|webhooks|sample-data)(/|$)")
+_ADMIN_AREAS = re.compile(r"^/api/((users|audit|backup|settings|calendar|tokens|webhooks|sample-data)(/|$)|sso/info$|portals/[^/]+/sample$)")
 _VAULT_FILE = re.compile(r"^/api/(vault/\d+/file|bids/\d+/pack)$")
 
 
@@ -197,7 +197,7 @@ class Accounts:
                   token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created REAL NOT NULL, expires REAL NOT NULL);
                 """)
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(users)")}
-            for col, kind in (("totp_secret", "TEXT"), ("totp_on", "INTEGER NOT NULL DEFAULT 0"), ("totp_last", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT NOT NULL DEFAULT ''")):
+            for col, kind in (("totp_secret", "TEXT"), ("sso_sub", "TEXT"), ("totp_on", "INTEGER NOT NULL DEFAULT 0"), ("totp_last", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT NOT NULL DEFAULT ''")):
                 if col not in have:
                     self.db.execute(f"ALTER TABLE users ADD COLUMN {col} {kind}")
             self.db.commit()
@@ -316,8 +316,9 @@ class Accounts:
 
     def list(self) -> list[dict[str, Any]]:
         with self.lock:
-            rows = self.db.execute("SELECT id, username, name, role, active, must_change, created, last_login, totp_on, email FROM users ORDER BY active DESC, username").fetchall()
-        return [{**{k: v for k, v in dict(r).items() if k != "totp_on"}, "active": bool(r["active"]), "must_change": bool(r["must_change"]), "two_step": bool(r["totp_on"])} for r in rows]
+            rows = self.db.execute("SELECT id, username, name, role, active, must_change, created, last_login, totp_on, email, sso_sub FROM users ORDER BY active DESC, username").fetchall()
+        return [{**{k: v for k, v in dict(r).items() if k not in ("totp_on", "sso_sub")}, "active": bool(r["active"]), "must_change": bool(r["must_change"]), "two_step": bool(r["totp_on"]),
+                 "sso": bool(r["sso_sub"])} for r in rows]
 
     def exists(self, username: str) -> bool:
         with self.lock:
@@ -387,6 +388,34 @@ class Accounts:
         with self.lock:
             self.db.execute("UPDATE users SET pw_hash = ?, must_change = 0 WHERE id = ?", (hash_password(new), user_id))
             self.db.commit()
+
+    # -- single sign-on --
+
+    def sso_login(self, who: dict[str, str], default_role: str, now: datetime) -> Principal:
+        """The person an SSO sign-in belongs to. Found by their provider id, else matched to an account with the same email (and linked), else created
+        with the default role and no local password. A switched-off account stays switched off."""
+        with self.lock:
+            r = self.db.execute("SELECT * FROM users WHERE sso_sub = ?", (who["sub"],)).fetchone()
+            if r is None:
+                r = self.db.execute("SELECT * FROM users WHERE email = ? AND email != '' AND (sso_sub IS NULL OR sso_sub = '') ORDER BY active DESC LIMIT 1", (who["email"],)).fetchone()
+                if r is not None:
+                    self.db.execute("UPDATE users SET sso_sub = ? WHERE id = ?", (who["sub"], r["id"]))
+                    self.db.commit()
+            if r is not None:
+                if not r["active"]:
+                    raise AccountError("Your account is switched off. Ask an administrator")
+                return self._principal(r)
+        base = re.sub(r"[^a-z0-9._-]+", "", who["email"].split("@")[0].lower()).lstrip("._-")[:34] or "user"
+        name = base if len(base) >= 3 else base + "-sso"
+        n = 1
+        while self.exists(name):
+            n += 1
+            name = f"{base[:34]}{n}"
+        with self.lock:
+            cur = self.db.execute("INSERT INTO users (username, name, role, pw_hash, active, must_change, created, email, sso_sub) VALUES (?,?,?,?,1,0,?,?,?)",
+                                  (name, who["name"] or name, default_role if default_role in ("viewer", "bidder") else "viewer", "!", now.isoformat(timespec="seconds"), who["email"], who["sub"]))
+            self.db.commit()
+            return self._principal(self.db.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone())
 
     # -- forgotten passwords: a link by email, good for an hour and for one use --
 
@@ -527,6 +556,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/account/2fa/disable"): "Turned off two-step sign-in",
     ("POST", "/api/account/sessions/end-others"): "Signed out other devices",
     ("GET", "/api/backup"): "Downloaded a backup",
+    ("GET", "/api/portals/{key}/sample"): "Downloaded a sample of what a portal returns",
     ("POST", "/api/sample-data"): "Loaded sample tenders",
     ("DELETE", "/api/sample-data"): "Removed the sample tenders",
     ("GET", "/api/account/export"): "Downloaded own data",

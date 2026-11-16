@@ -4,9 +4,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
-from . import filters
+from . import filters, gem
 from .config import Portal, Settings
 from .gepnic import GepnicClient, PortalError, Tender, apply_detail
 from .store import SeenStore
@@ -30,13 +30,16 @@ class PortalReport:
         return self.organisations_read == 0 and bool(self.errors)
 
 
-ClientFactory = Callable[[Portal, Settings], GepnicClient]
+ClientFactory = Callable[[Portal, Settings], Any]
 Progress = Callable[[str], None]
 # Called with (tender, client) for a tender already known, so the bid workspace can look again at tenders being bid for.
-Watcher = Callable[[Tender, GepnicClient], None]
+Watcher = Callable[[Tender, Any], None]
 
 
-def default_client(portal: Portal, settings: Settings) -> GepnicClient:
+def default_client(portal: Portal, settings: Settings):
+    """The reader for a portal: GeM has its own, everything else is NIC GePNIC software."""
+    if gem.is_gem(portal.base_url):
+        return gem.GemClient(portal.base_url, delay=settings.request_delay)
     return GepnicClient(portal.base_url, delay=settings.request_delay)
 
 
@@ -65,7 +68,7 @@ def collect(
 
 
 def _collect_portal(
-    portal: Portal, settings: Settings, client: GepnicClient, store: SeenStore, now: datetime, report: PortalReport, say: Progress,
+    portal: Portal, settings: Settings, client: Any, store: SeenStore, now: datetime, report: PortalReport, say: Progress,
     watcher: Watcher | None = None,
 ) -> None:
     include = portal.org_include or settings.org_include

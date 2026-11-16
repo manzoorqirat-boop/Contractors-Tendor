@@ -236,7 +236,7 @@ export function UsersPanel() {
                         {data.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
                       </select>}</td>
                   <td className="muted">{u.owner ? 'Server login' : when(u.last_login)}</td>
-                  <td>{u.active ? (u.must_change ? <span className="badge warn">Must choose a password</span> : <span className="badge ok">Active</span>) : <span className="badge plain">Switched off</span>}{u.two_step && <span className="badge accent" style={{ marginLeft: 6 }} title="Signs in with a code from an authenticator app">Two-step</span>}</td>
+                  <td>{u.active ? (u.must_change ? <span className="badge warn">Must choose a password</span> : <span className="badge ok">Active</span>) : <span className="badge plain">Switched off</span>}{u.two_step && <span className="badge accent" style={{ marginLeft: 6 }} title="Signs in with a code from an authenticator app">Two-step</span>}{u.sso && <span className="badge accent" style={{ marginLeft: 6 }} title="Signs in through the company's single sign-on">SSO</span>}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {!u.owner && (resetting === u.id
                       ? <span style={{ display: 'inline-flex', gap: 6 }}>

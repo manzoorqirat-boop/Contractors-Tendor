@@ -177,6 +177,9 @@ def _compact(text: str) -> str:
 
 def locate_on_portal(client: Any, portal_key: str, organisation: str, tender_id: str) -> Any | None:
     """Finds a tender again in a fresh portal session (its old links expired). Reads only the departments whose name matches the bid's."""
+    direct = getattr(client, "find", None)  # a portal with no department list (GeM) can look a bid up by its number
+    if direct:
+        return direct(portal_key, tender_id)
     chain = [c for c in (organisation or "").split("||") if c.strip()]
     first = _compact(chain[0]) if chain else ""
     whole = _compact(" ".join(chain))

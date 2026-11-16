@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -149,6 +149,8 @@ export const api = {
   calendar: () => call<{ enabled: boolean; url: string }>('/api/calendar'),
   newCalendarToken: () => call<{ enabled: boolean; url: string }>('/api/calendar/token', { method: 'POST' }),
   stopCalendar: () => call<{ enabled: boolean; url: string }>('/api/calendar', { method: 'DELETE' }),
+  ssoStatus: () => call<{ enabled: boolean; button_text: string }>('/api/sso/status'),
+  ssoInfo: () => call<SsoInfo>('/api/sso/info'),
   requestReset: (who: string) => call<{ ok: boolean; message: string }>('/api/password-reset/request', { method: 'POST', body: JSON.stringify({ who }) }),
   confirmReset: (token: string, password: string) => call<{ ok: boolean }>('/api/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token, password }) }),
   mySessions: () => call<{ sessions: Device[] }>('/api/account/sessions'),

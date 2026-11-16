@@ -359,6 +359,13 @@ class GepnicClient:
             raise PortalError("the document is over 10 MB", "unreachable")
         return data, r.headers.get("Content-Type", "")
 
+    def sample(self) -> tuple[str, bytes]:
+        """What the portal's department page returns, exactly as received (never cookies), so a reader can be corrected from real data."""
+        response = self._request(urljoin(self.base + "/", "app?page=FrontEndTendersByOrganisation&service=page"))
+        if response.status_code != 200:
+            raise PortalError(f"HTTP {response.status_code} from the portal", "blocked" if response.status_code in (401, 403) else "unreachable")
+        return response.headers.get("Content-Type", "text/html"), response.content[:200_000]
+
     def detail_page(self, tender: Tender) -> tuple[dict[str, str], list[str]]:
         """One fetch of the detail page: its label/value pairs and its corrigenda. Used to watch tenders you are bidding for."""
         html = self._get(tender.detail_path)
