@@ -553,7 +553,7 @@ class SeenStore:
                 args.append(parsed.max_value)
             fts = smartsearch.fts_query(parsed) if FTS_OK else None
             if parsed.has_text and fts:
-                where.append("rowid IN (SELECT rowid FROM seen_fts WHERE seen_fts MATCH ?)")
+                where.append("seen.rowid IN (SELECT rowid FROM seen_fts WHERE seen_fts MATCH ?)")
                 args.append(fts)
             elif parsed.has_text:  # nothing but "leave this out" words, or no full-text index: match row by row
                 where.append("tsmatch(" + " || ' ' || ".join(f"COALESCE({c}, '')" for c in FTS_COLUMNS) + ", ?) = 1")
@@ -613,7 +613,7 @@ class SeenStore:
         fts = self._fts_expr(filters.get("q")) if sort == "relevance" else None
         if sort == "relevance" and fts:
             # best text match first: title matters most, then the Tender ID, then department and description (lower bm25 is better)
-            join = " LEFT JOIN (SELECT rowid AS rid, bm25(seen_fts, 8.0, 2.0, 3.0, 6.0, 1.0, 1.5) AS rk FROM seen_fts WHERE seen_fts MATCH ?) r ON r.rid = seen.rowid"
+            join = " LEFT JOIN (SELECT seen_fts.rowid AS rid, bm25(seen_fts, 8.0, 2.0, 3.0, 6.0, 1.0, 1.5) AS rk FROM seen_fts WHERE seen_fts MATCH ?) r ON r.rid = seen.rowid"
             join_args = [fts]
             order = "(r.rk IS NULL), r.rk ASC, closing ASC"
         else:
