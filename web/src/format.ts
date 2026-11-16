@@ -18,6 +18,17 @@ export function fmtDate(iso: string | null | undefined, withTime = false): strin
   return `${date}, ${h12}:${String(p.mi).padStart(2, '0')} ${p.h >= 12 ? 'PM' : 'AM'}`;
 }
 
+/** True when reading a numeric date the wrong way round (day and month swapped) would still give a real date: 05-11-2026 can be 5 Nov or 11 May. */
+export function ambiguousDate(iso: string): boolean {
+  const p = parts(iso);
+  return !!p && p.d <= 12 && p.d !== p.mo;
+}
+
+/** The date spelled out under a date picker, but only when the picker's numbers could be misread; otherwise nothing, so the same date is not shown twice. */
+export function dateSay(iso: string, withTime = false): string | null {
+  return iso && ambiguousDate(iso) ? fmtDate(iso, withTime) : null;
+}
+
 export function fmtDay(iso: string): string {
   const p = parts(iso);
   return p ? `${p.d} ${MONTHS[p.mo - 1]}` : iso;
