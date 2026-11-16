@@ -4,7 +4,7 @@ import { api } from '../api';
 import { BriefView, readBase64, useAiStatus } from '../ai';
 import { BoqCard, RiskCard } from '../Boq';
 import { PriceAdvisor } from '../PriceAdvisor';
-import { chain, fmtDate, headline, inr, parseMoney, plural, relative } from '../format';
+import { chain, dateSay, fmtDate, headline, inr, parseMoney, plural, relative } from '../format';
 import { useLoad, useServerNow } from '../hooks';
 import { BidProgress } from '../BidProgress';
 import { AssigneeSelect, MyWork, TeamTab } from '../Team';
@@ -176,7 +176,7 @@ function DateField({ label, value, time, onSave }: { label: string; value: strin
   return (
     <label className="field-inline">{label}
       <input type={time ? 'datetime-local' : 'date'} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => commit(v)} onKeyDown={(e) => { if (e.key === 'Enter') commit(v); }} />
-      {v && <span className="date-say" aria-hidden>{fmtDate(v, !!time)}</span>}
+      {dateSay(v, !!time) && <span className="date-say" aria-hidden>{dateSay(v, !!time)}</span>}
     </label>
   );
 }

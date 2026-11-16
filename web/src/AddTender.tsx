@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { readBase64, useAiStatus } from './ai';
-import { fmtDate, inr, parseMoney } from './format';
+import { dateSay, inr, parseMoney } from './format';
 import { Drawer, Skeleton, useToast } from './ui';
 import { useConfirm } from './confirm';
 
@@ -171,9 +171,9 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
             <label className="field-inline">EMD (₹)<input data-field="emd" inputMode="decimal" value={form.emd} onChange={(e) => set({ emd: e.target.value })} {...a11y('emd')} /><Msg k="emd" /></label>
           </div>
           <div className="ws-grid" style={{ marginTop: 10 }}>
-            <label className="field-inline">Bid closes <span className="req">(required)</span><input data-field="closing" type="datetime-local" value={form.closing} onChange={(e) => { set({ closing: e.target.value }); setAssumed((a) => ({ ...a, closing: false })); }} {...a11y('closing')} />{form.closing && <span className="date-say" aria-hidden>{fmtDate(form.closing, true)}</span>}<Msg k="closing" /></label>
-            <label className="field-inline">Bids open<input data-field="opening" type="datetime-local" value={form.opening} onChange={(e) => { set({ opening: e.target.value }); setAssumed((a) => ({ ...a, opening: false })); }} {...a11y('opening')} />{form.opening && <span className="date-say" aria-hidden>{fmtDate(form.opening, true)}</span>}<Msg k="opening" /></label>
-            <label className="field-inline">Published<input data-field="published" type="datetime-local" value={form.published} onChange={(e) => set({ published: e.target.value })} {...a11y('published')} />{form.published && <span className="date-say" aria-hidden>{fmtDate(form.published, true)}</span>}<Msg k="published" /></label>
+            <label className="field-inline">Bid closes <span className="req">(required)</span><input data-field="closing" type="datetime-local" value={form.closing} onChange={(e) => { set({ closing: e.target.value }); setAssumed((a) => ({ ...a, closing: false })); }} {...a11y('closing')} />{dateSay(form.closing, true) && <span className="date-say" aria-hidden>{dateSay(form.closing, true)}</span>}<Msg k="closing" /></label>
+            <label className="field-inline">Bids open<input data-field="opening" type="datetime-local" value={form.opening} onChange={(e) => { set({ opening: e.target.value }); setAssumed((a) => ({ ...a, opening: false })); }} {...a11y('opening')} />{dateSay(form.opening, true) && <span className="date-say" aria-hidden>{dateSay(form.opening, true)}</span>}<Msg k="opening" /></label>
+            <label className="field-inline">Published<input data-field="published" type="datetime-local" value={form.published} onChange={(e) => set({ published: e.target.value })} {...a11y('published')} />{dateSay(form.published, true) && <span className="date-say" aria-hidden>{dateSay(form.published, true)}</span>}<Msg k="published" /></label>
           </div>
           {(assumed.closing || assumed.opening) && <p className="muted small" style={{ marginTop: 8 }}>The notice gave a date without a time, so 17:00 is filled in. Please set the real time.</p>}
           {!editKey && hasNotice && aiOn && <label className="check" style={{ marginTop: 12 }}><input type="checkbox" checked={readDoc} onChange={(e) => setReadDoc(e.target.checked)} /><span>Also read the notice for requirements and documents to submit</span></label>}
