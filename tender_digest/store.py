@@ -177,6 +177,7 @@ class SeenStore:
                   error TEXT, log TEXT NOT NULL DEFAULT '[]');
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS starred (key TEXT PRIMARY KEY, created TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, created REAL NOT NULL, last_seen REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS portal_status (
                   key TEXT PRIMARY KEY, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', checked TEXT NOT NULL,
@@ -435,6 +436,18 @@ class SeenStore:
             r = self.db.execute(
                 "SELECT SUM(ai_profile IS NOT NULL), SUM(ai_profile IS NULL) FROM seen WHERE civil = 1 AND (closing IS NULL OR closing >= ?)", (now.isoformat(),)).fetchone()
         return {"labelled": r[0] or 0, "unlabelled": r[1] or 0}
+
+    def ai_usage_today(self, day: str) -> int:
+        with self.lock:
+            r = self.db.execute("SELECT calls FROM ai_usage WHERE day = ?", (day,)).fetchone()
+        return r["calls"] if r else 0
+
+    def ai_usage_add(self, day: str, n: int = 1) -> int:
+        with self.lock:
+            self.db.execute("INSERT INTO ai_usage (day, calls) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET calls = calls + excluded.calls", (day, n))
+            self.db.execute("DELETE FROM ai_usage WHERE day < date(?, '-60 day')", (day,))
+            self.db.commit()
+        return self.ai_usage_today(day)
 
     def ai_info(self, keys: list[str]) -> dict[str, dict]:
         if not keys:

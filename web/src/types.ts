@@ -20,7 +20,7 @@ export interface Brief { recommendation: 'Bid' | 'Maybe' | 'No bid'; headline: s
 export interface DocFacts { summary: string; requirements: string[]; financial: { label: string; value: string }[]; dates: { label: string; value: string }[]; documents: string[]; penalties: string[]; red_flags: string[] }
 export interface Related { key: string; tender_id: string; title: string; closing: string | null; first_seen: string; value: number | null; similarity: number }
 export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[]; bid_id?: number | null; history?: string[]; manual?: boolean; has_source?: boolean }
-export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number }
+export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number; calls_today?: number; daily_limit?: number }
 export interface AskResult { filters: Record<string, unknown>; sort: string | null; explanation: string }
 export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[] }
 

@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 4 * * 1"                    # weekly: new security advisories appear for versions that were clean last week
 
 permissions:
   contents: read
@@ -50,19 +52,41 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
+  audit:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Python packages
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt -r requirements-dev.txt
+      - name: Web packages (the ones shipped to the browser)
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+
   docker:
     name: Docker image builds
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [backend, web]                   # only once the cheaper checks pass
+    needs: [backend, web, audit]            # only once the cheaper checks pass
     steps:
       - uses: actions/checkout@v4
       - name: Build
         run: docker build -t tender-digest:ci .
       - name: Smoke test the running container
         run: |
-          docker run -d --name app -p 8080:8080 \
-            -e PORT=8080 -e STATE_PATH=/tmp/state.db \
+          # A named volume is created owned by root, like a Railway volume: the entrypoint has to hand it to the unprivileged user.
+          docker volume create smoke-data
+          docker run -d --name app -p 8080:8080 -v smoke-data:/data \
+            -e PORT=8080 \
             -e APP_PASSWORD=ci-smoke-password -e SECRET_KEY=ci-smoke-secret -e COOKIE_SECURE=false \
             tender-digest:ci
           for i in $(seq 1 40); do
@@ -72,6 +96,11 @@ jobs:
           fail() { echo "SMOKE TEST FAILED: $1"; docker logs app; exit 1; }
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/health)" = "200" ] || fail "app did not answer /api/health"
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)" = "200" ] || fail "web page is not served at /"
+          uid=$(docker exec app awk '/^Uid:/ {print $2}' /proc/1/status)
+          [ "$uid" != "0" ] || fail "the app is running as root (uid $uid)"
+          [ "$(docker exec app stat -c %u /data/tender_state.db)" = "$uid" ] || fail "the database on the volume is not owned by the app user"
+          for i in $(seq 1 20); do [ "$(docker inspect -f '{{.State.Health.Status}}' app)" = "healthy" ] && break; sleep 3; done
+          [ "$(docker inspect -f '{{.State.Health.Status}}' app)" = "healthy" ] || fail "the container HEALTHCHECK did not report healthy"
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/boq/catalogue)" = "401" ] || fail "BOQ catalogue is reachable without logging in"
           curl -sf -c jar -H 'Content-Type: application/json' -d '{"username":"admin","password":"ci-smoke-password"}' http://localhost:8080/api/login > /dev/null || fail "login failed"
           out=$(curl -sf -b jar http://localhost:8080/api/boq/catalogue) || fail "GET /api/boq/catalogue failed"
@@ -80,4 +109,6 @@ jobs:
             -d '{"kind":"items","csv_text":"erp_item_code,item_name,primary_uom,standard_base_rate\nX1,Test item,Cum,100\n"}' \
             http://localhost:8080/api/boq/catalogue) || fail "catalogue import failed"
           echo "$out" | grep -q '"added":1' || fail "catalogue import did not add the item: $out"
+          curl -sf -b jar -o backup.zip http://localhost:8080/api/backup || fail "backup download failed"
+          unzip -l backup.zip | grep -q tender_state.db || fail "the backup zip has no database"
           echo "Smoke test passed"

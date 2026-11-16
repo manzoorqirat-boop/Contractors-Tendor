@@ -28,6 +28,24 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const MAX_WAIT_MS = 20 * 60 * 1000;
+
+/** For actions that can take minutes: the server answers at once with a ticket, and this waits for the real answer.
+ *  The caller gets the result, or the same ApiError it would have got from a direct answer. */
+async function job<T>(path: string, init?: RequestInit): Promise<T> {
+  const first = await call<T | { _job: string; state: string }>(path, init);
+  if (!first || typeof first !== 'object' || !('_job' in first)) return first as T;
+  const started = Date.now();
+  for (let wait = 700; Date.now() - started < MAX_WAIT_MS; wait = Math.min(wait + 300, 2500)) {
+    await sleep(wait);
+    const r = await call<{ state: string; result?: T; status?: number; detail?: string }>(`/api/jobs/${first._job}`);
+    if (r.state === 'done') return r.result as T;
+    if (r.state === 'failed') throw new ApiError(r.status ?? 500, r.detail || 'The action failed.');
+  }
+  throw new ApiError(0, 'This is taking much longer than expected. Check the page in a few minutes: it may still finish.');
+}
+
 export const api = {
   me: () => call<{ authenticated: boolean }>('/api/me'),
   login: (username: string, password: string) => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
@@ -43,11 +61,12 @@ export const api = {
   star: (key: string, starred: boolean) => call<{ key: string; starred: boolean }>('/api/tenders/star', { method: 'POST', body: JSON.stringify({ key, starred }) }),
   summary: (key: string, refresh = false) => call<{ summary: string; cached: boolean }>('/api/tenders/summary', { method: 'POST', body: JSON.stringify({ key, refresh }) }),
   brief: (key: string, refresh = false) => call<{ brief: Brief; cached: boolean }>('/api/tenders/brief', { method: 'POST', body: JSON.stringify({ key, refresh }) }),
-  document: (key: string, text: string, pdf_base64: string) => call<{ doc: DocFacts }>('/api/tenders/document', { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
+  document: (key: string, text: string, pdf_base64: string) => job<{ doc: DocFacts }>('/api/tenders/document', { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
   ask: (question: string) => call<AskResult>('/api/ask', { method: 'POST', body: JSON.stringify({ question }) }),
   aiStatus: () => call<AiStatus>('/api/ai/status'),
+  backupStatus: () => call<{ enabled: boolean; keep_days: number; latest_day: string | null; days: string[]; storage_warning: string }>('/api/backup/status'),
   aiTest: () => call<{ ok: boolean; model: string; fast_model: string }>('/api/ai/test', { method: 'POST' }),
-  aiScore: () => call<{ scored: number; labelled: number; unlabelled: number }>('/api/ai/score', { method: 'POST' }),
+  aiScore: () => job<{ scored: number; labelled: number; unlabelled: number }>('/api/ai/score', { method: 'POST' }),
   views: () => call<{ views: SavedView[] }>('/api/views'),
   saveViews: (views: SavedView[]) => call<{ views: SavedView[] }>('/api/views', { method: 'PUT', body: JSON.stringify({ views }) }),
   runs: () => call<{ runs: Run[]; running: number | null }>('/api/runs'),
@@ -70,13 +89,13 @@ export const api = {
   deleteItem: (id: number, item: number) => call<{ removed: number }>(`/api/bids/${id}/items/${item}`, { method: 'DELETE' }),
   generateItems: (id: number) => call<{ added: number }>(`/api/bids/${id}/items/generate`, { method: 'POST' }),
   changesSeen: (id: number) => call<{ ok: boolean }>(`/api/bids/${id}/changes/seen`, { method: 'POST' }),
-  bidDocument: (id: number, key: string, text: string, pdf_base64: string) => call<{ doc: DocFacts; added: number }>(`/api/bids/${id}/document`, { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
-  manualRead: (text: string, pdf_base64: string) => call<{ listing: ManualListing }>('/api/tenders/manual/read', { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  bidDocument: (id: number, key: string, text: string, pdf_base64: string) => job<{ doc: DocFacts; added: number }>(`/api/bids/${id}/document`, { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
+  manualRead: (text: string, pdf_base64: string) => job<{ listing: ManualListing }>('/api/tenders/manual/read', { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
   manualCheck: (id: string) => call<{ existing: { key: string; portal_name: string; organisation: string; manual: boolean }[] }>(`/api/tenders/manual/check?tender_id=${encodeURIComponent(id)}`),
-  manualCreate: (b: ManualFields & { text: string; pdf_base64: string; read_document: boolean }) => call<{ key: string; doc_read: boolean; doc_error: string; source_kept: boolean }>('/api/tenders/manual', { method: 'POST', body: JSON.stringify(b) }),
+  manualCreate: (b: ManualFields & { text: string; pdf_base64: string; read_document: boolean }) => job<{ key: string; doc_read: boolean; doc_error: string; source_kept: boolean }>('/api/tenders/manual', { method: 'POST', body: JSON.stringify(b) }),
   manualEdit: (key: string, b: ManualFields) => call<{ key: string }>(`/api/tenders/manual?key=${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(b) }),
   manualDelete: (key: string) => call<{ removed: string }>(`/api/tenders/manual?key=${encodeURIComponent(key)}`, { method: 'DELETE' }),
-  fetchPortal: (id: number) => call<FetchResult>(`/api/bids/${id}/fetch`, { method: 'POST' }),
+  fetchPortal: (id: number) => job<FetchResult>(`/api/bids/${id}/fetch`, { method: 'POST' }),
   bidBrief: (id: number, refresh = false) => call<{ brief: Brief; cached: boolean }>(`/api/bids/${id}/brief`, { method: 'POST', body: JSON.stringify({ key: '', refresh }) }),
   eligibility: (id: number) => call<Eligibility>(`/api/bids/${id}/eligibility`, { method: 'POST' }),
   draft: (id: number, kind: string, instructions: string, refresh: boolean) => call<{ kind: string; text: string; cached: boolean }>(`/api/bids/${id}/draft`, { method: 'POST', body: JSON.stringify({ kind, instructions, refresh }) }),
@@ -91,10 +110,10 @@ export const api = {
   boqCatalogue: () => call<CatalogueData>('/api/boq/catalogue'),
   importCatalogue: (kind: string, csv_text: string) => call<CatalogueImport>('/api/boq/catalogue', { method: 'POST', body: JSON.stringify({ kind, csv_text }) }),
   bidBoq: (id: number, include_review: boolean) => call<BoqView>(`/api/bids/${id}/boq?include_review=${include_review}`),
-  uploadBoq: (id: number, filename: string, file_base64: string) => call<BoqView>(`/api/bids/${id}/boq`, { method: 'POST', body: JSON.stringify({ filename, file_base64 }) }),
+  uploadBoq: (id: number, filename: string, file_base64: string) => job<BoqView>(`/api/bids/${id}/boq`, { method: 'POST', body: JSON.stringify({ filename, file_base64 }) }),
   confirmBoqLine: (id: number, line: number, item_code: string | null) => call<BoqView>(`/api/bids/${id}/boq/lines/${line}`, { method: 'POST', body: JSON.stringify({ item_code }) }),
   bidRisks: (id: number) => call<RiskData>(`/api/bids/${id}/risks`),
-  readRisks: (id: number, text: string, pdf_base64: string) => call<RiskData>(`/api/bids/${id}/risks`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  readRisks: (id: number, text: string, pdf_base64: string) => job<RiskData>(`/api/bids/${id}/risks`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
   advice: (id: number, minMargin: number, targetMargin: number) => call<Advice>(`/api/bids/${id}/advice?min_margin=${minMargin}&target_margin=${targetMargin}`),
   simulate: (id: number, input: SimInput) => call<Simulation>(`/api/bids/${id}/risks/simulate`, { method: 'POST', body: JSON.stringify(input) }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),

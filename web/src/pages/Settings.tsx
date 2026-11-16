@@ -9,7 +9,7 @@ import { Tabs } from '../Tabs';
 import type { AiStatus, AppConfig, Settings } from '../types';
 import '../compact.css';
 
-type Tab = 'email' | 'portals' | 'filters' | 'ai';
+type Tab = 'email' | 'portals' | 'filters' | 'ai' | 'backup';
 let lastTab: Tab = 'email';
 const norm = (v: { recipients: string; extra: string; exclude: string; minValue: string; logoText: string; f: Settings }) => JSON.stringify([
   lines(v.recipients), lines(v.extra), lines(v.exclude), Number(v.minValue) || 0, v.logoText, v.f.send_time, v.f.schedule_enabled, v.f.send_empty,
@@ -130,7 +130,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
         <div className="set-bar">
           <Tabs<Tab> label="Settings sections" value={tab} onChange={setTab} tabs={[
             { key: 'email', label: 'Daily email' }, { key: 'portals', label: <>Portals<span className="tab-dot">{form.portals.length}</span></> },
-            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }]} />
+            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }, { key: 'backup', label: 'Backup' }]} />
           {SaveBar}
         </div>
         {msg && <div className={`alert ${msg.tone}`} role="status">{msg.text}</div>}
@@ -204,7 +204,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
           <div className="set-grid">
             <section className="card ai-card">
               <h2>AI assistant {ai && <span className={`badge ${ai.configured ? 'ok' : 'plain'}`} style={{ marginLeft: 6 }}>{ai.configured ? 'On' : 'Off'}</span>}</h2>
-              <p className="sub">{ai?.configured ? <>Connected. {ai.labelled} open tenders labelled, {ai.unlabelled} waiting.</> : 'Off. Ask your administrator to switch it on in the server settings to get summaries, fit scores, work types, the ask bar, the document reader and bid briefs.'}</p>
+              <p className="sub">{ai?.configured ? <>Connected. {ai.labelled} open tenders labelled, {ai.unlabelled} waiting.{ai.daily_limit ? <> AI requests today: {ai.calls_today ?? 0} of {ai.daily_limit}.</> : null}</> : 'Off. Ask your administrator to switch it on in the server settings to get summaries, fit scores, work types, the ask bar, the document reader and bid briefs.'}</p>
               <label className="check"><input type="checkbox" checked={form.ai_digest_intro} onChange={(e) => patch({ ai_digest_intro: e.target.checked })} />Start the daily email with a short "worth a look today" paragraph</label>
               <label className="check"><input type="checkbox" checked={form.ai_hide_noncivil} onChange={(e) => patch({ ai_hide_noncivil: e.target.checked })} />Hide tenders the AI judges not to be civil work (off: they stay visible with a "May not be civil" tag)</label>
               <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -227,8 +227,38 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
             </section>
           </div>
         )}
+
+        {tab === 'backup' && <BackupPanel />}
       </form>
     </>
+  );
+}
+
+/** Download everything the app keeps, and show whether the automatic daily copy is running. */
+function BackupPanel() {
+  const { data, error } = useLoad(() => api.backupStatus(), []);
+  const when = data?.latest_day ? new Date(`${data.latest_day}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
+  return (
+    <div className="set-grid">
+      <section className="card">
+        <h2>Download a backup</h2>
+        <p className="sub">One zip with all tenders, bids, the BOQ catalogue and every file in the Vault. Save it somewhere other than this server (your computer, a cloud drive). It contains your company papers, so keep it private.</p>
+        <a className="btn primary" href="/api/backup" download>Download backup (.zip)</a>
+        <p className="muted small" style={{ marginTop: 8 }}>It can take a minute if the Vault holds many files. Make one before you change the server set-up, and regularly (weekly is a good habit).</p>
+      </section>
+      <section className="card">
+        <h2>Automatic daily copy {data && <span className={`badge ${data.enabled && data.latest_day ? 'ok' : 'warn'}`} style={{ marginLeft: 6 }}>{data.enabled ? (data.latest_day ? 'Running' : 'Waiting for the first copy') : 'Off'}</span>}</h2>
+        {error && <div className="alert bad">{error}</div>}
+        {data && (data.enabled
+          ? <p className="sub">{when ? <>Last copy: {when}. </> : null}The last {data.keep_days} days of the databases are kept on the server's volume. This protects against a bad edit or a damaged file, <strong>not</strong> against losing the volume, which is why the download above matters.</p>
+          : <p className="sub">Off: the app is running without a database file.</p>)}
+        {data?.storage_warning && <div className="alert bad" role="alert">{data.storage_warning}</div>}
+        <details>
+          <summary>How to restore a backup</summary>
+          <p className="sub">Your administrator runs this on the server, with the zip uploaded there: <code>python -m tender_digest.backup restore backup.zip --target-dir /data --force</code>, then restarts the service. Existing data is moved aside, not deleted.</p>
+        </details>
+      </section>
+    </div>
   );
 }
 

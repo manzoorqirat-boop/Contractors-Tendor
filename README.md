@@ -58,6 +58,17 @@ The BOQ data is stored in `boq.db` next to the main database (set `BOQ_DB_PATH` 
 
 **Fetch from portal** on a bid also brings in the BOQ and the risks, when the portal gives them without a login: it finds the BOQ file among the tender's documents (a spreadsheet, or a document named BOQ, Bill of Quantities or Price Bid), loads and matches it, and has Claude read the tender notice for risks (once; the notice is kept so you can read it again later without uploading). A BOQ you already loaded is never replaced by a fetch. If the portal asks for a login, OTP or captcha, the app says so and stops: it never tries to get past them. Fetching is per bid and on request, with a pause between requests, not a bulk crawl of every tender.
 
+## Backups
+
+Everything is in the `/data` volume: `tender_state.db` (tenders, bids, settings), `boq.db` (BOQ catalogue) and the `vault` folder (your papers and saved notices).
+
+- **Daily copy**: each day the service copies both databases into `/data/backups` (the last 7 days are kept; `BACKUP_KEEP_DAYS`). Each copy is checked with SQLite's integrity check. This protects against a bad edit or a damaged file, **not** against losing the volume.
+- **Download backup** (Settings > Backup): one zip with both databases and every vault file. **Save it somewhere other than Railway** (weekly is a good habit, and before any server change). It contains your company papers, so keep it private.
+- **Restore** (on the server, e.g. `railway ssh`, with the zip uploaded there): `python -m tender_digest.backup restore backup.zip --target-dir /data --force`, then restart the service. The zip's databases are checked first; existing data is moved aside (`name.before-restore-TIME`), never deleted. If you changed `VAULT_DIR` or `BOQ_DB_PATH`, copy those two items by hand.
+- Automatic copies to storage outside Railway (S3, R2) are not built in yet: they need a bucket and keys of your own.
+
+Long actions (reading a notice, matching a BOQ, fetching from a portal, labelling tenders) run in the background and the page waits for the answer, so a slow one is not cut off by Railway's proxy. If the service restarts in the middle, the page says so and you press the button again.
+
 ## Tenders the app cannot collect (add by hand)
 
 Some tenders never reach the lists the app reads: a portal behind a captcha, login or OTP, a newspaper notice, an NIT sent to you.
@@ -105,6 +116,9 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `TZ_NAME` | Optional | Default `Asia/Kolkata`. |
 | `SESSION_IDLE_HOURS` | Optional | Default `24`. A login unused for this long ends. Logins always end after 7 days. |
 | `TRUSTED_PROXY_HOPS` | Optional | Default `1` (Railway). How many proxies sit in front of the app; the caller's address is taken that many entries from the END of `X-Forwarded-For`. `0` ignores the header. |
+| `AI_MAX_CALLS_PER_DAY` | Optional | Default `300`. Most AI requests people can start from the page in a day (`0` = no limit). Cached answers cost nothing. Settings > AI shows today's count. The daily run's labelling has its own cap, `AI_MAX_PER_RUN`. |
+| `AI_MAX_CALLS_PER_MINUTE` | Optional | Default `20` (`0` = no limit). |
+| `BACKUP_KEEP_DAYS` | Optional | Default `7`. How many days of automatic database copies to keep on the volume. |
 | `ALLOW_EPHEMERAL_STORAGE` | Optional | Set `true` to silence the "no volume" warning on Railway (not recommended: a redeploy then loses all data). |
 | `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
 | `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
@@ -136,6 +150,11 @@ AI can be wrong: check every figure and date on the portal before bidding.
 - Everything except the login and a health check needs the password. Cookies are `HttpOnly`, `SameSite=Strict` and signed.
 - Logins are kept on the server: **Log out ends the session for good** (a copied cookie stops working), a login unused for `SESSION_IDLE_HOURS` ends, and **changing `APP_PASSWORD` signs everyone out**.
 - Wrong-password attempts are limited per address (8 in 10 minutes). Many wrong guesses from many addresses only slow logins down; they never lock the owner out. Use a password of 12 or more characters.
+- The portal reader only ever talks to the portal's own host: a link or a redirect to any other address (or to a private network) is refused, so a portal page cannot aim this server elsewhere.
+- Headers: strict `Content-Security-Policy` (no inline styles or scripts), HSTS on https, `Permissions-Policy`, `Cross-Origin-Opener-Policy`.
+- AI use is capped per day and per minute (`AI_MAX_CALLS_PER_DAY`, `AI_MAX_CALLS_PER_MINUTE`), so a stuck button or a stolen session cannot run up the bill.
+- The container runs as an unprivileged user. Its entrypoint starts as root only to give the `/data` volume to that user, then drops privileges. If you set Railway's `RAILWAY_RUN_UID`, the container starts non-root and the entrypoint just runs the app.
+- Every Python version is pinned in `requirements.txt`, and CI runs `pip-audit` and `npm audit` on every change and once a week.
 - Request bodies are capped: 16 MB on upload routes (a 10 MB file), 1 MB elsewhere. Writes from other sites are refused.
 - `/api/health` fails (503) when the database cannot be read or its folder is not writable, so Railway restarts the service. On Railway, the page shows a red notice if the database is not on a mounted volume.
 - Spreadsheet downloads neutralise cells that start with `=`, `+`, `-` or `@`, since tender text comes from outside.

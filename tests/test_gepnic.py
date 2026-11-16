@@ -60,7 +60,7 @@ def test_addresses_resolve_under_the_portal_path():
     class Http:
         headers = {}
 
-        def get(self, url, timeout):
+        def get(self, url, timeout, **kw):
             seen.append(url)
 
             class R:

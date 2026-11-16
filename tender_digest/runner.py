@@ -169,9 +169,9 @@ RETRYABLE = re.compile(r"^(Interrupted by a restart|Every portal failed|[A-Za-z_
 class Scheduler(threading.Thread):
     """Starts the daily scheduled run. If the service was down at the set time it runs once when it comes back, the same day."""
 
-    def __init__(self, manager: RunManager, interval: float = 30.0):
+    def __init__(self, manager: RunManager, interval: float = 30.0, housekeeping: Callable[[datetime], object] | None = None):
         super().__init__(daemon=True, name="scheduler")
-        self.manager, self.interval = manager, interval
+        self.manager, self.interval, self.housekeeping = manager, interval, housekeeping  # housekeeping: e.g. the daily backup, run every tick
         self._stop = threading.Event()
 
     def stop(self) -> None:
@@ -235,6 +235,11 @@ class Scheduler(threading.Thread):
 
     def tick(self) -> int | None:
         now = local_now(self.manager.tz_name)
+        if self.housekeeping:
+            try:
+                self.housekeeping(now)
+            except Exception:  # noqa: BLE001 - a backup problem is logged and must never stop the daily run
+                log.exception("housekeeping (daily backup) failed")
         if not self.due(now):
             self.maybe_alert(now)
             return None

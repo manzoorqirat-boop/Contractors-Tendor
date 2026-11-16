@@ -62,7 +62,7 @@ class Http:
     def __init__(self, *responses):
         self.responses, self.calls, self.headers = list(responses), 0, {}
 
-    def get(self, url, timeout):
+    def get(self, url, timeout, **kw):
         self.calls += 1
         r = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
         if isinstance(r, Exception):

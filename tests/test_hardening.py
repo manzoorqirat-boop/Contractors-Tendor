@@ -184,3 +184,154 @@ def test_editing_checks_the_same_rules_but_lets_you_fix_a_closed_tender(app_ctx)
     t.closing = (local_now().replace(tzinfo=None) - timedelta(days=2)).replace(second=0, microsecond=0)
     past.keep(t, local_now())
     assert c.patch("/api/tenders/manual", params={"key": key}, json={"location": "Pune", "closing": t.closing.isoformat(timespec="minutes")}).status_code == 200
+
+
+# ---- security headers ------------------------------------------------------------------------------------------
+
+def test_security_headers_are_strict(ctx):
+    h = ctx.client.get("/api/health").headers
+    csp = h["content-security-policy"]
+    for part in ("default-src 'self'", "style-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"):
+        assert part in csp, part
+    assert "unsafe-inline" not in csp and "unsafe-eval" not in csp
+    assert "camera=()" in h["permissions-policy"] and h["cross-origin-opener-policy"] == "same-origin"
+    assert "strict-transport-security" not in h  # these tests run over plain http; HSTS belongs to the https deployment
+
+
+def test_https_deployments_send_hsts(ctx):
+    app = web.create_app(web.AppConfig(PASSWORD, "k", cookie_secure=True, run_scheduler=False), ctx.env, SeenStore(":memory:"))
+    h = TestClient(app).get("/api/health").headers
+    assert h["strict-transport-security"].startswith("max-age=31536000")
+
+
+# ---- AI spend cap ----------------------------------------------------------------------------------------------
+
+def test_ai_requests_are_capped_per_day_and_per_minute(ctx):
+    store = SeenStore(":memory:")
+    budget = web.AiBudget(store, per_day=5, per_minute=3, today=lambda: "2026-11-20")
+    for _ in range(3):
+        budget.spend()
+    with pytest.raises(web.HTTPException) as e:
+        budget.spend()
+    assert e.value.status_code == 429 and "in a minute" in e.value.detail
+    assert budget.used_today() == 3  # a refused request is not counted
+    budget.recent.clear()
+    budget.spend(2)
+    budget.recent.clear()
+    with pytest.raises(web.HTTPException) as e:
+        budget.spend()
+    assert "daily limit of 5" in e.value.detail and "AI_MAX_CALLS_PER_DAY" in e.value.detail
+    assert web.AiBudget(store, 5, 3, lambda: "2026-11-21").used_today() == 0  # tomorrow starts again
+
+
+def test_the_ai_routes_stop_at_the_cap_and_report_usage(app_ctx, monkeypatch):
+    from tender_digest import ai
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(ai, "_call", lambda *a, **k: "A short summary.")
+    app = web.create_app(web.AppConfig(PASSWORD, "k", cookie_secure=False, run_scheduler=False, ai_per_day=2, ai_per_minute=0), settings(), app_ctx.store)
+    c = TestClient(app)
+    assert c.post("/api/login", json={"password": PASSWORD}).status_code == 200
+    key = app_ctx.key
+    assert c.post("/api/tenders/summary", json={"key": key, "refresh": True}).status_code == 200
+    assert c.post("/api/tenders/summary", json={"key": key}).json()["cached"] is True  # a cached answer costs nothing
+    assert c.get("/api/ai/status").json()["calls_today"] == 1
+    assert c.post("/api/tenders/summary", json={"key": key, "refresh": True}).status_code == 200
+    r = c.post("/api/tenders/summary", json={"key": key, "refresh": True})
+    assert r.status_code == 429 and "daily limit" in r.json()["detail"]
+    st = c.get("/api/ai/status").json()
+    assert st["calls_today"] == 2 and st["daily_limit"] == 2
+
+
+def test_the_ai_cap_is_not_spent_when_ai_is_off(ctx, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    login(ctx)
+    assert ctx.client.get("/api/ai/status").json()["calls_today"] == 0
+
+
+# ---- long actions run in the background ------------------------------------------------------------------------
+
+def wait_for(c, job_id, tries=200):
+    import time
+    for _ in range(tries):
+        r = c.get(f"/api/jobs/{job_id}")
+        assert r.status_code == 200, r.text
+        if r.json()["state"] != "running":
+            return r.json()
+        time.sleep(0.02)
+    raise AssertionError("job did not finish")
+
+
+def test_jobs_report_their_result_or_their_failure():
+    import threading
+    jobs = web.Jobs()
+    go = threading.Event()
+    first = jobs.start("read", "bid-1", lambda: (go.wait(5), {"ok": 1})[1])
+    assert jobs.start("read", "bid-1", lambda: {"ok": 2}) == first  # a double click gets the running job, not a second one
+    assert jobs.start("read", "bid-2", lambda: {"ok": 3}) != first  # another bid is separate
+    assert jobs.get(first)["state"] == "running"
+    go.set()
+    import time
+    for _ in range(100):
+        if jobs.get(first)["state"] != "running":
+            break
+        time.sleep(0.02)
+    assert jobs.get(first)["state"] == "done" and jobs.get(first)["result"] == {"ok": 1}
+
+    def refuses():
+        raise web.HTTPException(422, "The BOQ has no estimate")
+
+    def breaks():
+        raise RuntimeError("secret internal detail")
+
+    bad, worse = jobs.start("x", None, refuses), jobs.start("y", None, breaks)
+    time.sleep(0.3)
+    assert jobs.get(bad) == {"state": "failed", "kind": "x", "elapsed": 0, "status": 422, "detail": "The BOQ has no estimate"}
+    got = jobs.get(worse)
+    assert got["status"] == 500 and "secret internal detail" not in got["detail"]  # the person never sees internals
+    assert jobs.get("unknown") is None
+
+
+def test_too_many_long_actions_at_once_are_refused():
+    import threading
+    jobs, hold = web.Jobs(), threading.Event()
+    for i in range(web.Jobs.MAX_RUNNING):
+        jobs.start("k", str(i), lambda: hold.wait(5))
+    with pytest.raises(web.HTTPException) as e:
+        jobs.start("k", "one-more", lambda: None)
+    assert e.value.status_code == 429
+    hold.set()
+
+
+def background_app(app_ctx):
+    app = web.create_app(web.AppConfig(PASSWORD, "k", cookie_secure=False, run_scheduler=False, background_jobs=True, ai_per_minute=0), settings(), app_ctx.store)
+    c = TestClient(app)
+    assert c.post("/api/login", json={"password": PASSWORD}).status_code == 200
+    return c
+
+
+def test_a_long_route_answers_at_once_with_a_ticket_and_the_page_polls(app_ctx, monkeypatch):
+    import json
+    from tender_digest import ai
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(ai, "_call", lambda *a, **k: json.dumps({"tender_id": "NIT/9", "title": "Road", "closing": "2099-12-02T15:00"}))
+    c = background_app(app_ctx)
+    r = c.post("/api/tenders/manual/read", json={"text": "NOTICE INVITING TENDER"})
+    assert r.status_code == 202 and r.json()["state"] == "running"
+    done = wait_for(c, r.json()["_job"])
+    assert done["state"] == "done" and done["result"]["listing"]["tender_id"] == "NIT/9"
+
+
+def test_a_failure_in_the_background_keeps_its_status_and_message(app_ctx, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    c = background_app(app_ctx)
+    r = c.post("/api/tenders/manual/read", json={"text": "NOTICE"})
+    assert r.status_code == 202
+    done = wait_for(c, r.json()["_job"])
+    assert done["state"] == "failed" and done["status"] == 503 and done["detail"]  # AI off: the same 503 the page used to get directly
+
+
+def test_job_answers_need_a_login_and_unknown_ones_are_explained(app_ctx):
+    c = background_app(app_ctx)
+    assert c.get("/api/jobs/nope").status_code == 404 and "restarted" in c.get("/api/jobs/nope").json()["detail"]
+    c.post("/api/logout")
+    assert c.get("/api/jobs/nope").status_code == 401

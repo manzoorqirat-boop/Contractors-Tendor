@@ -5,12 +5,10 @@ needs one of those is not an error to fix: it goes on the "check manually" list,
 """
 from __future__ import annotations
 
-import ipaddress
-import socket
 from typing import Any
 from urllib.parse import urlparse
 
-from .gepnic import GepnicClient, PortalError
+from .gepnic import GepnicClient, PortalError, is_public_host
 
 MANUAL_STEP = "Open it in your own browser and check it by hand."
 
@@ -31,19 +29,6 @@ NEEDS_MANUAL = {"captcha", "login", "otp", "blocked", "different_software", "unr
 def describe(kind: str) -> dict[str, Any]:
     label, advice = KINDS.get(kind, KINDS["unknown"])
     return {"kind": kind if kind in KINDS else "unknown", "label": label, "advice": advice, "manual": kind in NEEDS_MANUAL}
-
-
-def is_public_host(host: str) -> bool:
-    """False when the name points at this machine or a private network. A name that does not resolve is left to fail normally."""
-    try:
-        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
-    except OSError:
-        return True
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            return False
-    return True
 
 
 def probe(base_url: str, delay: float = 0.6, timeout: int = 20) -> dict[str, Any]:
