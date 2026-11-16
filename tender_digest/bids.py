@@ -215,8 +215,8 @@ def clean_patch(raw: Any) -> dict[str, Any]:
             out[k] = v
         elif rule == "date":
             v = (str(v).strip() if v is not None else "")
-            if v and not _DATE.match(v):
-                raise BidError("Dates look like 2026-11-20")
+            if v and (not _DATE.match(v) or _when(v) is None):
+                raise BidError("Dates look like 2026-11-20, and must be real dates")
             out[k] = v or None
         elif rule == "money":
             if v in (None, ""):
@@ -232,6 +232,21 @@ def clean_patch(raw: Any) -> dict[str, Any]:
         else:
             out[k] = str(v if v is not None else "").strip()[: int(rule)]
     return out
+
+
+# The first bytes of each kind of file. A file whose contents do not match its name is refused: it is either a mistake or a disguise.
+_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    ".pdf": (b"%PDF",), ".png": (b"\x89PNG\r\n\x1a\n",), ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",),
+    ".zip": (b"PK\x03\x04", b"PK\x05\x06"), ".docx": (b"PK\x03\x04",), ".xlsx": (b"PK\x03\x04",),
+    ".doc": (b"\xd0\xcf\x11\xe0",), ".xls": (b"\xd0\xcf\x11\xe0",),
+}
+
+
+def looks_like(ext: str, data: bytes) -> bool:
+    if ext == ".txt":
+        return b"\x00" not in data[:4096]
+    sigs = _SIGNATURES.get(ext)
+    return bool(sigs) and data.startswith(sigs)
 
 
 class BidBook:
@@ -775,6 +790,8 @@ class BidBook:
             ext = Path(filename or "").suffix.lower()
             if ext not in FILE_TYPES:
                 raise BidError("Allowed file types: " + ", ".join(sorted(FILE_TYPES)))
+            if not looks_like(ext, data):
+                raise BidError(f"That file does not look like a real {ext} file. Check that you chose the right one")
             self.vault_dir.mkdir(parents=True, exist_ok=True)
             stored = uuid.uuid4().hex + ext
             (self.vault_dir / stored).write_bytes(data)

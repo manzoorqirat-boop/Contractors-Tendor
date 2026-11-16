@@ -103,6 +103,17 @@ class AppConfig:
     trusted_proxy_hops: int = 1  # how many reverse proxies sit in front (Railway: 1). 0 = ignore X-Forwarded-For
 
 
+def real_date(value: str) -> bool:
+    """Looks like 2026-11-20 (optionally with a time) AND is a date that exists: 2026-13-45 is not."""
+    if not DATE_RE.match(value):
+        return False
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 def _int_env(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name, "") or default)
@@ -659,8 +670,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             raise HTTPException(422, "Unknown status")
         dates = dict(closing_from=closing_from, closing_to=closing_to, seen_from=seen_from, seen_to=seen_to, published_from=published_from, published_to=published_to)
         for name, value in dates.items():
-            if value and not DATE_RE.match(value):
-                raise HTTPException(422, f"{name} must look like 2026-11-20")
+            if value and not real_date(value):
+                raise HTTPException(422, f"{name} must be a real date, like 2026-11-20")
         lists = {"portal": portal, "category": category, "department": department, "location": location, "work_type": work_type}
         for name, values in lists.items():
             if values and (len(values) > 50 or any(len(v) > 200 for v in values)):
@@ -864,6 +875,12 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return run_job("manual-create", body.tender_id.strip(), lambda: do_manual_create(body))
 
     def do_manual_create(body: ManualBody) -> dict:
+        with manual_lock:  # the "already there?" check and the save are one step, so two people cannot both add the same Tender ID
+            return _manual_create(body)
+
+    manual_lock = threading.Lock()
+
+    def _manual_create(body: ManualBody) -> dict:
         tid = body.tender_id.strip()[:80]
         if not tid:
             raise HTTPException(422, "The Tender ID is needed: it is how you find the tender on its portal")
@@ -1315,7 +1332,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return out
 
     @app.get("/api/bids/{bid_id}/advice", dependencies=auth)
-    def bid_advice(bid_id: int, min_margin: float = 3.0, target_margin: float = 8.0, include_review: bool = False) -> dict:
+    def bid_advice(bid_id: int, min_margin: float = Query(3.0, ge=0, lt=50), target_margin: float = Query(8.0, gt=0, lt=50), include_review: bool = False) -> dict:
         """Quote advice: your cost range (with risk allowances when they have been read) against how past L1 prices compared with their estimates."""
         bid = bid_or_404(bid_id)
         mode, notes = "with_risks", []

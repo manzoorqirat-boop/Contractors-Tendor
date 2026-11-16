@@ -110,7 +110,7 @@ def extract_risks(tender: dict, text: str = "", pdf_base64: str = "") -> dict[st
     else:
         if not text.strip():
             raise ai.AIError("Paste the tender text or choose a PDF first.")
-        content = (f"Tender listing for context:\n{ai._facts(tender, 600)}\n\n<document>\n{text[:ai.MAX_TEXT]}\n</document>\n\n"
+        content = (f"Tender listing for context:\n{ai._facts(tender, 600)}\n\n<document>\n{ai.fence(text)}\n</document>\n\n"
                    "Find the 12 risk drivers in this document.")
     try:
         return clean_risks(ai._json(ai._call(RISK_SYSTEM, content, max_tokens=4000)))
