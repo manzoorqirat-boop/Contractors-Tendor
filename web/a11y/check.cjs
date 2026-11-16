@@ -64,7 +64,7 @@ async function scan(page, name) {
     await visit('bids', '#/bids');
     await visit('bid', '#/bids/1');
     if (!reduced) {
-      for (const t of ['Checklist', 'Price', 'Letters']) await visit(`bid ${t}`, '#/bids/1', () => page.click(`[role=tab]:has-text("${t}")`));
+      for (const t of ['Checklist', 'Price', 'Money', 'Letters']) await visit(`bid ${t}`, '#/bids/1', () => page.click(`[role=tab]:has-text("${t}")`));
     }
     await visit('vault', '#/vault');
     if (!reduced) {
@@ -79,6 +79,9 @@ async function scan(page, name) {
         await boxes.nth(1).check(); await boxes.nth(2).check();
         await page.click('button:has-text("Compare")'); await page.waitForSelector('table.cmp');
       });
+    }
+    if (!reduced) {
+      await visit('add a payment', '#/bids/1', async () => { await page.click('[role=tab]:has-text("Money")'); await page.click('button:has-text("Add a payment")'); });
     }
     await visit('runs', '#/runs');
     if (!reduced) {

@@ -9,6 +9,7 @@ import type { Nav } from '../App';
 import { ChartSkeleton, Skeleton, useToast } from '../ui';
 import { useConfirm } from '../confirm';
 import { ManualBanner } from '../ManualPortals';
+import { MoneyCard } from '../Money';
 import { Only, useSession } from '../session';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
 import { BarBlock, labelFor, metricOf, MEASURES } from './Charts';
@@ -134,6 +135,8 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
       <SetupCard onChanged={() => stats.reload()} />
 
       <ManualBanner onOpen={() => go('settings')} />
+
+      <MoneyCard onOpenBid={(id) => { window.location.hash = `#/bids/${id}`; }} />
 
       <FilterBar filters={filters} display={display} config={config} facets={nav.facets} onChange={nav.setFilters} onApplyView={(f, d) => go('dashboard', f, d)} hideStatus />
 

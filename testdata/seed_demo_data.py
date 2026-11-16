@@ -24,6 +24,7 @@ sys.path.insert(0, str(HERE.parent))  # the repo root, for tender_digest
 
 from tender_digest import ai                                            # noqa: E402
 from tender_digest.bids import BidBook, clean_patch, default_vault_dir  # noqa: E402
+from tender_digest.money import MoneyBook  # noqa: E402
 from tender_digest.gepnic import Tender                                 # noqa: E402
 from tender_digest.letters import Letters                               # noqa: E402
 from tender_digest.store import SeenStore                               # noqa: E402
@@ -95,6 +96,8 @@ def main() -> None:
 
     now = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None, microsecond=0)
     book = BidBook(store, a.vault_dir or default_vault_dir(a.db))
+    cash = MoneyBook(book)
+    day = lambda n: str((now + timedelta(days=n)).date())  # noqa: E731
     rnd = random.Random(2026)
     kept: list[tuple[Tender, str]] = []
 
@@ -162,6 +165,11 @@ def main() -> None:
             patch.update(prebid_date="2026-11-19", query_deadline="2026-11-21")
         book.update(bid["id"], clean_patch(patch), now)
         book.generate_items(bid["id"], now)
+        if tag == "T1":      # an EMD still to be paid, and a fee that is paid and gone
+            cash.add(bid["id"], {"kind": "emd", "amount": by[tag].emd or 50000, "instrument": "online", "status": "planned"}, now)
+            cash.add(bid["id"], {"kind": "tender_fee", "amount": 1180, "instrument": "online", "status": "paid", "paid_on": day(-1), "reference": "UTR 4021998877"}, now)
+        else:                # an EMD held as a bank guarantee that runs out soon
+            cash.add(bid["id"], {"kind": "emd", "amount": by[tag].emd or 50000, "instrument": "bg", "status": "paid", "paid_on": day(-6), "reference": "BG/2026/0412", "bank": "State Bank, Nashik", "valid_until": day(20)}, now)
     past = [("Road widening, Sinnar", "Roads & highways", 4.1e7, 3.7e7, 3.62e7, "Test Roadways (fictional)", "lost"), ("Drain at Ward 3, Satpur", "Drainage & sewerage", 1.2e7, 1.05e7, 1.05e7, "", "won"),
             ("School repairs, Igatpuri", "Repairs & maintenance", 4.5e6, 4.1e6, 3.9e6, "Test Builders (fictional)", "lost"), ("Culvert on Peth road", "Bridges & flyovers", 6e6, 5.4e6, 5.4e6, "", "won"),
             ("BT resurfacing, Dindori", "Roads & highways", 1.6e7, 1.46e7, 1.41e7, "Test Infra (fictional)", "lost"), ("Community hall, Trimbak", "Buildings", 8e6, 7.3e6, 7.3e6, "", "won")]
@@ -173,6 +181,11 @@ def main() -> None:
         store.ai_save([(t.key, {"work_type": wtype, "civil": True, "fit": 4, "reason": "Past work"})], ph, False)
         bid, _ = book.create_from_tender(t.key, now)
         book.update(bid["id"], clean_patch({"stage": stage, "my_value": mine, "l1_value": l1, "l1_bidder": who or "Sahyadri Infra Works (us)", "result_note": "Seeded test result"}), now)
+        if n == 0:           # a lost bid whose EMD was due back weeks ago
+            cash.add(bid["id"], {"kind": "emd", "amount": round(est * 0.02, -2), "instrument": "dd", "status": "paid", "paid_on": day(-80), "refund_due": day(-25), "reference": "DD 556610", "bank": "Bank of Maharashtra"}, now)
+        if n == 1:           # a won bid: EMD still held, and the performance security as a guarantee
+            cash.add(bid["id"], {"kind": "emd", "amount": round(est * 0.02, -2), "instrument": "online", "status": "paid", "paid_on": day(-78)}, now)
+            cash.add(bid["id"], {"kind": "performance_security", "amount": round(mine * 0.05, -2), "instrument": "bg", "status": "paid", "paid_on": day(-60), "valid_until": day(300), "bank": "State Bank, Nashik"}, now)
 
     letters = Letters(store)
     if not letters.list():
