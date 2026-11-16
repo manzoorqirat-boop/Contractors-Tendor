@@ -151,7 +151,7 @@ export interface BidComment { id: number; at: string; username: string; text: st
 export interface Signoff { state: 'requested' | 'approved' | 'declined'; requested_by: string; by: string; at: string; note: string }
 export type Role = 'viewer' | 'bidder' | 'admin';
 export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean; two_step: boolean; email?: string }
-export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; two_step?: boolean; email?: string; created: string | null; last_login: string | null; owner: boolean }
+export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; two_step?: boolean; sso?: boolean; email?: string; created: string | null; last_login: string | null; owner: boolean }
 export interface UsersData { users: UserRow[]; roles: { key: Role; label: string; text: string }[]; min_password: number }
 export interface AuditEntry { id: number; at: string; username: string; role: string | null; action: string; target: string; detail: string; client: string }
 
@@ -177,3 +177,4 @@ export interface Webhook { id: number; name: string; url: string; events: string
 export interface EraseResult { handle: string; changed: Record<string, number>; when: string; note: string }
 export interface SetupStep { key: string; title: string; why: string; done: boolean; href: string; where: string; optional?: boolean; admin?: boolean }
 export interface SetupStatus { steps: SetupStep[]; done: number; total: number; sample: { loaded: boolean; tenders: number } }
+export interface SsoInfo { enabled: boolean; problem: string; issuer: string; client_id: string; redirect_uri: string; allowed_domains: string[]; default_role: string }

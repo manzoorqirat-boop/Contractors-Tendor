@@ -144,6 +144,10 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `BACKUP_KEEP_DAYS` | Optional | Default `7`. How many days of automatic database copies to keep on the volume. |
 | `OWNER_TOTP_SECRET` | Optional | A base32 secret (for example from an authenticator app's "setup key"). When set, the owner login also needs the 6-digit code from the app. Secret. To lose the requirement, remove the variable. |
 | `APP_URL` | Optional | This site's public address, for example `https://tend.example.com`. Used for the "Open the bid" links in reminder emails and the calendar. |
+| `SSO_ISSUER`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET` | Optional (all three or none) | Turns on single sign-on with any OpenID Connect provider (Google Workspace: `https://accounts.google.com`; Microsoft Entra ID: `https://login.microsoftonline.com/<tenant-id>/v2.0`; Okta, Keycloak, Auth0). Secret. See *Single sign-on* below. |
+| `SSO_ALLOWED_DOMAINS` | With SSO | Email domains allowed to sign in, e.g. `example.com,example.org`. **Without it nobody is let in.** |
+| `SSO_DEFAULT_ROLE` | Optional | `viewer` (default) or `bidder`, for people created by their first SSO sign-in. Never `admin`. |
+| `SSO_BUTTON_TEXT` | Optional | Default `Sign in with SSO`; e.g. `Sign in with Google`. |
 | `DATA_ENCRYPTION_KEY` | Optional | A long private phrase (16+ characters). When set, two-step and webhook secrets and every uploaded file (the Vault and saved tender notices) are stored encrypted, and anything stored earlier is encrypted at the next start. **Keep it somewhere other than the server: without it those files, and a restored backup, cannot be read.** Secret. |
 | `DATA_ENCRYPTION_KEY_OLD` | Optional | To change the key: set the new one in `DATA_ENCRYPTION_KEY` and the old one here, restart, then remove this. Commas separate several old keys. |
 | `ALLOW_EPHEMERAL_STORAGE` | Optional | Set `true` to silence the "no volume" warning on Railway (not recommended: a redeploy then loses all data). |
@@ -202,6 +206,16 @@ Sign in with a username and password. Administrators add people in **Settings > 
 - **Retention** (Settings > Backup): how many days the activity log (default 365) and collected tenders (default 120) are kept.
 - **Settings > Activity** records who signed in, what each person changed, refusals ("view-only account tried to ...") and downloads of backups, Vault files and the spreadsheet. Reading pages is not logged. Entries are kept for the retention period (default 365 days), and at most the last 20,000.
 - Rules are enforced on the server (one table, `required_role` in `tender_digest/accounts.py`); the page only hides what a person cannot use.
+
+## Single sign-on
+
+With SSO, people sign in with the company's own account (Google Workspace, Microsoft Entra ID, Okta, Keycloak...) instead of a separate password here, and the provider's two-step check applies.
+
+1. In the provider, register a **web application** with the redirect address shown in **Settings > Integrations > Single sign-on** (`<APP_URL>/api/sso/callback`; set `APP_URL` so it is right) and note its client ID and secret.
+2. Set `SSO_ISSUER`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET` and `SSO_ALLOWED_DOMAINS` on the server and restart. A "Sign in with SSO" button appears on the sign-in page.
+3. The first sign-in of a person creates their account with `SSO_DEFAULT_ROLE`; an existing account with the same email address is linked instead of duplicated. An administrator changes roles in Settings > People, and switching a person off keeps them out even though the provider still signs them in. SSO accounts have no local password.
+
+How it is checked: authorization-code flow with PKCE, the one-time state and nonce, the ID token's signature against the provider's published keys (RS256 or ES256 only; `none` and shared-secret algorithms are refused), and its issuer, audience and expiry. Only email addresses the provider marks as verified, at an allowed domain, get in. The owner login (`APP_USERNAME`/`APP_PASSWORD`) keeps working, so a provider outage or a wrong setting never locks everyone out. Tested against a fake provider (all the ways a token can be wrong) and in a real browser round trip; **not yet tried against Google, Microsoft or Okta themselves**.
 
 ## Security
 

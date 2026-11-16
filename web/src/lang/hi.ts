@@ -337,4 +337,5 @@ export const HI: Record<string, string> = {
   "Close a panel, menu or dialog": "पैनल, मेनू या डायलॉग बंद करें",
   "{n} civil tender": "{n} सिविल निविदा",
   "{n} civil tenders": "{n} सिविल निविदाएँ",
+  "or": "या",
 };

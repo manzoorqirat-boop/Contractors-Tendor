@@ -49,11 +49,17 @@ export function Login({ onDone }: { onDone: () => void }) {
   const [who, setWho] = useState('');
   const [sent, setSent] = useState('');
   const [online, setOnline] = useState<boolean | null>(null);
+  const [sso, setSso] = useState<{ enabled: boolean; button_text: string } | null>(null);
   const [resetToken, setResetToken] = useState(() => /^#\/reset\/([\w-]{20,200})$/.exec(location.hash)?.[1] ?? '');
   const [newPassword, setNewPassword] = useState('');
   const [again, setAgain] = useState('');
   const [done, setDone] = useState(false);
 
+  useEffect(() => {
+    api.ssoStatus().then(setSso, () => setSso(null));
+    const m = new URLSearchParams(location.search).get('sso_error');  // the provider's answer was refused: say why, then tidy the address
+    if (m) { setError(m); history.replaceState(null, '', location.pathname + location.hash); }
+  }, []);
   useEffect(() => {
     let alive = true;
     const ping = () => fetch('/api/health').then((r) => alive && setOnline(r.ok), () => alive && setOnline(false));
@@ -176,6 +182,13 @@ export function Login({ onDone }: { onDone: () => void }) {
                 </>
               )}
             </form>
+          )}
+
+          {sso?.enabled && (
+            <div style={{ marginTop: 14 }}>
+              <p className="muted small" style={{ textAlign: 'center', margin: '0 0 8px' }}>{tr('or')}</p>
+              <a className="btn login-submit" href="/api/sso/login" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>{sso.button_text}</a>
+            </div>
           )}
 
           <p className="login-status">
