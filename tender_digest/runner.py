@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from . import ai, alerts, appsettings, collector, digest, mailer
+from . import ai, alerts, appsettings, collector, digest, mailer, reminders
 from .bids import BidBook
 from .config import Settings
 from .store import SeenStore
@@ -69,6 +69,50 @@ class RunManager:
         else:
             self._run(run_id, settings, send_email, saved)
         return run_id
+
+    REMINDER_RETRY = timedelta(minutes=10)
+
+    def send_reminders(self, now: datetime, app_url: str = "") -> int:
+        """Sends the deadline reminders that are due (once each) by email and, if set up, to the webhook. Returns how many were sent.
+        With no way to send (no email set up, no webhook) nothing is recorded, so reminders go out as soon as one is."""
+        saved = self.store.get_settings()
+        cur = appsettings.current(self.env, saved)
+        if not cur["reminders_on"]:
+            return 0
+        sent = self.store.reminders_sent()
+        fire, handled = reminders.due(reminders.deadlines(self.bids.list(), now), now, sent)
+        if not fire:
+            if handled:
+                self.store.reminders_mark(handled, now.isoformat(timespec="seconds"))
+            return 0
+        by_mail = self.mail_configured and bool(cur["recipients"])
+        hook = cur["webhook_url"]
+        if not by_mail and not hook:
+            return 0
+        failed_at = saved.get("reminder_failed")  # after a failure, wait before trying again; after a success there is no wait
+        if failed_at and now - datetime.fromisoformat(failed_at) < self.REMINDER_RETRY:
+            return 0
+        subject, html_body, text = reminders.build_message(fire, app_url)
+        ok = False
+        if by_mail:
+            try:
+                self.sender(self.env.brevo_api_key, self.env.mail_from, self.env.mail_from_name, cur["recipients"], subject, html_body, text)
+                ok = True
+            except Exception as e:  # noqa: BLE001 - tried again in 10 minutes
+                log.warning("reminder email failed: %s", e)
+        if hook:
+            try:
+                reminders.post_webhook(hook, f"{subject}\n{text}", fire)
+                ok = True
+            except reminders.WebhookError as e:
+                log.warning("reminder webhook failed: %s", e)
+        if ok:
+            self.store.reminders_mark(handled, now.isoformat(timespec="seconds"))
+            if failed_at:
+                self.store.put_settings({"reminder_failed": None})
+            return len(fire)
+        self.store.put_settings({"reminder_failed": now.isoformat(timespec="seconds")})
+        return 0
 
     def _say(self, run_id: int, message: str) -> None:
         self._lines.append(f"{local_now(self.tz_name).strftime('%H:%M:%S')}  {message}")

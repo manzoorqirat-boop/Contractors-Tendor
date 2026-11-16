@@ -51,7 +51,7 @@ export interface NewPortal { name: string; state: string; base_url: string }
 
 export interface Settings {
   recipients: string[]; send_time: string; schedule_enabled: boolean; send_empty: boolean; portals: string[]; min_value: number;
-  extra_keywords: string[]; exclude_words: string[]; company_profile: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string;
+  extra_keywords: string[]; exclude_words: string[]; company_profile: string; reminders_on?: boolean; webhook_url?: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string;
 }
 
 export type Status = 'open' | 'closing_soon' | 'closed' | 'all';

@@ -177,6 +177,7 @@ class SeenStore:
                   error TEXT, log TEXT NOT NULL DEFAULT '[]');
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS starred (key TEXT PRIMARY KEY, created TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS reminders_sent (key TEXT PRIMARY KEY, at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS login_fails (at REAL NOT NULL, client TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, created REAL NOT NULL, last_seen REAL NOT NULL, user_id INTEGER NOT NULL DEFAULT 0);
@@ -766,6 +767,18 @@ class SeenStore:
     def login_fails_clear(self, client: str) -> None:
         with self.lock:
             self.db.execute("DELETE FROM login_fails WHERE client = ?", (client,))
+            self.db.commit()
+
+    # ---- deadline reminders already handled, so each threshold fires once ------------------------------------------
+
+    def reminders_sent(self) -> set[str]:
+        with self.lock:
+            return {r["key"] for r in self.db.execute("SELECT key FROM reminders_sent")}
+
+    def reminders_mark(self, keys: list[str], at: str) -> None:
+        with self.lock:
+            self.db.executemany("INSERT OR IGNORE INTO reminders_sent (key, at) VALUES (?, ?)", [(k, at) for k in keys])
+            self.db.execute("DELETE FROM reminders_sent WHERE at < date(?, '-90 day')", (at[:10],))
             self.db.commit()
 
     def ping(self) -> None:

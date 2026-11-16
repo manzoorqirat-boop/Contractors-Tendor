@@ -60,7 +60,7 @@ class Principal:
 
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
 
-_ADMIN_AREAS = re.compile(r"^/api/(users|audit|backup|settings)(/|$)")
+_ADMIN_AREAS = re.compile(r"^/api/(users|audit|backup|settings|calendar)(/|$)")
 _VAULT_FILE = re.compile(r"^/api/vault/\d+/file$")
 
 
@@ -379,6 +379,9 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("PUT", "/api/views"): "Changed saved views",
     ("PUT", "/api/settings"): "Changed settings",
     ("POST", "/api/settings/test-email"): "Sent a test email",
+    ("POST", "/api/settings/test-webhook"): "Sent a test message to the webhook",
+    ("POST", "/api/calendar/token"): "Made a new calendar address",
+    ("DELETE", "/api/calendar"): "Turned the calendar feed off",
     ("POST", "/api/portals"): "Added a portal",
     ("DELETE", "/api/portals/{key}"): "Removed a portal",
     ("POST", "/api/portals/{key}/check"): "Checked a portal",

@@ -133,5 +133,9 @@ export const api = {
   readRisks: (id: number, text: string, pdf_base64: string) => job<RiskData>(`/api/bids/${id}/risks`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
   advice: (id: number, minMargin: number, targetMargin: number) => call<Advice>(`/api/bids/${id}/advice?min_margin=${minMargin}&target_margin=${targetMargin}`),
   simulate: (id: number, input: SimInput) => call<Simulation>(`/api/bids/${id}/risks/simulate`, { method: 'POST', body: JSON.stringify(input) }),
+  testWebhook: (url: string) => call<{ ok: boolean }>('/api/settings/test-webhook', { method: 'POST', body: JSON.stringify({ url }) }),
+  calendar: () => call<{ enabled: boolean; url: string }>('/api/calendar'),
+  newCalendarToken: () => call<{ enabled: boolean; url: string }>('/api/calendar/token', { method: 'POST' }),
+  stopCalendar: () => call<{ enabled: boolean; url: string }>('/api/calendar', { method: 'DELETE' }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
 };

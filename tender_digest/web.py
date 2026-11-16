@@ -26,7 +26,7 @@ from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, alerts, appsettings, mailer
+from . import access, accounts, ai, alerts, appsettings, mailer, reminders
 from .accounts import AccountError, Accounts, Principal
 from . import offsite
 from .backup import Backups, BackupError
@@ -101,6 +101,7 @@ class AppConfig:
     idle_seconds: int = 24 * 3600  # a session unused for this long ends; it also ends after SESSION_SECONDS whatever happens
     ai_per_day: int = 300  # most AI requests a person can start in a day (0 = no limit); scheduled labelling has its own cap, AI_MAX_PER_RUN
     ai_per_minute: int = 20
+    app_url: str = ""  # this site's public address (APP_URL), used for links in reminder emails and the calendar
     owner_totp: str = ""  # a base32 secret: when set, the owner login also needs the six-digit code from an authenticator app
     background_jobs: bool = False  # True in the real service: long actions run in the background and the page polls. Tests run them inline.
     trusted_proxy_hops: int = 1  # how many reverse proxies sit in front (Railway: 1). 0 = ignore X-Forwarded-For
@@ -138,6 +139,7 @@ def config_from_env() -> AppConfig:
         password=password, secret_key=key, username=os.environ.get("APP_USERNAME", "admin").strip(), cookie_secure=os.environ.get("COOKIE_SECURE", "true").lower() not in ("0", "false", "no"),
         tz_name=os.environ.get("TZ_NAME", "Asia/Kolkata"),
         idle_seconds=max(1, _int_env("SESSION_IDLE_HOURS", 24)) * 3600, background_jobs=True, trusted_proxy_hops=max(0, _int_env("TRUSTED_PROXY_HOPS", 1)),
+        app_url=os.environ.get("APP_URL", "").strip().rstrip("/"),
         owner_totp=re.sub(r"[\s=-]", "", os.environ.get("OWNER_TOTP_SECRET", "")).upper(),
         ai_per_day=max(0, _int_env("AI_MAX_CALLS_PER_DAY", 300)), ai_per_minute=max(0, _int_env("AI_MAX_CALLS_PER_MINUTE", 20)),
         static_dir=Path(os.environ.get("STATIC_DIR") or Path(__file__).resolve().parent.parent / "web" / "dist"),
@@ -399,6 +401,10 @@ class LoginBody(BaseModel):
     code: str = ""
 
 
+class WebhookTest(BaseModel):
+    url: str = ""
+
+
 class TwoStepCode(BaseModel):
     code: str
 
@@ -560,7 +566,15 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         remote_problem = str(e)
         log.warning("off-site backup is not active: %s", e)
     backups = Backups(store, boq.store, env.state_path, vault_dir, keep_days=max(1, _int_env("BACKUP_KEEP_DAYS", 7)), remote=remote_cfg, remote_problem=remote_problem)
-    scheduler = Scheduler(manager, housekeeping=backups.housekeeping) if config.run_scheduler else None
+    def housekeeping(now: datetime) -> None:
+        """Run by the scheduler every half minute: the daily backup, then any deadline reminders that are due. One failing never stops the other."""
+        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url)):
+            try:
+                job()
+            except Exception:  # noqa: BLE001
+                log.exception("housekeeping task failed")
+
+    scheduler = Scheduler(manager, housekeeping=housekeeping) if config.run_scheduler else None
     limiter = LoginLimiter(store=store)
     jobs = Jobs()
     people = Accounts(store)
@@ -1808,6 +1822,53 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         store.delete_portal_status(key)
         refresh_portals()
         return {"removed": key}
+
+    @app.post("/api/settings/test-webhook", dependencies=auth)
+    def test_webhook(body: WebhookTest) -> dict:
+        url = (body.url or "").strip() or appsettings.current(env, store.get_settings())["webhook_url"]
+        if not url:
+            raise HTTPException(422, "Type the webhook address first")
+        try:
+            reminders.post_webhook(url, "TendAI test: deadline reminders will arrive here.")
+        except reminders.WebhookError as e:
+            raise HTTPException(502, str(e)) from None
+        return {"ok": True}
+
+    # ---- calendar feed: a private address that calendar apps subscribe to --------------------------------------------
+
+    def public_base(request: Request) -> str:
+        if config.app_url:
+            return config.app_url
+        proto = request.headers.get("x-forwarded-proto", "").split(",")[-1].strip() or request.url.scheme
+        return f"{proto}://{request.headers.get('host', 'localhost')}"
+
+    def calendar_state(request: Request) -> dict:
+        token = store.get_settings().get("calendar_token")
+        return {"enabled": bool(token), "url": f"{public_base(request)}/api/calendar/{token}.ics" if token else ""}
+
+    @app.get("/api/calendar", dependencies=auth)
+    def get_calendar(request: Request) -> dict:
+        return calendar_state(request)
+
+    @app.post("/api/calendar/token", dependencies=auth)
+    def new_calendar_token(request: Request) -> dict:
+        """Makes (or replaces) the secret address. Replacing it stops every calendar that used the old one."""
+        store.put_settings({"calendar_token": secrets.token_urlsafe(24)})
+        return calendar_state(request)
+
+    @app.delete("/api/calendar", dependencies=auth)
+    def stop_calendar(request: Request) -> dict:
+        store.put_settings({"calendar_token": None})
+        return calendar_state(request)
+
+    @app.get("/api/calendar/{token}.ics")
+    def calendar_feed(token: str, request: Request) -> Response:
+        # No login: calendar apps cannot sign in. The long random address is the secret, and the feed holds deadlines only.
+        have = store.get_settings().get("calendar_token")
+        if not have or not hmac.compare_digest(token.encode(), str(have).encode()):
+            raise HTTPException(404, "Not found")
+        return Response(reminders.build_ics(bids.list(), bids.vault_list(), now(), config.tz_name, config.app_url or public_base(request)),
+                        media_type="text/calendar; charset=utf-8", headers={"Content-Disposition": 'inline; filename="tendai-deadlines.ics"'})
 
     @app.post("/api/settings/test-email", dependencies=auth)
     def test_email() -> dict:
