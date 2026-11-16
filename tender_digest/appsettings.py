@@ -108,6 +108,26 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
             if not isinstance(payload[flag], bool):
                 raise SettingsError(f"{flag} must be true or false")
             out[flag] = payload[flag]
+    if "reminders_on" in payload:
+        if not isinstance(payload["reminders_on"], bool):
+            raise SettingsError("reminders_on must be true or false")
+        out["reminders_on"] = payload["reminders_on"]
+    if "require_signoff" in payload:
+        if not isinstance(payload["require_signoff"], bool):
+            raise SettingsError("require_signoff must be true or false")
+        out["require_signoff"] = payload["require_signoff"]
+    for key, label, low, high in (("audit_days", "How long the activity log is kept", 30, 3650), ("tender_days", "How long collected tenders are kept", 30, 3650)):
+        if key in payload:
+            v = payload[key]
+            if isinstance(v, bool) or not isinstance(v, int) or not low <= v <= high:
+                raise SettingsError(f"{label} must be a whole number of days from {low} to {high}")
+            out[key] = v
+    if "webhook_url" in payload:
+        from .reminders import check_webhook_url
+        try:
+            out["webhook_url"] = check_webhook_url(str(payload["webhook_url"] or ""))
+        except ValueError as e:
+            raise SettingsError(str(e)) from None
     if "portals" in payload:
         portals = _words(payload["portals"], "Portals")
         unknown = [p for p in portals if p not in known_portals]
@@ -147,7 +167,8 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
 
 DEFAULTS = {
     "send_time": "08:00", "schedule_enabled": True, "send_empty": True, "min_value": 0.0,
-    "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "ai_digest_intro": True, "ai_hide_noncivil": False,
+    "reminders_on": True, "require_signoff": False, "webhook_url": "", "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "ai_digest_intro": True, "ai_hide_noncivil": False,
+    "audit_days": 365, "tender_days": 120,
 }
 
 
@@ -167,6 +188,11 @@ def current(env: Settings, saved: dict[str, Any]) -> dict[str, Any]:
         "logo_text": saved.get("logo_text", DEFAULTS["logo_text"]),
         "ai_digest_intro": saved.get("ai_digest_intro", DEFAULTS["ai_digest_intro"]),
         "ai_hide_noncivil": saved.get("ai_hide_noncivil", DEFAULTS["ai_hide_noncivil"]),
+        "reminders_on": saved.get("reminders_on", DEFAULTS["reminders_on"]),
+        "require_signoff": saved.get("require_signoff", DEFAULTS["require_signoff"]),
+        "webhook_url": saved.get("webhook_url", DEFAULTS["webhook_url"]),
+        "audit_days": saved.get("audit_days", DEFAULTS["audit_days"]),
+        "tender_days": saved.get("tender_days", DEFAULTS["tender_days"]),
     }
 
 

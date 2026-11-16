@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from . import smartsearch
 from .gepnic import Tender
 
 _DATES = ("published", "closing", "opening")
@@ -163,6 +164,7 @@ class SeenStore:
         # One connection shared by the web threads and the run thread; every use goes through the lock.
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self.db.create_function("tsmatch", 2, smartsearch.match, deterministic=True)  # the search in the tender list
         self.lock = threading.RLock()
         with self.lock:
             self.db.executescript(
@@ -177,6 +179,7 @@ class SeenStore:
                   error TEXT, log TEXT NOT NULL DEFAULT '[]');
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS starred (key TEXT PRIMARY KEY, created TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS reminders_sent (key TEXT PRIMARY KEY, at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS login_fails (at REAL NOT NULL, client TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, created REAL NOT NULL, last_seen REAL NOT NULL, user_id INTEGER NOT NULL DEFAULT 0);
@@ -185,6 +188,10 @@ class SeenStore:
                   departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
                 """
             )
+            have_s = {r["name"] for r in self.db.execute("PRAGMA table_info(sessions)")}
+            for col in ("client", "agent"):
+                if col not in have_s:
+                    self.db.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")  # which device each sign-in came from
             if "user_id" not in {r["name"] for r in self.db.execute("PRAGMA table_info(sessions)")}:
                 self.db.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")  # sessions made before accounts existed belong to the owner (0)
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(seen)")}
@@ -264,6 +271,19 @@ class SeenStore:
             ).fetchall()
         return [_from_json(r[0]) for r in rows]
 
+    def count_portal(self, portal: str) -> int:
+        with self.lock:
+            return self.db.execute("SELECT COUNT(*) FROM seen WHERE portal = ?", (portal,)).fetchone()[0]
+
+    def delete_portal(self, portal: str) -> list[str]:
+        """Removes every tender kept from one portal (sample data). Returns their keys."""
+        with self.lock:
+            keys = [r[0] for r in self.db.execute("SELECT key FROM seen WHERE portal = ?", (portal,))]
+            self.db.execute("DELETE FROM seen WHERE portal = ?", (portal,))
+            self.db.execute("DELETE FROM starred WHERE key LIKE ?", (portal + ":%",))
+            self.db.commit()
+        return keys
+
     def mark_emailed(self, keys: list[str]) -> None:
         with self.lock:
             self.db.executemany("UPDATE seen SET emailed = 1 WHERE key = ?", [(k,) for k in keys])
@@ -324,9 +344,20 @@ class SeenStore:
             args.append(int(f["min_fit"]))
 
         if f.get("q"):
-            like = cls._like(str(f["q"]))
-            where.append("(" + " OR ".join(f"{c} LIKE ? ESCAPE '\\'" for c in ("title", "description", "organisation", "tender_id", "location", "category")) + ")")
-            args += [like] * 6
+            parsed = smartsearch.parse(str(f["q"]))
+            if parsed.min_value is not None:
+                where.append("value >= ?")
+                args.append(parsed.min_value)
+            if parsed.max_value is not None:
+                where.append("value <= ?")
+                args.append(parsed.max_value)
+            if parsed.has_text:
+                where.append("tsmatch(" + " || ' ' || ".join(f"COALESCE({c}, '')" for c in ("title", "description", "organisation", "tender_id", "location", "category")) + ", ?) = 1")
+                args.append(parsed.spec())
+            elif parsed.min_value is None and parsed.max_value is None:  # only filler words (or symbols): fall back to the plain text match
+                like = cls._like(str(f["q"]))
+                where.append("(" + " OR ".join(f"{c} LIKE ? ESCAPE '\\'" for c in ("title", "description", "organisation", "tender_id", "location", "category")) + ")")
+                args += [like] * 6
         if f.get("min_value") is not None:
             where.append("value >= ?")
             args.append(float(f["min_value"]))
@@ -401,6 +432,20 @@ class SeenStore:
         d["opening"] = json.loads(d.pop("payload") or "{}").get("opening")
         return d
 
+    _vocab: tuple[int, float, dict[str, int]] | None = None
+
+    def vocabulary(self) -> dict[str, int]:
+        """The words used in collected tenders, for suggesting a spelling. Rebuilt when the number of tenders changes, at most every ten minutes."""
+        import time
+        n, t = self.count(), time.time()
+        if self._vocab and (self._vocab[0] == n or t - self._vocab[1] < 600):
+            return self._vocab[2]
+        with self.lock:
+            texts = [f"{r[0]} {r[1]}" for r in self.db.execute("SELECT title, description FROM seen WHERE civil = 1")]
+        vocab = smartsearch.vocabulary_from(texts)
+        self._vocab = (n, t, vocab)
+        return vocab
+
     def categories(self) -> list[str]:
         with self.lock:
             return [r[0] for r in self.db.execute("SELECT DISTINCT category FROM seen WHERE civil=1 AND category <> '' ORDER BY category")]
@@ -424,7 +469,7 @@ class SeenStore:
         with self.lock:
             rows = self.db.execute(
                 "SELECT key, title, description, organisation, category, location, portal, value, emd, closing, published FROM seen "
-                "WHERE civil = 1 AND (closing IS NULL OR closing >= ?) AND (ai_profile IS NULL OR ai_profile <> ?) ORDER BY first_seen DESC LIMIT ?",
+                "WHERE civil = 1 AND portal <> 'sample' AND (closing IS NULL OR closing >= ?) AND (ai_profile IS NULL OR ai_profile <> ?) ORDER BY first_seen DESC LIMIT ?",
                 (now.isoformat(), profile_hash, limit)).fetchall()
         return [dict(r) for r in rows]
 
@@ -718,11 +763,34 @@ class SeenStore:
 
     # ---- login sessions: kept here so that logging out, or going idle, really ends them ------------------------
 
-    def session_start(self, sid: str, now: float, keep_seconds: float, user_id: int = 0) -> None:
+    def session_start(self, sid: str, now: float, keep_seconds: float, user_id: int = 0, client: str = "", agent: str = "") -> None:
         with self.lock:
             self.db.execute("DELETE FROM sessions WHERE created < ?", (now - keep_seconds,))
-            self.db.execute("INSERT OR REPLACE INTO sessions (sid, created, last_seen, user_id) VALUES (?, ?, ?, ?)", (sid, now, now, user_id))
+            self.db.execute("INSERT OR REPLACE INTO sessions (sid, created, last_seen, user_id, client, agent) VALUES (?, ?, ?, ?, ?, ?)", (sid, now, now, user_id, client[:64], agent[:200]))
             self.db.commit()
+
+    @staticmethod
+    def session_ref(sid: str) -> str:
+        """A short name for a session that is safe to show and send back (the session id itself is the credential and never leaves the server)."""
+        import hashlib
+        return hashlib.sha256(sid.encode()).hexdigest()[:16]
+
+    def sessions_of(self, user_id: int, now: float, idle_seconds: float) -> list[dict]:
+        """The sign-ins of one person that are still alive, newest use first."""
+        with self.lock:
+            rows = self.db.execute("SELECT sid, created, last_seen, client, agent FROM sessions WHERE user_id = ? AND last_seen >= ? ORDER BY last_seen DESC",
+                                   (user_id, now - idle_seconds)).fetchall()
+        return [{"ref": self.session_ref(r["sid"]), "sid": r["sid"], "created": r["created"], "last_seen": r["last_seen"], "client": r["client"], "agent": r["agent"]} for r in rows]
+
+    def session_end_ref(self, user_id: int, ref: str) -> bool:
+        """Ends one of this person's sign-ins by its short name. False when it is not theirs or is already gone."""
+        with self.lock:
+            for r in self.db.execute("SELECT sid FROM sessions WHERE user_id = ?", (user_id,)).fetchall():
+                if self.session_ref(r["sid"]) == ref:
+                    self.db.execute("DELETE FROM sessions WHERE sid = ?", (r["sid"],))
+                    self.db.commit()
+                    return True
+        return False
 
     def session_touch(self, sid: str, now: float, idle_seconds: float) -> int | None:
         """The session's user id (0 = the owner login) when it exists and was used within `idle_seconds`, else None.
@@ -766,6 +834,18 @@ class SeenStore:
     def login_fails_clear(self, client: str) -> None:
         with self.lock:
             self.db.execute("DELETE FROM login_fails WHERE client = ?", (client,))
+            self.db.commit()
+
+    # ---- deadline reminders already handled, so each threshold fires once ------------------------------------------
+
+    def reminders_sent(self) -> set[str]:
+        with self.lock:
+            return {r["key"] for r in self.db.execute("SELECT key FROM reminders_sent")}
+
+    def reminders_mark(self, keys: list[str], at: str) -> None:
+        with self.lock:
+            self.db.executemany("INSERT OR IGNORE INTO reminders_sent (key, at) VALUES (?, ?)", [(k, at) for k in keys])
+            self.db.execute("DELETE FROM reminders_sent WHERE at < date(?, '-90 day')", (at[:10],))
             self.db.commit()
 
     def ping(self) -> None:

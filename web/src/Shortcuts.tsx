@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Tab } from './App';
+import { tr } from './i18n';
 
-const GO: Record<string, [Tab, string]> = { d: ['dashboard', 'Dashboard'], e: ['explore', 'Explore'], t: ['tenders', 'Tenders'], b: ['bids', 'Bids'], v: ['vault', 'Vault'], r: ['runs', 'Runs'], s: ['settings', 'Settings'] };
+const GO: Record<string, [Tab, string]> = { d: ['dashboard', tr('Dashboard')], e: ['explore', tr('Explore')], t: ['tenders', tr('Tenders')], b: ['bids', tr('Bids')], v: ['vault', tr('Vault')], r: ['runs', tr('Runs')], s: ['settings', tr('Settings')] };
 
 const typing = (el: EventTarget | null) => {
   const t = el as HTMLElement | null;
@@ -38,16 +39,16 @@ export function ShortcutsHelp({ onClose, allowed }: { onClose: () => void; allow
     return () => { document.removeEventListener('keydown', esc); before?.focus?.(); };
   }, [onClose]);
   const rows: [string, string][] = [
-    ['/', 'Search the tender list'], ['?', 'Show this list'], ['Esc', 'Close a panel, menu or dialog'],
+    ['/', tr('Search the tender list')], ['?', tr('Show this list')], ['Esc', tr('Close a panel, menu or dialog')],
     ...Object.entries(GO).filter(([, [t]]) => allowed(t)).map(([k, [, label]]): [string, string] => [`g then ${k}`, `Go to ${label}`]),
   ];
   return (
     <div className="confirm-wrap" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="confirm-box" role="dialog" aria-modal="true" aria-labelledby="sc-title">
-        <h2 id="sc-title">Keyboard shortcuts</h2>
+        <h2 id="sc-title">{tr('Keyboard shortcuts')}</h2>
         <dl className="shortcuts">{rows.map(([k, what]) => <div key={k}><dt>{k.split(' then ').map((p, i) => <span key={i}>{i > 0 && ' then '}<kbd>{p}</kbd></span>)}</dt><dd>{what}</dd></div>)}</dl>
-        <p className="muted small">Shortcuts pause while you are typing in a box.</p>
-        <div className="confirm-actions"><button type="button" className="btn primary" ref={close} onClick={onClose}>Close</button></div>
+        <p className="muted small">{tr('Shortcuts pause while you are typing in a box.')}</p>
+        <div className="confirm-actions"><button type="button" className="btn primary" ref={close} onClick={onClose}>{tr('Close')}</button></div>
       </div>
     </div>
   );

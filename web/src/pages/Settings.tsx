@@ -7,10 +7,12 @@ import { PortalsManager } from '../ManualPortals';
 import { setLogoText } from '../Brand';
 import { Tabs } from '../Tabs';
 import { useToast } from '../ui';
+import { useConfirm } from '../confirm';
 import { ActivityPanel, UsersPanel } from '../Account';
+import { DataPrivacyCard, IntegrationsPanel } from '../Integrations';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
-type Tab = 'email' | 'portals' | 'filters' | 'ai' | 'people' | 'activity' | 'backup';
+type Tab = 'email' | 'reminders' | 'portals' | 'filters' | 'ai' | 'people' | 'integrations' | 'activity' | 'backup';
 let lastTab: Tab = 'email';
 const norm = (v: { recipients: string; extra: string; exclude: string; minValue: string; logoText: string; f: Settings }) => JSON.stringify([
   lines(v.recipients), lines(v.extra), lines(v.exclude), Number(v.minValue) || 0, v.logoText, v.f.send_time, v.f.schedule_enabled, v.f.send_empty,
@@ -76,7 +78,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
       const saved = await api.saveSettings({
         recipients: lines(recipients), send_time: form.send_time, schedule_enabled: form.schedule_enabled, send_empty: form.send_empty,
         portals: form.portals, min_value: Number(minValue) || 0, extra_keywords: lines(extra), exclude_words: lines(exclude),
-        logo_text: logoText, ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil,
+        logo_text: logoText, ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil, reminders_on: form.reminders_on ?? true, webhook_url: form.webhook_url ?? '',
       });
       loadAi();
       load(saved);
@@ -131,9 +133,9 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
       <form onSubmit={save}>
         <div className="set-bar">
           <Tabs<Tab> label="Settings sections" value={tab} onChange={setTab} tabs={[
-            { key: 'email', label: 'Daily email' }, { key: 'portals', label: <>Portals<span className="tab-dot">{form.portals.length}</span></> },
-            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }, { key: 'people', label: 'People' }, { key: 'activity', label: 'Activity' }, { key: 'backup', label: 'Backup' }]} />
-          {['email', 'portals', 'filters', 'ai'].includes(tab) && SaveBar}
+            { key: 'email', label: 'Daily email' }, { key: 'reminders', label: 'Reminders' }, { key: 'portals', label: <>Portals<span className="tab-dot">{form.portals.length}</span></> },
+            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }, { key: 'people', label: 'People' }, { key: 'integrations', label: 'Integrations' }, { key: 'activity', label: 'Activity' }, { key: 'backup', label: 'Backup' }]} />
+          {['email', 'reminders', 'portals', 'filters', 'ai'].includes(tab) && SaveBar}
         </div>
         {msg && <div className={`alert ${msg.tone}`} role="status">{msg.text}</div>}
 
@@ -163,6 +165,8 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
             </div>
           </section>
         )}
+
+        {tab === 'reminders' && <RemindersTab form={form} patch={patch} />}
 
         {tab === 'portals' && (
           <>
@@ -233,9 +237,63 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
 
               </form>
       {tab === 'people' && <UsersPanel />}
+      {tab === 'integrations' && <IntegrationsPanel />}
       {tab === 'activity' && <ActivityPanel />}
       {tab === 'backup' && <BackupPanel />}
     </>
+  );
+}
+
+/** Deadline reminders: on or off, where else to send them, and a calendar address. Saved with the Save button, except the calendar, which acts at once. */
+function RemindersTab({ form, patch }: { form: Settings; patch: (p: Partial<Settings>) => void }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const cal = useLoad(() => api.calendar(), []);
+  const [testing, setTesting] = useState(false);
+  async function testHook() {
+    setTesting(true);
+    try { await api.testWebhook(form.webhook_url ?? ''); toast('The test message was sent. Check the chat or gateway.'); } catch (e) { toast((e as Error).message, 'bad'); } finally { setTesting(false); }
+  }
+  async function newAddress() {
+    if (cal.data?.enabled && !(await confirm({ title: 'Make a new calendar address?', body: 'Calendars that use the old address stop updating. You subscribe again with the new one.', confirmLabel: 'Make a new address' }))) return;
+    try { await api.newCalendarToken(); cal.reload(); } catch (e) { toast((e as Error).message, 'bad'); }
+  }
+  async function turnOff() {
+    if (!(await confirm({ title: 'Turn the calendar off?', body: 'The address stops working for every calendar that uses it.', confirmLabel: 'Turn off', danger: true }))) return;
+    try { await api.stopCalendar(); cal.reload(); } catch (e) { toast((e as Error).message, 'bad'); }
+  }
+  async function copy() { try { await navigator.clipboard.writeText(cal.data?.url ?? ''); toast('Address copied'); } catch { toast('Could not copy: select the address and copy it', 'bad'); } }
+  return (
+    <div className="set-grid">
+      <section className="card">
+        <h2>Deadline reminders</h2>
+        <p className="sub">Do not wait for tomorrow's email. For bids in progress, a reminder goes out 3 days and 1 day before the closing date, the EMD date, the pre-bid meeting and the last date for queries, and again 6 hours before a bid closes. Each reminder is sent once. Nothing is sent between 10 pm and 7 am, except the last one before a closing time.</p>
+        <label className="check"><input type="checkbox" checked={form.reminders_on ?? true} onChange={(e) => patch({ reminders_on: e.target.checked })} />Send deadline reminders by email to the daily-email recipients</label>
+        <label className="field" style={{ marginTop: 14 }}>Also send to a chat or message service (optional)
+          <span className="hint">A web address that accepts a JSON message: a Slack or Microsoft Teams incoming webhook, or a WhatsApp or SMS gateway. It must start with https://.</span>
+          <input type="text" value={form.webhook_url ?? ''} onChange={(e) => patch({ webhook_url: e.target.value })} placeholder="https://hooks.slack.com/services/..." spellCheck={false} autoComplete="off" />
+        </label>
+        <button type="button" className="btn" onClick={testHook} disabled={testing || !(form.webhook_url ?? '').trim()}>{testing ? 'Sending…' : 'Send a test message'}</button>
+      </section>
+      <section className="card">
+        <h2>Calendar {cal.data && <span className={`badge ${cal.data.enabled ? 'ok' : 'plain'}`} style={{ marginLeft: 6 }}>{cal.data.enabled ? 'On' : 'Off'}</span>}</h2>
+        <p className="sub">Subscribe in Google Calendar, Outlook or an iPhone and every bid deadline and expiring Vault paper appears in your own calendar, with a reminder a day before. It updates by itself.</p>
+        {cal.error && <div className="alert bad">{cal.error}</div>}
+        {cal.data?.enabled ? (
+          <>
+            <label className="field">Your private calendar address<span className="hint">Anyone with this address can see the deadlines, so share it only with your team.</span>
+              <input type="text" readOnly value={cal.data.url} onFocus={(e) => e.currentTarget.select()} aria-label="Calendar address" /></label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn primary" onClick={copy}>Copy address</button>
+              <button type="button" className="btn" onClick={newAddress}>Make a new address</button>
+              <button type="button" className="btn" onClick={turnOff}>Turn off</button>
+            </div>
+            <details style={{ marginTop: 12 }}><summary>How to subscribe</summary>
+              <p className="sub"><strong>Google Calendar:</strong> Other calendars, From URL, paste the address. <strong>Outlook:</strong> Add calendar, Subscribe from web. <strong>iPhone:</strong> Settings, Calendar, Accounts, Add Subscribed Calendar.</p></details>
+          </>
+        ) : <button type="button" className="btn primary" onClick={newAddress} disabled={!cal.data}>Make a calendar address</button>}
+      </section>
+    </div>
   );
 }
 
@@ -269,6 +327,7 @@ function BackupPanel() {
           </>
         )}
       </section>
+      <DataPrivacyCard encryption={data?.encryption} />
       <section className="card">
         <h2>Automatic daily copy {data && <span className={`badge ${data.enabled && data.latest_day ? 'ok' : 'warn'}`} style={{ marginLeft: 6 }}>{data.enabled ? (data.latest_day ? 'Running' : 'Waiting for the first copy') : 'Off'}</span>}</h2>
         {error && <div className="alert bad">{error}</div>}

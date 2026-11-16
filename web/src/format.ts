@@ -1,3 +1,4 @@
+import { tr } from './i18n';
 // The server speaks in India time without a zone ("2026-11-14T17:30:00"). Show it exactly as given: no browser conversion.
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -33,15 +34,15 @@ export function relative(iso: string | null, now: string): { text: string; tone:
   const hours = (asUtc(iso) - asUtc(now)) / 3_600_000;
   if (hours < 0) {
     const d = Math.floor(-hours / 24);
-    return { text: d === 0 ? 'Closed today' : `Closed ${d} day${d === 1 ? '' : 's'} ago`, tone: 'closed' };
+    return { text: d === 0 ? tr('Closed today') : d === 1 ? tr('Closed {d} day ago', { d }) : tr('Closed {d} days ago', { d }), tone: 'closed' };
   }
   if (hours < 48) {  // the last two days are counted in hours and minutes: that is when it matters
     const mins = Math.floor((asUtc(iso) - asUtc(now)) / 60_000);  // whole minutes: no floating-point drift
     const h = Math.floor(mins / 60), m = mins % 60;
-    return { text: h === 0 ? `Closes in ${m} min` : m === 0 ? `Closes in ${h} h` : `Closes in ${h} h ${m} min`, tone: hours < 24 ? 'urgent' : 'soon' };
+    return { text: h === 0 ? tr('Closes in {m} min', { m }) : m === 0 ? tr('Closes in {h} h', { h }) : tr('Closes in {h} h {m} min', { h, m }), tone: hours < 24 ? 'urgent' : 'soon' };
   }
   const d = Math.floor(hours / 24);
-  return { text: `Closes in ${d} day${d === 1 ? '' : 's'}`, tone: d <= 3 ? 'soon' : 'ok' };
+  return { text: d === 1 ? tr('Closes in {d} day', { d }) : tr('Closes in {d} days', { d }), tone: d <= 3 ? 'soon' : 'ok' };
 }
 
 /** What a person types for an amount, as rupees: "5,00,000", "50 lakh", "1.5 cr", "₹12L", "75k". Null when it is not an amount. */
@@ -55,7 +56,7 @@ export function parseMoney(text: string): number | null {
 
 /** 851184 -> "₹8.51 lakh", 20991250 -> "₹2.10 crore". Indian units, because that is how these are quoted. */
 export function inr(v: number | null | undefined, compact = true): string {
-  if (v === null || v === undefined) return 'Not stated';
+  if (v === null || v === undefined) return tr('Not stated');
   if (compact) {
     if (v >= 1e7) return `₹${(v / 1e7).toFixed(2)} crore`;
     if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)} lakh`;

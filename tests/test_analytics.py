@@ -156,7 +156,7 @@ def test_search_text_is_literal_not_a_pattern(store):
     assert count(store, {"status": "all", "q": "%"}) == 0
     assert count(store, {"status": "all", "q": "_"}) == 0
     assert count(store, {"status": "all", "q": "Road work 7"}) >= 1
-    assert count(store, {"status": "all", "q": "' OR 1=1 --"}) == 0
+    assert count(store, {"status": "all", "q": "' OR 1=1 --"}) < count(store, {"status": "all"})  # words in a search, never SQL
 
 
 def test_stats_follow_the_filters(store):

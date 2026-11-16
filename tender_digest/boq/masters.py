@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS bid_risk (tender_key TEXT PRIMARY KEY, findings TEXT 
 CREATE TABLE IF NOT EXISTS boq_line (
     boq_id INTEGER NOT NULL, line_no INTEGER NOT NULL, sr TEXT, section TEXT, description TEXT NOT NULL, uom_raw TEXT, uom TEXT,
     qty REAL, est_rate REAL, est_amount REAL, sor_code TEXT, match_status TEXT, match_tier TEXT, confidence REAL, erp_item_code TEXT,
-    candidates TEXT NOT NULL DEFAULT '[]', reason TEXT, PRIMARY KEY (boq_id, line_no));
+    candidates TEXT NOT NULL DEFAULT '[]', reason TEXT, manual_cost REAL, PRIMARY KEY (boq_id, line_no));
 """
 
 DEFAULT_COMPANY = "default"
@@ -95,6 +95,8 @@ class MasterStore:
         self.lock = threading.RLock()
         with self.lock:
             self.db.executescript(SCHEMA)
+            if "manual_cost" not in {r["name"] for r in self.db.execute("PRAGMA table_info(boq_line)")}:
+                self.db.execute("ALTER TABLE boq_line ADD COLUMN manual_cost REAL")  # added after the first release
             self.db.executemany("INSERT OR IGNORE INTO uom_master (alias, canonical_uom, dimension, factor_to_base) VALUES (?,?,?,?)",
                                 [(a, c, U.UNITS[c][0], U.UNITS[c][1]) for a, c in U.all_aliases().items()])
             self.db.commit()
@@ -258,7 +260,7 @@ class MasterStore:
                                                              datetime.now().isoformat(timespec="seconds")))
             boq_id = int(cur.lastrowid or 0)
             for n, r in enumerate(rows, start=1):
-                self.db.execute("INSERT INTO boq_line VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                self.db.execute("INSERT INTO boq_line (boq_id, line_no, sr, section, description, uom_raw, uom, qty, est_rate, est_amount, sor_code, match_status, match_tier, confidence, erp_item_code, candidates, reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                                 (boq_id, n, r.get("sr"), r.get("section"), r.get("description", ""), r.get("uom_raw"), r.get("uom"), r.get("qty"),
                                  r.get("est_rate"), r.get("est_amount"), r.get("sor_code"), r.get("match_status"), r.get("match_tier"),
                                  r.get("confidence"), r.get("erp_item_code"), json.dumps(r.get("candidates") or []), r.get("reason")))
@@ -292,6 +294,12 @@ class MasterStore:
                 self.db.execute("DELETE FROM boq_line WHERE boq_id=?", (i,))
                 self.db.execute("DELETE FROM boq_document WHERE boq_id=?", (i,))
             self.db.commit()
+
+    def set_line_cost(self, boq_id: int, line_no: int, cost: float | None) -> bool:
+        with self.lock:
+            cur = self.db.execute("UPDATE boq_line SET manual_cost = ? WHERE boq_id = ? AND line_no = ?", (cost, boq_id, line_no))
+            self.db.commit()
+            return cur.rowcount == 1
 
     def update_line_match(self, boq_id: int, line_no: int, status: str, tier: str, confidence: float, item_code: str | None, reason: str) -> bool:
         with self.lock:

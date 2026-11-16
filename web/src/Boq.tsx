@@ -5,6 +5,7 @@ import { inr, parseMoney, plural } from './format';
 import { useLoad } from './hooks';
 import { useToast } from './ui';
 import { useConfirm } from './confirm';
+import { useSession } from './session';
 import type { BoqCandidate, BoqLine, BoqStatus, CatalogueItem, Simulation } from './types';
 
 const STATUS: Record<BoqStatus, [string, string]> = {
@@ -72,7 +73,7 @@ export function BoqCard({ bidId }: { bidId: number }) {
       <div className="card-head">
         <div>
           <h2>Bill of quantities (BOQ)</h2>
-          <p className="sub">Upload the tender's BOQ (.xlsx, .xlsm, .xls or .csv). Each line is matched to your item catalogue; confirm the matches and the cost is worked out from your own rates.</p>
+          <p className="sub">Upload the tender's BOQ (.xlsx, .xlsm, .xls, .csv or a PDF with a table). Each line is matched to your item catalogue; confirm the matches and the cost is worked out from your own rates.</p>
         </div>
         <div className="head-actions">
           <a className="btn small" href="#/vault">Item catalogue{d ? ` (${d.catalogue.item_master ?? 0})` : ''} in Vault</a>
@@ -83,8 +84,8 @@ export function BoqCard({ bidId }: { bidId: number }) {
       {noCatalogue && <div className="alert warn">Your item catalogue is empty, so nothing can be matched yet. Load your item list once in the <a href="#/vault">Vault</a>, then come back here.</div>}
 
       <div className="ai-doc">
-        <label className="field" style={{ margin: 0 }}>BOQ file (.xlsx, .xlsm, .xls or .csv, up to 10 MB)
-          <input type="file" accept=".xlsx,.xlsm,.xls,.csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <label className="field" style={{ margin: 0 }}>BOQ file (.xlsx, .xlsm, .xls, .csv or .pdf, up to 10 MB)
+          <input type="file" accept=".xlsx,.xlsm,.xls,.csv,.pdf,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </label>
         <div><button className="btn primary" onClick={upload} disabled={busy || !file}>{busy ? 'Reading and matching…' : boq ? 'Replace BOQ and match again' : 'Read and match'}</button></div>
         {d && !d.ai && <p className="muted small" style={{ margin: 0 }}>The AI assistant is off, so lines are matched by rules only and none is marked Matched until you confirm it.</p>}
@@ -107,7 +108,7 @@ export function BoqCard({ bidId }: { bidId: number }) {
             <dt>Your cost, confirmed lines only</dt><dd>{confirmedPr ? <>{inr(confirmedPr.projected_cost, false)} <span className="muted small">({confirmedPr.break_even_pct === null ? '-' : pct(confirmedPr.break_even_pct)} against the estimate)</span></> : '-'}</dd>
             <dt>If lines marked Check are right</dt><dd>{withCheckPr ? <>{inr(withCheckPr.projected_cost, false)} <span className="muted small">({withCheckPr.break_even_pct === null ? '-' : pct(withCheckPr.break_even_pct)}). A guess until you confirm them.</span></> : '-'}</dd>
           </dl>
-          <p className="muted small">{pr.assumption} Material-only rates and lump sums are never counted as a full cost.</p>
+          <p className="muted small">{pr.assumption} Material-only rates and lump sums are never counted as a full cost unless you enter your own figure for the line.</p>
           <div className="head-actions" style={{ margin: '8px 0' }}>
             {suggested.length > 0 && <button className="btn small primary" onClick={acceptAll} disabled={accepting}>{accepting ? 'Confirming…' : `Confirm all ${suggested.length} suggested matches`}</button>}
             <label className="muted small"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Show lines marked "Check" with a cost in the table</label>
@@ -133,8 +134,9 @@ export function BoqCard({ bidId }: { bidId: number }) {
                       </td>
                       <td className="num nowrap">
                         {l.cost?.complete && l.cost.cost_amount !== null
-                          ? <>{inr(l.cost.cost_amount, false)}<div className="muted small" title={l.cost.note}>{pct(l.cost.variance_pct)}</div></>
+                          ? <>{inr(l.cost.cost_amount, false)}<div className="muted small" title={l.cost.note}>{l.manual_cost !== null ? 'your figure' : pct(l.cost.variance_pct)}</div></>
                           : <span className="muted" title={l.cost?.note ?? ''}>-</span>}
+                        <CostEntry line={l} bidId={bidId} onSaved={reloadAll} />
                       </td>
                     </tr>
                   </Fragment>
@@ -146,6 +148,44 @@ export function BoqCard({ bidId }: { bidId: number }) {
         </>
       )}
     </section>
+  );
+}
+
+/** Lets a bidder enter what a line will cost in total: the way to price a lump sum or an item that is not in the catalogue. */
+function CostEntry({ line, bidId, onSaved }: { line: BoqLine; bidId: number; onSaved: () => void }) {
+  const toast = useToast();
+  const { can } = useSession();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const priced = line.cost?.complete && line.manual_cost === null;
+  if (!can('bidder') || (priced && !line.lump_sum)) return null;
+  async function save(cost: number | null) {
+    setSaving(true);
+    try { await api.setBoqLineCost(bidId, line.line_no, cost); setOpen(false); onSaved(); }
+    catch (e) { toast((e as Error).message, 'bad'); } finally { setSaving(false); }
+  }
+  if (!open) {
+    return (
+      <div>
+        <button type="button" className="btn small" onClick={() => { setText(line.manual_cost !== null ? String(line.manual_cost) : ''); setOpen(true); }}>
+          {line.manual_cost !== null ? 'Change cost' : line.lump_sum ? 'Enter lump-sum cost' : 'Enter cost'}
+        </button>
+      </div>
+    );
+  }
+  const value = parseMoney(text);
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (value !== null && value > 0) void save(value); }} style={{ display: 'grid', gap: 4, marginTop: 4 }}>
+      <label className="muted small">Your total cost for this line (₹, or 4.5 lakh)
+        <input autoFocus value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal" aria-invalid={text !== '' && (value === null || value <= 0)} />
+      </label>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button className="btn small primary" disabled={saving || value === null || value <= 0}>Save</button>
+        {line.manual_cost !== null && <button type="button" className="btn small" disabled={saving} onClick={() => void save(null)}>Remove</button>}
+        <button type="button" className="btn small" onClick={() => setOpen(false)}>Cancel</button>
+      </div>
+    </form>
   );
 }
 

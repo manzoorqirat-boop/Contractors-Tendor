@@ -16,6 +16,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from html import escape as html_escape
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -26,7 +27,7 @@ from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, alerts, appsettings, mailer
+from . import access, accounts, ai, alerts, appsettings, events, letters, mailer, pack, privacy, reminders, sample, sealing, smartsearch, tokens
 from .accounts import AccountError, Accounts, Principal
 from . import offsite
 from .backup import Backups, BackupError
@@ -35,6 +36,7 @@ from .boq.match import ClaudeVerifier
 from .boq.portal import fetch_boq, fetch_risks
 from .boq.service import BoqError, BoqService
 from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
+from .bids import _when as stored_date
 from .gepnic import PortalError, Tender, parse_date, pick_nit
 from .config import Portal, Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell, tenders_workbook
@@ -49,7 +51,7 @@ CSP = "default-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'n
 # Request size limits. Uploads travel as base64 inside JSON (a 10 MB file is about 13.4 MB), so those routes get more room; everything else is small.
 MAX_UPLOAD_BODY = 16 * 1024 * 1024
 MAX_JSON_BODY = 1024 * 1024
-UPLOAD_PATH_RE = re.compile(r"^/api/(vault|boq/catalogue|tenders/(document|manual(/read)?)|bids/\d+/(document|boq|risks))$")
+UPLOAD_PATH_RE = re.compile(r"^/api/(vault|boq/catalogue|tenders/(document|manual(/read)?)|bids/\d+/(document|boq|risks|award))$")
 MAX_VIEWS = 30
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?)?$")
 # The settings a saved view may hold: the page's filters and display choices, nothing else.
@@ -101,6 +103,7 @@ class AppConfig:
     idle_seconds: int = 24 * 3600  # a session unused for this long ends; it also ends after SESSION_SECONDS whatever happens
     ai_per_day: int = 300  # most AI requests a person can start in a day (0 = no limit); scheduled labelling has its own cap, AI_MAX_PER_RUN
     ai_per_minute: int = 20
+    app_url: str = ""  # this site's public address (APP_URL), used for links in reminder emails and the calendar
     owner_totp: str = ""  # a base32 secret: when set, the owner login also needs the six-digit code from an authenticator app
     background_jobs: bool = False  # True in the real service: long actions run in the background and the page polls. Tests run them inline.
     trusted_proxy_hops: int = 1  # how many reverse proxies sit in front (Railway: 1). 0 = ignore X-Forwarded-For
@@ -138,6 +141,7 @@ def config_from_env() -> AppConfig:
         password=password, secret_key=key, username=os.environ.get("APP_USERNAME", "admin").strip(), cookie_secure=os.environ.get("COOKIE_SECURE", "true").lower() not in ("0", "false", "no"),
         tz_name=os.environ.get("TZ_NAME", "Asia/Kolkata"),
         idle_seconds=max(1, _int_env("SESSION_IDLE_HOURS", 24)) * 3600, background_jobs=True, trusted_proxy_hops=max(0, _int_env("TRUSTED_PROXY_HOPS", 1)),
+        app_url=os.environ.get("APP_URL", "").strip().rstrip("/"),
         owner_totp=re.sub(r"[\s=-]", "", os.environ.get("OWNER_TOTP_SECRET", "")).upper(),
         ai_per_day=max(0, _int_env("AI_MAX_CALLS_PER_DAY", 300)), ai_per_minute=max(0, _int_env("AI_MAX_CALLS_PER_MINUTE", 20)),
         static_dir=Path(os.environ.get("STATIC_DIR") or Path(__file__).resolve().parent.parent / "web" / "dist"),
@@ -378,6 +382,29 @@ class NewUser(BaseModel):
     name: str = ""
     role: str = "viewer"
     password: str
+    email: str = ""
+
+
+class OwnEmail(BaseModel):
+    email: str = ""
+
+
+class AwardBody(BaseModel):
+    text: str = ""
+    pdf_base64: str = ""
+
+
+class BiddersBody(BaseModel):
+    bidders: list[dict[str, Any]] = Field(max_length=30)
+
+
+class CommentBody(BaseModel):
+    text: str
+
+
+class SignoffBody(BaseModel):
+    action: str
+    note: str = ""
 
 
 class UserEdit(BaseModel):
@@ -386,6 +413,7 @@ class UserEdit(BaseModel):
     active: bool | None = None
     password: str | None = None
     reset_2fa: bool = False
+    email: str | None = None
 
 
 class PasswordChange(BaseModel):
@@ -397,6 +425,36 @@ class LoginBody(BaseModel):
     username: str = ""
     password: str
     code: str = ""
+
+
+class EraseBody(BaseModel):
+    confirm: str = Field(max_length=80)
+
+
+class TokenBody(BaseModel):
+    name: str = Field(max_length=80)
+    role: str = "viewer"
+    days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class HookBody(BaseModel):
+    name: str | None = Field(default=None, max_length=80)
+    url: str | None = Field(default=None, max_length=500)
+    events: list[str] | None = Field(default=None, max_length=20)
+    active: bool | None = None
+
+
+class ResetRequest(BaseModel):
+    who: str = Field(max_length=120)
+
+
+class ResetConfirm(BaseModel):
+    token: str = Field(max_length=200)
+    password: str = Field(max_length=300)
+
+
+class WebhookTest(BaseModel):
+    url: str = ""
 
 
 class TwoStepCode(BaseModel):
@@ -437,6 +495,25 @@ class ViewItem(BaseModel):
 class BulkStar(BaseModel):
     keys: list[str] = Field(max_length=200)
     starred: bool
+
+
+class TemplateBody(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    body: str = Field(max_length=letters.MAX_BODY * 2)
+    note: str = Field(default="", max_length=200)
+
+
+class TemplateRestore(BaseModel):
+    version: int = Field(ge=1)
+
+
+class LetterFill(BaseModel):
+    template_id: int
+
+
+class Corrigendum(BaseModel):
+    note: str = Field(max_length=600)
+    closing: str | None = Field(default=None, max_length=20)
 
 
 class DocChecked(BaseModel):
@@ -521,6 +598,10 @@ class BoqUpload(BaseModel):
     file_base64: str = ""
 
 
+class BoqCost(BaseModel):
+    cost: float | None = None  # what the line costs you in total; null removes it
+
+
 class BoqConfirm(BaseModel):
     item_code: str | None = None
 
@@ -550,7 +631,9 @@ class RunBody(BaseModel):
 
 def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None) -> FastAPI:
     vault_dir = default_vault_dir(env.state_path)
-    bids = BidBook(store, vault_dir)
+    sealer = sealing.Sealer.from_env()  # raises with a clear message when the key is too short: better than quietly storing things unencrypted
+    bids = BidBook(store, vault_dir, sealer)
+    letter_book = letters.Letters(store)
     boq = BoqService.open(env.state_path, lambda: ClaudeVerifier() if ai.configured() else None)
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     remote_cfg, remote_problem = None, ""
@@ -560,10 +643,42 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         remote_problem = str(e)
         log.warning("off-site backup is not active: %s", e)
     backups = Backups(store, boq.store, env.state_path, vault_dir, keep_days=max(1, _int_env("BACKUP_KEEP_DAYS", 7)), remote=remote_cfg, remote_problem=remote_problem)
-    scheduler = Scheduler(manager, housekeeping=backups.housekeeping) if config.run_scheduler else None
+    audit_pruned = {"day": ""}
+
+    def prune_audit_daily(now: datetime) -> None:
+        """Once a day, drops activity-log entries older than the retention period set in Settings."""
+        day = now.date().isoformat()
+        if audit_pruned["day"] == day:
+            return
+        audit_pruned["day"] = day
+        people.prune_audit(now, appsettings.current(env, store.get_settings())["audit_days"])
+
+    def housekeeping(now: datetime) -> None:
+        """Run by the scheduler every half minute: the daily backup, then any deadline reminders that are due. One failing never stops the other."""
+        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hooks.deliver(now), lambda: prune_audit_daily(now)):
+            try:
+                job()
+            except Exception:  # noqa: BLE001
+                log.exception("housekeeping task failed")
+
+    scheduler = Scheduler(manager, housekeeping=housekeeping) if config.run_scheduler else None
     limiter = LoginLimiter(store=store)
     jobs = Jobs()
-    people = Accounts(store)
+    people = Accounts(store, sealer)
+    api_tokens = tokens.ApiTokens(store)
+    hooks = events.Events(store, sealer)
+    encryption_problem = ""
+    if sealer.enabled:  # bring everything stored before the key was set (or under an older key) up to date
+        try:
+            files = bids.seal_existing()
+            secrets_done = people.seal_existing() + hooks.seal_existing()
+            log.info("encryption at rest: %s files sealed, %s re-keyed, %s secrets written, %s failed", files["sealed"], files["rotated"], secrets_done, files["failed"])
+            if files["failed"]:
+                encryption_problem = f"{files['failed']} stored file(s) could not be encrypted. See the server log."
+        except Exception:  # noqa: BLE001
+            log.exception("encrypting stored data failed")
+            encryption_problem = "Encrypting the stored data failed. See the server log."
+    bids.on_event = lambda event, data: hooks.emit(event, data, now())
 
     def run_job(kind: str, key: str | None, fn: Callable[[], Any]):
         """Runs `fn` now (tests) or in the background (the service). In the background the answer is a ticket the page polls at /api/jobs/<id>."""
@@ -594,6 +709,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             d.clear()
             d.update({p.key: value(p) for p in ps})
         portal_names["manual"], portal_states["manual"] = "Added by hand", "Added by hand"
+        portal_names["sample"], portal_states["sample"] = "Sample data", "Sample data"
 
     refresh_portals()
 
@@ -665,6 +781,16 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def current_user(request: Request) -> Principal | None:
         """Who is signed in on this request, or None. Roles are read fresh each time, so a change or a deactivation applies at once."""
+        header = request.headers.get("authorization", "")
+        if header[:7].lower() == "bearer ":  # a program using an API token (negative ids are tokens)
+            client = client_of(request)
+            if limiter.blocked(client):
+                raise HTTPException(429, "Too many wrong attempts. Wait a few minutes and try again.")
+            found = api_tokens.lookup(header[7:].strip(), now())
+            if not found:
+                limiter.failed(client)
+                return None
+            return Principal(-found["id"], f"token:{found['name']}", f"API token: {found['name']}", found["role"])
         sid = session_id(request)
         uid = store.session_touch(sid, time.time(), config.idle_seconds) if sid else None
         if uid is None:
@@ -685,6 +811,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if not user.can(needed):
             raise HTTPException(403, "Your account is view-only, so it cannot change anything. Ask an administrator for the bidder role." if needed == "bidder"
                                 else "Only an administrator can do that.")
+        if user.id < 0 and request.url.path.startswith("/api/account"):
+            raise HTTPException(403, "An API token cannot use account settings.")
         if user.must_change and request.url.path != "/api/account/password":
             raise HTTPException(403, "Choose a new password before you continue.")
 
@@ -760,7 +888,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 raise HTTPException(401, "That code is not right. Wait for a new one from the app and try again.")
         limiter.succeeded(client)
         sid = secrets.token_urlsafe(24)
-        store.session_start(sid, time.time(), SESSION_SECONDS, who.id)
+        store.session_start(sid, time.time(), SESSION_SECONDS, who.id, client, accounts.describe_agent(request.headers.get("user-agent", "")))
         if not who.owner:
             people.record_login(who.id, now())
         people.log(now(), who.username, who.role, "Signed in", client=client)
@@ -825,7 +953,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             "mail_configured": manager.mail_configured, "recipient_count": len(cur["recipients"]),
             "now": now().isoformat(timespec="seconds"), "timezone": config.tz_name,
             "dimensions": [{"key": k, "label": d["label"], "time": isinstance(d["order"], str) and d["order"] in ("first", "last")} for k, d in DIMENSIONS.items()],
-            "soon_days": env.closing_soon_days, "ai_enabled": ai.configured(), "storage_warning": storage_note,
+            "soon_days": env.closing_soon_days, "ai_enabled": ai.configured(), "storage_warning": storage_note, "require_signoff": cur["require_signoff"],
         }
 
     @app.get("/api/stats", dependencies=auth)
@@ -871,7 +999,13 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if sort not in SORTS:
             raise HTTPException(422, "Unknown sort")
         rows, total = store.search(now(), f, sort, page_size, (page - 1) * page_size)
-        return {"items": [shape(r) for r in rows], "total": total, "page": page, "page_size": page_size, "categories": store.categories()}
+        out = {"items": [shape(r) for r in rows], "total": total, "page": page, "page_size": page_size, "categories": store.categories()}
+        if f.get("q"):
+            parsed = smartsearch.parse(str(f["q"]))
+            out["understood"] = parsed.describe() if (parsed.has_text or parsed.min_value is not None or parsed.max_value is not None) else ""
+            if total == 0 and parsed.has_text:
+                out["suggest"] = smartsearch.suggest(str(f["q"]), store.vocabulary())
+        return out
 
     @app.get("/api/tenders/export", dependencies=auth)
     def export(f: dict = fparams, sort: str = "closing", format: str = Query("csv", pattern="^(csv|xlsx)$"), keys: list[str] | None = Query(None, max_length=300)) -> Response:
@@ -1214,7 +1348,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             **bid, "portal_name": portal_names.get(bid["portal"] or "", bid["portal"]), "search_url": portal_search.get(bid["portal"] or "", ""),
             "value_text": format_inr(bid["value"]), "items": items, "changes": changes, "unseen": sum(1 for c in changes if not c["seen"]),
             "history": bids.history_notes(bid.get("work_type"), bid.get("organisation"), bid.get("value")),
-            "has_source": bids.has_source(bid["key"]), "manual": bid["portal"] == "manual",
+            "has_source": bids.has_source(bid["key"]), "manual": bid["portal"] == "manual", "comment_count": bids.comment_count(bid["id"]),
         }
 
     @app.get("/api/bids", dependencies=auth)
@@ -1270,8 +1404,13 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return bid_full(bid_or_404(bid_id))
 
     @app.patch("/api/bids/{bid_id}", dependencies=auth)
-    def patch_bid(bid_id: int, body: dict[str, Any]) -> dict:
-        bid_or_404(bid_id)
+    def patch_bid(bid_id: int, body: dict[str, Any], request: Request) -> dict:
+        current = bid_or_404(bid_id)
+        user: Principal = request.state.user
+        new_stage = body.get("stage")
+        if (appsettings.current(env, store.get_settings())["require_signoff"] and current["stage"] == "interested" and new_stage in ("preparing", "submitted")
+                and not user.can("admin") and (current.get("signoff") or {}).get("state") != "approved"):
+            raise HTTPException(422, "This bid needs an administrator's approval before it moves on. Use 'Ask for approval' on the Team tab.")
         try:
             bids.update(bid_id, clean_patch(body), now())
         except BidError as e:
@@ -1298,12 +1437,18 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return {"added": bids.generate_items(bid_id, now())}
 
     @app.patch("/api/bids/{bid_id}/items/{item_id}", dependencies=auth)
-    def patch_bid_item(bid_id: int, item_id: int, body: dict[str, Any]) -> dict:
-        bid_or_404(bid_id)
+    def patch_bid_item(bid_id: int, item_id: int, body: dict[str, Any], request: Request) -> dict:
+        bid = bid_or_404(bid_id)
+        before = bids.get_item(bid_id, item_id)
         try:
-            return bids.update_item(bid_id, item_id, body)
+            item = bids.update_item(bid_id, item_id, body)
         except BidError as e:
             raise bid_error(e) from None
+        who = (item.get("owner") or "").strip().lower()
+        if "owner" in body and who and before and (before.get("owner") or "").strip().lower() != who and who != request.state.user.username.lower():
+            notify(people.emails_for([who]), f"{request.state.user.name} gave you a task on a bid",
+                   f"{request.state.user.name} assigned you: {item['text']}\n\nBid: {(bid['description'] or bid['title'])[:120]} (ID {bid['tender_id']})\nCloses: {bid.get('closing') or 'not set'}{bid_link(bid_id)}")
+        return item
 
     @app.delete("/api/bids/{bid_id}/items/{item_id}", dependencies=auth)
     def delete_bid_item(bid_id: int, item_id: int) -> dict:
@@ -1481,12 +1626,17 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def do_bid_boq_upload(bid_id: int, body: BoqUpload) -> dict:
         bid = bid_or_404(bid_id)
-        return boq_call(boq.analyse, bid["key"], body.filename, body.file_base64, uses_ai=True)
+        return boq_call(boq.analyse, bid["key"], body.filename, body.file_base64, pdf_reader=ai.read_boq_pdf if ai.configured() else None, uses_ai=True)
 
     @app.post("/api/bids/{bid_id}/boq/lines/{line_no}", dependencies=auth)
     def bid_boq_confirm(bid_id: int, line_no: int, body: BoqConfirm, request: Request) -> dict:
         bid = bid_or_404(bid_id)
         return boq_call(boq.confirm, bid["key"], line_no, body.item_code, request.state.user.username)
+
+    @app.post("/api/bids/{bid_id}/boq/lines/{line_no}/cost", dependencies=auth)
+    def bid_boq_cost(bid_id: int, line_no: int, body: BoqCost) -> dict:
+        bid = bid_or_404(bid_id)
+        return boq_call(boq.set_cost, bid["key"], line_no, body.cost)
 
     @app.get("/api/bids/{bid_id}/risks", dependencies=auth)
     def bid_risks(bid_id: int) -> dict:
@@ -1577,11 +1727,14 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     @app.get("/api/vault/{doc_id}/file", dependencies=auth)
     def vault_file(doc_id: int):
-        found = bids.vault_file(doc_id)
+        try:
+            found = bids.vault_bytes(doc_id)
+        except sealing.SealError as e:
+            raise HTTPException(500, str(e)) from None
         if not found:
             raise HTTPException(404, "No file is stored for that document")
-        path, name = found
-        return FileResponse(path, media_type="application/octet-stream", filename=name)
+        content, name = found
+        return Response(content, media_type="application/octet-stream", headers={"Content-Disposition": 'attachment; filename="' + re.sub(r'[^\w.\- ()]', "_", name) + '"'})
 
     @app.get("/api/company-profile", dependencies=auth)
     def get_company_profile() -> dict:
@@ -1609,6 +1762,244 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 facts.append({"label": label, "value": value})
         store.put_settings({"company_facts": facts})
         return {"facts": facts}
+
+    # ---- the bid pack, letter templates, comparing tenders, hand-recorded corrigenda ---------------------------------------
+
+    @app.get("/api/bids/{bid_id}/pack", dependencies=auth)
+    def bid_pack(bid_id: int):
+        """A zip of the papers this bid needs, in checklist order, with an index of what is in it and what is missing."""
+        bid = bid_or_404(bid_id)
+        path, summary = pack.build(bid, bids.with_matches(bid, now()), bids, now())
+        stem = pack.safe_name(bid.get("tender_id") or f"bid-{bid_id}", 40)
+        return FileResponse(path, media_type="application/zip", filename=f"bid-pack-{stem}.zip", background=BackgroundTask(path.unlink, missing_ok=True),
+                            headers={"X-Pack-Files": str(summary["files"]), "X-Pack-Attention": str(summary["needs_attention"])})
+
+    def template_error(e: letters.LetterError) -> HTTPException:
+        return HTTPException(422, str(e))
+
+    @app.get("/api/letter-templates", dependencies=auth)
+    def letter_templates() -> dict:
+        facts = [{"key": f"company_{letters.slug(f['label'])}", "label": f["label"]} for f in company_facts() if letters.slug(f.get("label", ""))]
+        fields = [{"key": k, "label": v} for k, v in letters.BID_FIELDS.items()]
+        return {"templates": letter_book.list(), "fields": fields + facts}
+
+    @app.post("/api/letter-templates", dependencies=auth)
+    def letter_template_create(body: TemplateBody, request: Request) -> dict:
+        try:
+            return letter_book.create(body.name, body.body, request.state.user.username, now(), body.note)
+        except letters.LetterError as e:
+            raise template_error(e) from None
+
+    @app.put("/api/letter-templates/{template_id}", dependencies=auth)
+    def letter_template_save(template_id: int, body: TemplateBody, request: Request) -> dict:
+        try:
+            return letter_book.save(template_id, body.body, request.state.user.username, now(), body.name, body.note)
+        except letters.LetterError as e:
+            raise (HTTPException(404, str(e)) if str(e) == "No such template" else template_error(e)) from None
+
+    @app.get("/api/letter-templates/{template_id}/versions", dependencies=auth)
+    def letter_template_versions(template_id: int) -> dict:
+        if not letter_book.get(template_id):
+            raise HTTPException(404, "No such template")
+        return {"versions": letter_book.versions(template_id)}
+
+    @app.post("/api/letter-templates/{template_id}/restore", dependencies=auth)
+    def letter_template_restore(template_id: int, body: TemplateRestore, request: Request) -> dict:
+        if not letter_book.get(template_id):
+            raise HTTPException(404, "No such template")
+        try:
+            return letter_book.restore(template_id, body.version, request.state.user.username, now())
+        except letters.LetterError as e:
+            raise template_error(e) from None
+
+    @app.delete("/api/letter-templates/{template_id}", dependencies=auth)
+    def letter_template_delete(template_id: int) -> dict:
+        if not letter_book.delete(template_id):
+            raise HTTPException(404, "No such template")
+        return {"removed": template_id}
+
+    @app.post("/api/bids/{bid_id}/letter", dependencies=auth)
+    def bid_letter(bid_id: int, body: LetterFill) -> dict:
+        """A template filled in from this bid and the company facts. Placeholders with no value stay in the text and are listed."""
+        bid = bid_or_404(bid_id)
+        tpl = letter_book.get(body.template_id)
+        if not tpl:
+            raise HTTPException(404, "No such template")
+        today = now()
+
+        def day(v: str | None) -> str:
+            d = stored_date(v, end_of_day=False) if v else None
+            return d.strftime("%d %b %Y" + (", %I:%M %p" if v and len(v) > 10 else "")).replace(" 0", " ") if d else ""
+
+        values = {"tender_id": bid.get("tender_id") or "", "title": bid.get("description") or bid.get("title") or "", "organisation": bid.get("organisation") or "",
+                  "portal": portal_names.get(bid.get("portal") or "", bid.get("portal") or ""), "location": bid.get("location") or "", "closing": day(bid.get("closing")),
+                  "opening": day(bid.get("opening")), "prebid": day(bid.get("prebid_date")), "emd": format_inr(bid.get("emd")) if bid.get("emd") else "",
+                  "value": format_inr(bid.get("value")) if bid.get("value") else "", "today": today.strftime("%d %b %Y").lstrip("0")}
+        for f in company_facts():
+            values[f"company_{letters.slug(f.get('label', ''))}"] = str(f.get("value", ""))
+        text, missing = letters.render(tpl["body"], values)
+        return {"text": text, "missing": missing, "template": tpl["name"], "version": tpl["version"]}
+
+    @app.get("/api/tenders/compare", dependencies=auth)
+    def tenders_compare(keys: list[str] = Query(..., max_length=4)) -> dict:
+        """Two to four tenders side by side, with the derived figures a bidder weighs (EMD as a share of value, days left)."""
+        keys = list(dict.fromkeys(keys))
+        if not 2 <= len(keys) <= 4:
+            raise HTTPException(422, "Choose two to four tenders to compare")
+        out = []
+        for k in keys:
+            row = store.get_tender(k)
+            if not row:
+                raise HTTPException(404, "One of those tenders is no longer in the list")
+            row = shape(row)
+            closing = stored_date(row.get("closing"), end_of_day=False) if row.get("closing") else None
+            value, emd = row.get("value"), row.get("emd")
+            bid_id = bids.id_for_key(k)
+            out.append({**{f: row.get(f) for f in ("key", "tender_id", "title", "description", "organisation", "portal_name", "category", "location", "work_type", "value", "value_text",
+                                                   "emd", "published", "closing", "opening", "fit", "fit_reason", "starred", "manual")},
+                        "emd_pct": round(emd / value * 100, 2) if value and emd else None,
+                        "days_left": round((closing - now()).total_seconds() / 86400, 1) if closing else None, "bid_id": bid_id})
+        return {"tenders": out}
+
+    @app.post("/api/bids/{bid_id}/corrigenda", dependencies=auth)
+    def bid_corrigendum(bid_id: int, body: Corrigendum, request: Request) -> dict:
+        """Records a corrigendum (and the closing date it set) read on the portal by hand."""
+        bid_or_404(bid_id)
+        try:
+            bids.record_corrigendum(bid_id, body.note, body.closing, now(), request.state.user.username)
+        except BidError as e:
+            raise bid_error(e) from None
+        return bid_full(bid_or_404(bid_id))
+
+    # ---- teamwork: people, comments, approval -------------------------------------------------------------------
+
+    def bid_link(bid_id: int) -> str:
+        return f"\n\nOpen it: {config.app_url}/#/bids/{bid_id}" if config.app_url else ""
+
+    def notify(emails: list[str], subject: str, text: str) -> None:
+        """Tells people by email, without making the person who acted wait for it. Never raises: a mail problem must not undo their change."""
+        if not emails or not manager.mail_configured:
+            return
+
+        def send() -> None:
+            try:
+                body = "<p>" + re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', html_escape(text)).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+                manager.sender(env.brevo_api_key, env.mail_from, env.mail_from_name, emails, f"TendAI: {subject}", body, text)
+            except Exception:  # noqa: BLE001
+                log.exception("notification email failed")
+
+        if manager.background:
+            threading.Thread(target=send, daemon=True, name="notify").start()
+        else:
+            send()
+
+    @app.get("/api/people", dependencies=auth)
+    def people_directory() -> dict:
+        """Names to pick from when assigning a task. No contact details."""
+        found = people.directory()
+        if not any(p["username"] == owner.username for p in found):
+            found.append({"username": owner.username, "name": "Owner"})
+        return {"people": found}
+
+    @app.post("/api/account/email", dependencies=auth)
+    def set_own_email(body: OwnEmail, request: Request) -> dict:
+        user: Principal = request.state.user
+        if user.owner:
+            raise HTTPException(422, "The owner login has no stored email. Add yourself as a person in Settings > People to get notifications")
+        try:
+            return {"email": people.set_own_email(user.id, body.email)}
+        except AccountError as e:
+            raise HTTPException(422, str(e)) from None
+
+    @app.get("/api/my-work", dependencies=auth)
+    def my_work(request: Request) -> dict:
+        """Open checklist items assigned to the signed-in person, on bids still in progress."""
+        return {"items": bids.items_for_owner(request.state.user.username)}
+
+    # ---- who bid, and who the competitors are ---------------------------------------------------------------------------
+
+    @app.post("/api/bids/{bid_id}/award", dependencies=auth)
+    def bid_award(bid_id: int, body: AwardBody):
+        return run_job("award", str(bid_id), lambda: do_bid_award(bid_id, body))
+
+    def do_bid_award(bid_id: int, body: AwardBody) -> dict:
+        """Reads an award notice or comparative statement into a list of bidders for the person to check. Saves nothing."""
+        bid = bid_or_404(bid_id)
+        return {"award": ai_call(ai.read_award, bid_as_tender(bid), body.text, body.pdf_base64)}
+
+    @app.get("/api/bids/{bid_id}/bidders", dependencies=auth)
+    def get_bidders(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        return {"bidders": bids.bidders(bid_id)}
+
+    @app.put("/api/bids/{bid_id}/bidders", dependencies=auth)
+    def put_bidders(bid_id: int, body: BiddersBody) -> dict:
+        bid_or_404(bid_id)
+        try:
+            patch = bids.set_bidders(bid_id, body.bidders, now())
+        except BidError as e:
+            raise bid_error(e) from None
+        return {"bidders": bids.bidders(bid_id), "updated": patch}
+
+    @app.get("/api/competitors", dependencies=auth)
+    def competitors() -> dict:
+        return {"competitors": bids.competitors()}
+
+    @app.get("/api/bids/{bid_id}/comments", dependencies=auth)
+    def list_comments(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        return {"comments": bids.comments(bid_id)}
+
+    @app.post("/api/bids/{bid_id}/comments", dependencies=auth)
+    def add_comment(bid_id: int, body: CommentBody, request: Request) -> dict:
+        bid = bid_or_404(bid_id)
+        user: Principal = request.state.user
+        try:
+            c = bids.add_comment(bid_id, user.username, body.text, now())
+        except BidError as e:
+            raise bid_error(e) from None
+        mentioned = {m.lower() for m in re.findall(r"@([A-Za-z0-9._-]{3,40})", body.text)}
+        tell = (mentioned | {(bid.get("owner") or "").strip().lower()}) - {user.username.lower(), ""}
+        notify(people.emails_for(sorted(tell)), f"{user.name} commented on a bid",
+               f"{user.name} wrote on {(bid['description'] or bid['title'])[:100]} (ID {bid['tender_id']}):\n\n{body.text.strip()[:600]}{bid_link(bid_id)}")
+        return c
+
+    @app.delete("/api/bids/{bid_id}/comments/{comment_id}", dependencies=auth)
+    def delete_comment(bid_id: int, comment_id: int, request: Request) -> dict:
+        user: Principal = request.state.user
+        if not bids.delete_comment(bid_id, comment_id, user.username, user.can("admin")):
+            raise HTTPException(404, "No such comment, or it is not yours to remove")
+        return {"removed": comment_id}
+
+    @app.post("/api/bids/{bid_id}/signoff", dependencies=auth)
+    def bid_signoff(bid_id: int, body: SignoffBody, request: Request) -> dict:
+        """Asking for, giving, refusing or withdrawing approval to bid. Only administrators approve or decline."""
+        bid = bid_or_404(bid_id)
+        user: Principal = request.state.user
+        cur = bid.get("signoff") or {}
+        note = body.note.strip()[:500]
+        title = (bid["description"] or bid["title"])[:100]
+        stamp = now().isoformat(timespec="seconds")
+        if body.action == "request":
+            if bid["stage"] != "interested":
+                raise HTTPException(422, "Approval is asked for while a bid is still at Interested")
+            mark = {"state": "requested", "requested_by": user.username, "by": user.username, "at": stamp, "note": note}
+            notify(people.admin_emails(), f"{user.name} asks approval to bid", f"{user.name} asks for approval to bid on {title} (ID {bid['tender_id']}).\n\n{note}{bid_link(bid_id)}")
+        elif body.action == "withdraw":
+            if not cur or (cur.get("requested_by") != user.username and not user.can("admin")):
+                raise HTTPException(403, "Only the person who asked, or an administrator, can withdraw the request")
+            mark = None
+        elif body.action in ("approve", "decline"):
+            if not user.can("admin"):
+                raise HTTPException(403, "Only an administrator can approve or decline a bid")
+            mark = {"state": "approved" if body.action == "approve" else "declined", "requested_by": cur.get("requested_by") or user.username, "by": user.username, "at": stamp, "note": note}
+            if cur.get("requested_by") and cur["requested_by"] != user.username:
+                notify(people.emails_for([cur["requested_by"]]), f"Bid {'approved' if body.action == 'approve' else 'declined'}: {title[:60]}",
+                       f"{user.name} {'approved' if body.action == 'approve' else 'declined'} the bid on {title} (ID {bid['tender_id']}).\n\n{note}{bid_link(bid_id)}")
+        else:
+            raise HTTPException(422, "Unknown action")
+        bids.set_json(bid_id, "signoff", mark, now())
+        return {"signoff": mark}
 
     # ---- people: accounts, passwords, activity ------------------------------------------------------------------
 
@@ -1653,6 +2044,213 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         store.sessions_end_for(request.state.user.id, except_sid=session_id(request))
         return {"ok": True}
 
+    @app.get("/api/account/sessions", dependencies=auth)
+    def my_sessions(request: Request) -> dict:
+        """The devices this person is signed in on."""
+        mine = session_id(request)
+        rows = store.sessions_of(request.state.user.id, time.time(), config.idle_seconds)
+        return {"sessions": [{"ref": r["ref"], "device": r["agent"] or "Unknown device", "client": r["client"], "created": r["created"], "last_seen": r["last_seen"],
+                              "current": r["sid"] == mine} for r in rows]}
+
+    @app.delete("/api/account/sessions/{ref}", dependencies=auth)
+    def end_session(ref: str, request: Request) -> dict:
+        if not store.session_end_ref(request.state.user.id, ref):
+            raise HTTPException(404, "That sign-in is already over")
+        return {"ok": True}
+
+    # ---- forgotten password: public, so each step is throttled and says the same thing whoever asks ---------------------
+
+    reset_hits: dict[str, list[float]] = {}
+
+    def reset_throttle(client: str, kind: str, limit: int) -> None:
+        t = time.time()
+        hits = [x for x in reset_hits.get(f"{kind}:{client}", []) if t - x < 900]
+        if len(hits) >= limit:
+            reset_hits[f"{kind}:{client}"] = hits
+            raise HTTPException(429, "Too many tries. Wait a few minutes and try again.")
+        hits.append(t)
+        reset_hits[f"{kind}:{client}"] = hits
+        if len(reset_hits) > 5000:  # never grows without bound
+            for k in [k for k, v in reset_hits.items() if not v or t - v[-1] > 900]:
+                reset_hits.pop(k, None)
+
+    @app.post("/api/password-reset/request")
+    def password_reset_request(body: ResetRequest, request: Request) -> dict:
+        reset_throttle(client_of(request), "ask", 6)
+        if not manager.mail_configured:
+            raise HTTPException(503, "Email is not set up on this server, so a reset link cannot be sent. Ask an administrator to set a new password for you.")
+        found = people.reset_request(body.who, time.time())
+        if found:
+            user, token = found
+            link = f"{public_base(request)}/#/reset/{token}"
+            notify([user.email], "Reset your password",
+                   f"Someone asked to reset the password for {user.username}.\n\nOpen this link to choose a new one (it works once and stops working in {people.RESET_MINUTES} minutes):\n{link}\n\n"
+                   "If you did not ask for this, ignore this email: your password has not changed.")
+            people.log(now(), user.username, user.role, "Asked for a password reset link", client=client_of(request))
+        return {"ok": True, "message": "If that matches an account with an email address, a link to choose a new password is on its way."}
+
+    @app.post("/api/password-reset/confirm")
+    def password_reset_confirm(body: ResetConfirm, request: Request) -> dict:
+        reset_throttle(client_of(request), "use", 10)
+        try:
+            user = people.reset_confirm(body.token, body.password, time.time())
+        except AccountError as e:
+            raise HTTPException(422, str(e)) from None
+        store.sessions_end_for(user.id)  # whoever had the old password is signed out
+        people.log(now(), user.username, user.role, "Chose a new password from an emailed link", client=client_of(request))
+        return {"ok": True}
+
+    # ---- first run: what is set up, and sample data to try the app with ------------------------------------------------------
+
+    @app.get("/api/setup", dependencies=auth)
+    def setup_status() -> dict:
+        """A short list of what a new installation still needs, worked out from what is stored. Nothing here is a setting: it only reads."""
+        cur = appsettings.current(env, store.get_settings())
+        runs = store.list_runs(1)
+        sample_rows = store.count_portal("sample")
+        steps = [
+            {"key": "profile", "title": "Describe your company", "why": "The AI assistant uses it to score tenders for fit and to write letters.", "done": len(profile().strip()) >= 20, "href": "#/vault", "where": "Vault > Company"},
+            {"key": "facts", "title": "Add your company facts", "why": "Turnover, registration class and similar figures are checked against each tender's eligibility.", "done": len(company_facts()) >= 3, "href": "#/vault", "where": "Vault > Company"},
+            {"key": "vault", "title": "Add your standard papers to the Vault", "why": "GST, PAN, registration, balance sheets: bids match their checklist to these.", "done": len(bids.vault_list()) >= 3, "href": "#/vault", "where": "Vault > Documents"},
+            {"key": "email", "title": "Choose who gets the daily email", "why": "New civil tenders arrive in the inbox each morning.", "done": bool(manager.mail_configured and cur["recipients"]), "href": "#/settings", "where": "Settings > Daily email", "admin": True},
+            {"key": "run", "title": "Collect tenders", "why": "Press Run now on the Runs page, or wait for the daily run.", "done": store.count() - sample_rows > 0 or bool(runs and runs[0]["status"] == "ok"), "href": "#/runs", "where": "Runs"},
+            {"key": "bid", "title": "Start your first bid", "why": "Open a tender and press Start bid to get the checklist, price tools and team tools.", "done": len([b for b in bids.list() if b["portal"] != "sample"]) > 0, "href": "#/tenders", "where": "Tenders"},
+            {"key": "catalogue", "title": "Load your item catalogue (optional)", "why": "Lets a BOQ be costed from your own rates.", "done": (boq.catalogue(False)["counts"].get("item_master", 0) or 0) > 0, "href": "#/vault", "where": "Vault > Item catalogue", "optional": True},
+        ]
+        return {"steps": steps, "done": sum(1 for s in steps if s["done"]), "total": len(steps), "sample": {"loaded": sample_rows > 0, "tenders": sample_rows}}
+
+    @app.post("/api/sample-data", dependencies=auth)
+    def load_sample_data() -> dict:
+        """Adds a few fake tenders so every page has something to show. Never emailed, never sent to the AI."""
+        added = 0
+        for t in sample.tenders(now()):
+            if not store.get_tender(t.key):
+                store.keep(t, now())
+                store.mark_emailed([t.key])
+                added += 1
+        return {"added": added, "tenders": store.count_portal("sample")}
+
+    @app.delete("/api/sample-data", dependencies=auth)
+    def remove_sample_data() -> dict:
+        """Removes the sample tenders and any bids (with their checklists, comments and BOQs) started on them."""
+        removed_bids = 0
+        for b in bids.list():
+            if b["portal"] == "sample":
+                boq.store.delete_boqs(b["key"])
+                bids.delete_source(b["key"])
+                removed_bids += bool(bids.delete(b["id"]))
+        keys = store.delete_portal("sample")
+        return {"tenders": len(keys), "bids": removed_bids}
+
+    # ---- what is kept about a person: a copy, and erasure ---------------------------------------------------------------------
+
+    def download(data: dict, name: str) -> Response:
+        return Response(json.dumps(data, indent=2, ensure_ascii=False, default=str), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{name}.json"'})
+
+    @app.get("/api/account/export", dependencies=auth)
+    def export_own_data(request: Request):
+        user: Principal = request.state.user
+        if user.owner:
+            raise HTTPException(422, "The owner login is set by the server's variables and has no stored account")
+        return download(privacy.export_person(people, bids, user.id), f"my-tendai-data-{user.username}")
+
+    @app.get("/api/users/{user_id}/export", dependencies=auth)
+    def export_person_data(user_id: int):
+        if user_id == accounts.OWNER_ID:
+            raise HTTPException(422, "The owner login is set by the server's variables and has no stored account")
+        try:
+            data = privacy.export_person(people, bids, user_id)
+        except privacy.PrivacyError as e:
+            raise HTTPException(404, str(e)) from None
+        return download(data, f"tendai-data-{data['account']['username']}")
+
+    @app.post("/api/users/{user_id}/erase", dependencies=auth)
+    def erase_person_data(user_id: int, body: EraseBody, request: Request) -> dict:
+        """Removes who a person was (name, email, password, sign-ins, and their name on comments and the activity log). The person must be deactivated first."""
+        me: Principal = request.state.user
+        if user_id == accounts.OWNER_ID or user_id == me.id:
+            raise HTTPException(422, "You cannot erase your own account or the owner login")
+        with people.lock:
+            row = people.db.execute("SELECT username, active FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "No such person")
+        if row["active"]:
+            raise HTTPException(422, "Turn the account off first (Active off), then erase it")
+        if body.confirm.strip().lower() != row["username"]:
+            raise HTTPException(422, "Type the person's username exactly to confirm")
+        try:
+            out = privacy.erase_person(people, bids, store, user_id, now())
+        except privacy.PrivacyError as e:
+            raise HTTPException(422, str(e)) from None
+        return out
+
+    # ---- integrations: API tokens and outgoing webhooks (administrators) -----------------------------------------------------
+
+    @app.get("/api/tokens", dependencies=auth)
+    def list_tokens() -> dict:
+        return {"tokens": api_tokens.list(), "roles": list(tokens.ROLES)}
+
+    @app.post("/api/tokens", dependencies=auth)
+    def create_token(body: TokenBody, request: Request) -> dict:
+        try:
+            record, raw = api_tokens.create(body.name, body.role, body.days, request.state.user.username, now())
+        except tokens.TokenError as e:
+            raise HTTPException(422, str(e)) from None
+        return {"token": record, "secret": raw}
+
+    @app.delete("/api/tokens/{token_id}", dependencies=auth)
+    def revoke_token(token_id: int) -> dict:
+        if not api_tokens.revoke(token_id):
+            raise HTTPException(404, "No such active token")
+        return {"revoked": token_id}
+
+    def hook_error(e: events.HookError) -> HTTPException:
+        return HTTPException(404 if "No such" in str(e) else 422, str(e))
+
+    @app.get("/api/webhooks", dependencies=auth)
+    def list_webhooks() -> dict:
+        return {"webhooks": hooks.list(), "events": [{"key": k, "label": v} for k, v in events.EVENTS.items() if k != "test"]}
+
+    @app.post("/api/webhooks", dependencies=auth)
+    def create_webhook(body: HookBody) -> dict:
+        try:
+            hook, secret = hooks.create(body.name or "", body.url or "", body.events or [], now())
+        except events.HookError as e:
+            raise hook_error(e) from None
+        return {"webhook": hook, "secret": secret}
+
+    @app.patch("/api/webhooks/{hook_id}", dependencies=auth)
+    def edit_webhook(hook_id: int, body: HookBody) -> dict:
+        try:
+            return hooks.update(hook_id, name=body.name, url=body.url, events=body.events, active=body.active)
+        except events.HookError as e:
+            raise hook_error(e) from None
+
+    @app.post("/api/webhooks/{hook_id}/secret", dependencies=auth)
+    def new_webhook_secret(hook_id: int) -> dict:
+        try:
+            return {"secret": hooks.new_secret(hook_id)}
+        except events.HookError as e:
+            raise hook_error(e) from None
+
+    @app.post("/api/webhooks/{hook_id}/test", dependencies=auth)
+    def test_webhook_hook(hook_id: int) -> dict:
+        """Sends a test message to this webhook right now and says how it went."""
+        if not hooks.get(hook_id):
+            raise HTTPException(404, "No such webhook")
+        hooks.emit("test", {"message": "This is a test from TendAI."}, now(), only_hook=hook_id)
+        hooks.deliver(now(), timeout=8)
+        state = hooks.get(hook_id) or {}
+        if state.get("last_status") != "ok":
+            raise HTTPException(502, state.get("last_error") or "The test message could not be delivered")
+        return {"ok": True, "webhook": state}
+
+    @app.delete("/api/webhooks/{hook_id}", dependencies=auth)
+    def delete_webhook(hook_id: int) -> dict:
+        if not hooks.delete(hook_id):
+            raise HTTPException(404, "No such webhook")
+        return {"removed": hook_id}
+
     @app.get("/api/users", dependencies=auth)
     def list_users() -> dict:
         owner_row = {"id": accounts.OWNER_ID, "username": owner.username, "name": "Owner (server login)", "role": "admin", "active": True, "must_change": False,
@@ -1663,7 +2261,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.post("/api/users", dependencies=auth)
     def create_user(body: NewUser) -> dict:
         try:
-            return people.create(body.username, body.name, body.role, body.password, now(), reserved=config.username)
+            return people.create(body.username, body.name, body.role, body.password, now(), reserved=config.username, email=body.email)
         except AccountError as e:
             raise HTTPException(422, str(e)) from None
 
@@ -1675,7 +2273,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if user_id == me.id and (body.active is False or (body.role is not None and body.role != me.role)):
             raise HTTPException(422, "You cannot remove your own access or change your own role. Ask another administrator")
         try:
-            out = people.update(user_id, name=body.name, role=body.role, active=body.active, password=body.password, reset_two_step=body.reset_2fa)
+            out = people.update(user_id, name=body.name, role=body.role, active=body.active, password=body.password, reset_two_step=body.reset_2fa, email=body.email)
         except AccountError as e:
             raise HTTPException(404 if "No such" in str(e) else 422, str(e)) from None
         if body.active is False or body.password is not None:
@@ -1691,7 +2289,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     @app.get("/api/backup/status", dependencies=auth)
     def backup_status() -> dict:
-        return {**backups.status(), "storage_warning": storage_note}
+        return {**backups.status(), "storage_warning": storage_note,
+                "encryption": sealing.describe(sealer, encryption_problem, bids.plain_files() if sealer.enabled else 0, people.plain_secrets() if sealer.enabled else 0)}
 
     @app.post("/api/backup/offsite-now", dependencies=auth)
     def backup_offsite_now():
@@ -1808,6 +2407,53 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         store.delete_portal_status(key)
         refresh_portals()
         return {"removed": key}
+
+    @app.post("/api/settings/test-webhook", dependencies=auth)
+    def test_webhook(body: WebhookTest) -> dict:
+        url = (body.url or "").strip() or appsettings.current(env, store.get_settings())["webhook_url"]
+        if not url:
+            raise HTTPException(422, "Type the webhook address first")
+        try:
+            reminders.post_webhook(url, "TendAI test: deadline reminders will arrive here.")
+        except reminders.WebhookError as e:
+            raise HTTPException(502, str(e)) from None
+        return {"ok": True}
+
+    # ---- calendar feed: a private address that calendar apps subscribe to --------------------------------------------
+
+    def public_base(request: Request) -> str:
+        if config.app_url:
+            return config.app_url
+        proto = request.headers.get("x-forwarded-proto", "").split(",")[-1].strip() or request.url.scheme
+        return f"{proto}://{request.headers.get('host', 'localhost')}"
+
+    def calendar_state(request: Request) -> dict:
+        token = store.get_settings().get("calendar_token")
+        return {"enabled": bool(token), "url": f"{public_base(request)}/api/calendar/{token}.ics" if token else ""}
+
+    @app.get("/api/calendar", dependencies=auth)
+    def get_calendar(request: Request) -> dict:
+        return calendar_state(request)
+
+    @app.post("/api/calendar/token", dependencies=auth)
+    def new_calendar_token(request: Request) -> dict:
+        """Makes (or replaces) the secret address. Replacing it stops every calendar that used the old one."""
+        store.put_settings({"calendar_token": secrets.token_urlsafe(24)})
+        return calendar_state(request)
+
+    @app.delete("/api/calendar", dependencies=auth)
+    def stop_calendar(request: Request) -> dict:
+        store.put_settings({"calendar_token": None})
+        return calendar_state(request)
+
+    @app.get("/api/calendar/{token}.ics")
+    def calendar_feed(token: str, request: Request) -> Response:
+        # No login: calendar apps cannot sign in. The long random address is the secret, and the feed holds deadlines only.
+        have = store.get_settings().get("calendar_token")
+        if not have or not hmac.compare_digest(token.encode(), str(have).encode()):
+            raise HTTPException(404, "Not found")
+        return Response(reminders.build_ics(bids.list(), bids.vault_list(), now(), config.tz_name, config.app_url or public_base(request)),
+                        media_type="text/calendar; charset=utf-8", headers={"Content-Disposition": 'inline; filename="tendai-deadlines.ics"'})
 
     @app.post("/api/settings/test-email", dependencies=auth)
     def test_email() -> dict:

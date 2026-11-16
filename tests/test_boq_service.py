@@ -84,8 +84,8 @@ def test_upload_problems_are_explained(svc):
         svc.analyse(KEY, "x.csv", b64(b"a" * (10 * 1024 * 1024 + 1)))
     with pytest.raises(BoqError, match="No BOQ table"):
         svc.analyse(KEY, "x.csv", b64(b"just,a,notice\nnothing,here,\n"))
-    with pytest.raises(BoqError, match="Use .xlsx"):
-        svc.analyse(KEY, "scan.pdf", b64(b"%PDF-1.4 whatever"))               # a PDF BOQ is not read
+    with pytest.raises(BoqError, match="could not be read"):
+        svc.analyse(KEY, "scan.pdf", b64(b"%PDF-1.4 whatever"))               # a damaged PDF is explained
     with pytest.raises(BoqError, match="No BOQ table"):
         svc.analyse(KEY, "old.xls", b64(b"whatever"))                         # .xls is opened, but this one holds no table
     with pytest.raises(BoqError, match="valid .xlsx"):

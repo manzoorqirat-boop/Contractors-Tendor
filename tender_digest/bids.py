@@ -15,9 +15,10 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .gepnic import parse_date
+from .sealing import Sealer
 from .store import SeenStore, _from_json, _iso, _to_json
 
 log = logging.getLogger("tender_digest.bids")
@@ -250,10 +251,12 @@ def looks_like(ext: str, data: bytes) -> bool:
 
 
 class BidBook:
-    def __init__(self, store: SeenStore, vault_dir: str | Path | None = None):
+    def __init__(self, store: SeenStore, vault_dir: str | Path | None = None, sealer: Sealer | None = None):
+        self.sealer = sealer or Sealer()
         self.store = store
         self.db, self.lock = store.db, store.lock
         self.vault_dir = Path(vault_dir) if vault_dir else None
+        self.on_event: Callable[[str, dict[str, Any]], None] | None = None  # told when something happens on a bid (outgoing webhooks listen here)
         with self.lock:
             self.db.executescript(
                 """
@@ -268,6 +271,12 @@ class BidBook:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'task', text TEXT NOT NULL,
                   done INTEGER NOT NULL DEFAULT 0, owner TEXT, vault_id INTEGER, note TEXT, position INTEGER NOT NULL DEFAULT 0, source TEXT, created TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS bid_items_bid ON bid_items (bid_id);
+                CREATE TABLE IF NOT EXISTS bid_bidders (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, name TEXT NOT NULL, price REAL, rank INTEGER, status TEXT, mine INTEGER NOT NULL DEFAULT 0);
+                CREATE INDEX IF NOT EXISTS bid_bidders_bid ON bid_bidders (bid_id);
+                CREATE TABLE IF NOT EXISTS bid_comments (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, at TEXT NOT NULL, username TEXT NOT NULL, text TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS bid_comments_bid ON bid_comments (bid_id);
                 CREATE TABLE IF NOT EXISTS bid_changes (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, at TEXT NOT NULL, what TEXT NOT NULL, old TEXT, new TEXT,
                   seen INTEGER NOT NULL DEFAULT 0, notified INTEGER NOT NULL DEFAULT 0);
@@ -278,10 +287,21 @@ class BidBook:
                 """
             )
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(bids)")}
-            for col in ("portal_facts", "portal_checked", "doc_checked"):
+            for col in ("portal_facts", "portal_checked", "doc_checked", "signoff"):
                 if col not in have:
                     self.db.execute(f"ALTER TABLE bids ADD COLUMN {col} TEXT")  # added after the first release
             self.db.commit()
+
+    def _emit(self, event: str, bid_id: int, **extra: Any) -> None:
+        """Tells the listener (if any) what happened to a bid. A failing listener never breaks the action that caused the event."""
+        if not self.on_event:
+            return
+        try:
+            b = self.get(bid_id) or {}
+            self.on_event(event, {"bid_id": bid_id, "tender_id": b.get("tender_id"), "title": (b.get("description") or b.get("title") or "")[:200],
+                                  "organisation": b.get("organisation"), "stage": b.get("stage"), "closing": b.get("closing"), **extra})
+        except Exception:  # noqa: BLE001
+            log.exception("event %s could not be sent on", event)
 
     # ---- bids ------------------------------------------------------------------------------------------------------
 
@@ -290,7 +310,7 @@ class BidBook:
         if r is None:
             return None
         d = dict(r)
-        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked"):
+        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked", "signoff"):
             if f in d:
                 try:
                     d[f] = json.loads(d[f]) if d[f] else None
@@ -320,6 +340,7 @@ class BidBook:
             )
             self.db.commit()
             bid_id = cur.lastrowid
+        self._emit("bid.created", bid_id)
         return self.get(bid_id) or {}, True
 
     def get(self, bid_id: int) -> dict | None:
@@ -363,10 +384,12 @@ class BidBook:
         with self.lock:
             self.db.execute(f"UPDATE bids SET {cols} WHERE id = ?", [*sets.values(), bid_id])
             self.db.commit()
+        if "stage" in patch and patch["stage"] != bid["stage"]:
+            self._emit("bid.stage_changed", bid_id, previous_stage=bid["stage"])
         return self.get(bid_id) or bid
 
     def set_json(self, bid_id: int, field: str, value: Any, now: datetime) -> None:
-        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked"):
+        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked", "signoff"):
             raise ValueError(field)
         with self.lock:
             self.db.execute(f"UPDATE bids SET {field} = ?, updated = ? WHERE id = ?", (json.dumps(value) if value is not None else None, _iso(now), bid_id))
@@ -389,7 +412,7 @@ class BidBook:
         kind = "pdf" if isinstance(data, bytes) else "txt"
         path = self._source_path(key, kind)
         path.parent.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
-        path.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))  # type: ignore[union-attr]
+        self.sealer.write_file(path, data if isinstance(data, bytes) else data.encode("utf-8"))  # type: ignore[arg-type]
 
     def load_source(self, key: str) -> tuple[str, str]:
         """(text, pdf_base64): whichever was kept, else two empty strings."""
@@ -397,10 +420,18 @@ class BidBook:
 
         pdf, txt = self._source_path(key, "pdf"), self._source_path(key, "txt")
         if pdf and pdf.is_file():
-            return "", base64.b64encode(pdf.read_bytes()).decode("ascii")
+            return "", base64.b64encode(self.sealer.read_file(pdf)).decode("ascii")
         if txt and txt.is_file():
-            return txt.read_text(encoding="utf-8", errors="ignore"), ""
+            return self.sealer.read_file(txt).decode("utf-8", errors="ignore"), ""
         return "", ""
+
+    def source_bytes(self, key: str) -> tuple[str, bytes] | None:
+        """(file extension, content) of the kept tender notice, or None."""
+        for kind in ("pdf", "txt"):
+            p = self._source_path(key, kind)
+            if p and p.is_file():
+                return f".{kind}", self.sealer.read_file(p)
+        return None
 
     def has_source(self, key: str) -> bool:
         return any(p and p.is_file() for p in (self._source_path(key, "pdf"), self._source_path(key, "txt")))
@@ -424,6 +455,8 @@ class BidBook:
         with self.lock:
             self.db.execute("DELETE FROM bid_items WHERE bid_id = ?", (bid_id,))
             self.db.execute("DELETE FROM bid_changes WHERE bid_id = ?", (bid_id,))
+            self.db.execute("DELETE FROM bid_comments WHERE bid_id = ?", (bid_id,))
+            self.db.execute("DELETE FROM bid_bidders WHERE bid_id = ?", (bid_id,))
             cur = self.db.execute("DELETE FROM bids WHERE id = ?", (bid_id,))
             self.db.commit()
             return cur.rowcount > 0
@@ -479,6 +512,143 @@ class BidBook:
                 raise BidError("No such item")
             row = self.db.execute("SELECT * FROM bid_items WHERE id = ?", (item_id,)).fetchone()
         return {**dict(row), "done": bool(row["done"])}
+
+    def get_item(self, bid_id: int, item_id: int) -> dict | None:
+        with self.lock:
+            r = self.db.execute("SELECT * FROM bid_items WHERE id = ? AND bid_id = ?", (item_id, bid_id)).fetchone()
+        return {**dict(r), "done": bool(r["done"])} if r else None
+
+    def items_for_owner(self, username: str) -> list[dict]:
+        """Open checklist items assigned to a person, on bids still in progress, soonest closing first."""
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT i.id AS item_id, i.text, i.kind, b.id AS bid_id, b.title, b.description, b.tender_id, b.closing, b.stage FROM bid_items i JOIN bids b ON b.id = i.bid_id "
+                "WHERE LOWER(i.owner) = ? AND i.done = 0 AND b.stage IN ('interested', 'preparing') ORDER BY (b.closing IS NULL), b.closing, i.id", (username.strip().lower(),)).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- who bid: the bidders of a tender, and how competitors have behaved across tenders -------------------------------------
+
+    MAX_BIDDERS = 30
+
+    def bidders(self, bid_id: int) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT id, name, price, rank, status, mine FROM bid_bidders WHERE bid_id = ? ORDER BY (rank IS NULL), rank, (price IS NULL), price, id", (bid_id,)).fetchall()
+        return [{**dict(r), "mine": bool(r["mine"])} for r in rows]
+
+    def set_bidders(self, bid_id: int, raw: list[Any], now: datetime) -> dict:
+        """Replaces the bidders of a bid. When the lowest qualified quote is known and no L1 was recorded, it is recorded as L1; the row marked
+        as yours fills in your quoted price if that was empty. Returns the bid fields that changed."""
+        if not isinstance(raw, list) or len(raw) > self.MAX_BIDDERS:
+            raise BidError(f"A tender can list up to {self.MAX_BIDDERS} bidders")
+        rows = []
+        for b in raw:
+            if not isinstance(b, dict):
+                raise BidError("Each bidder needs a name")
+            name = str(b.get("name") or "").strip()[:120]
+            if not name:
+                continue
+            price = b.get("price")
+            if price in (None, ""):
+                price = None
+            else:
+                try:
+                    price = float(price)
+                except (TypeError, ValueError):
+                    raise BidError(f"The quote for {name} is not an amount") from None
+                if not 0 < price < 1e13:
+                    raise BidError(f"The quote for {name} is not an amount")
+            rank = b.get("rank")
+            if rank in (None, ""):
+                rank = None
+            elif not isinstance(rank, int) or isinstance(rank, bool) or not 1 <= rank <= 99:
+                raise BidError(f"The rank of {name} must be a whole number, 1 for the lowest bid")
+            rows.append((name, price, rank, str(b.get("status") or "").strip()[:40], 1 if b.get("mine") else 0))
+        if sum(1 for r in rows if r[4]) > 1:
+            raise BidError("Only one row can be marked as your company")
+        bid = self.get(bid_id) or {}
+        with self.lock:
+            self.db.execute("DELETE FROM bid_bidders WHERE bid_id = ?", (bid_id,))
+            self.db.executemany("INSERT INTO bid_bidders (bid_id, name, price, rank, status, mine) VALUES (?,?,?,?,?,?)", [(bid_id, *r) for r in rows])
+            self.db.commit()
+        patch: dict[str, Any] = {}
+        live = [r for r in rows if r[1] and not re.search(r"reject|disqual|withdr|non.?respons", r[3], re.I)]
+        if live and not bid.get("l1_value"):
+            low = min(live, key=lambda r: r[1])
+            patch["l1_value"] = low[1]
+            if not bid.get("l1_bidder"):
+                patch["l1_bidder"] = low[0]
+        mine = next((r for r in rows if r[4] and r[1]), None)
+        if mine and not bid.get("my_value"):
+            patch["my_value"] = mine[1]
+        if patch:
+            self.update(bid_id, patch, now)
+        self._emit("bid.result", bid_id, bidders=[{"name": r[0], "price": r[1], "rank": r[2], "status": r[3], "mine": bool(r[4])} for r in rows])
+        return patch
+
+    @staticmethod
+    def company_key(name: str) -> str:
+        """A company's name reduced so spellings of it match: M/s Rao Infra Pvt. Ltd. and RAO INFRA PRIVATE LIMITED are the same."""
+        s = re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower().replace("&", " and "))
+        words = [w for w in s.split() if w not in {"m", "s", "ms", "pvt", "private", "ltd", "limited", "llp", "co", "company", "the", "and", "pl", "p"}]
+        return " ".join(words)
+
+    def competitors(self) -> list[dict]:
+        """Every company that bid against you: how often, how often it won, and how far from the estimate it quotes."""
+        with self.lock:
+            rows = [dict(r) for r in self.db.execute(
+                "SELECT p.name, p.price, p.rank, p.status, b.id AS bid_id, b.value, b.organisation, b.updated FROM bid_bidders p JOIN bids b ON b.id = p.bid_id WHERE p.mine = 0")]
+        groups: dict[str, list[dict]] = {}
+        for r in rows:
+            k = self.company_key(r["name"])
+            if k:
+                groups.setdefault(k, []).append(r)
+        out = []
+        for k, rs in groups.items():
+            names = [r["name"] for r in rs]
+            shown = max(set(names), key=lambda n: (names.count(n), len(n)))
+            disc = [(r["price"] / r["value"] - 1) * 100 for r in rs if r["price"] and r["value"] and r["value"] > 0 and -90 < (r["price"] / r["value"] - 1) * 100 < 200]
+            depts: dict[str, int] = {}
+            for r in rs:
+                d = _dept(r["organisation"])
+                if d:
+                    depts[d] = depts.get(d, 0) + 1
+            out.append({"key": k, "name": shown, "bids": len({r["bid_id"] for r in rs}), "wins": len({r["bid_id"] for r in rs if r["rank"] == 1}),
+                        "avg_vs_estimate": round(sum(disc) / len(disc), 1) if disc else None, "quotes": len(disc),
+                        "departments": [d for d, _ in sorted(depts.items(), key=lambda kv: -kv[1])[:3]], "last_seen": max(r["updated"] or "" for r in rs)[:10]})
+        return sorted(out, key=lambda c: (-c["bids"], -c["wins"], c["name"]))
+
+    # ---- comments ----------------------------------------------------------------------------------------------------
+
+    MAX_COMMENT = 2000
+
+    def add_comment(self, bid_id: int, username: str, text: str, now: datetime) -> dict:
+        text = (text or "").strip()
+        if not text:
+            raise BidError("Write something first")
+        if len(text) > self.MAX_COMMENT:
+            raise BidError(f"A comment can be up to {self.MAX_COMMENT} characters")
+        with self.lock:
+            cur = self.db.execute("INSERT INTO bid_comments (bid_id, at, username, text) VALUES (?,?,?,?)", (bid_id, _iso(now), username[:80], text))
+            self.db.commit()
+        return {"id": cur.lastrowid, "bid_id": bid_id, "at": _iso(now), "username": username, "text": text}
+
+    def comments(self, bid_id: int) -> list[dict]:
+        with self.lock:
+            return [dict(r) for r in self.db.execute("SELECT id, at, username, text FROM bid_comments WHERE bid_id = ? ORDER BY id", (bid_id,))]
+
+    def comment_count(self, bid_id: int) -> int:
+        with self.lock:
+            return self.db.execute("SELECT COUNT(*) FROM bid_comments WHERE bid_id = ?", (bid_id,)).fetchone()[0]
+
+    def delete_comment(self, bid_id: int, comment_id: int, username: str, is_admin: bool) -> bool:
+        """A person removes their own comment; an administrator can remove any. False when there is no such comment or it is not theirs."""
+        with self.lock:
+            r = self.db.execute("SELECT username FROM bid_comments WHERE id = ? AND bid_id = ?", (comment_id, bid_id)).fetchone()
+            if not r or not (is_admin or r["username"] == username):
+                return False
+            self.db.execute("DELETE FROM bid_comments WHERE id = ?", (comment_id,))
+            self.db.commit()
+        return True
 
     def delete_item(self, bid_id: int, item_id: int) -> bool:
         with self.lock:
@@ -553,6 +723,33 @@ class BidBook:
         with self.lock:
             self.db.execute("INSERT INTO bid_changes (bid_id, at, what, old, new) VALUES (?,?,?,?,?)", (bid_id, _iso(now), what, old, new))
             self.db.commit()
+        self._emit("bid.changed", bid_id, change=what, old=old, new=new)
+
+    def record_corrigendum(self, bid_id: int, note: str, new_closing: str | None, now: datetime, who: str = "") -> dict:
+        """Writes down a corrigendum read on the portal by hand (for a tender the app cannot watch), optionally with the closing date it set."""
+        bid = self.get(bid_id)
+        if not bid:
+            raise BidError("No such bid")
+        note = re.sub(r"[ \t]+", " ", str(note or "")).strip()[:500]
+        if not note:
+            raise BidError("Say what the corrigendum changed")
+        closing_iso = None
+        if new_closing:
+            when = _when(str(new_closing).strip())
+            if when is None:
+                raise BidError("The new closing date looks like 2026-12-05 or 2026-12-05T15:00")
+            closing_iso = _iso(when)
+        self.add_change(bid_id, "corrigendum", None, note + (f" (noted by {who})" if who else ""), now)
+        known = list(bid.get("corrigenda") or [])
+        known.append(note)
+        self.set_json(bid_id, "corrigenda", known[-100:], now)
+        if closing_iso and closing_iso != bid.get("closing"):
+            self.add_change(bid_id, "closing", bid.get("closing"), closing_iso, now)
+            with self.lock:
+                self.db.execute("UPDATE bids SET closing = ?, updated = ? WHERE id = ?", (closing_iso, _iso(now), bid_id))
+                self.db.commit()
+            self._sync_tender_dates(bid["key"], _when(closing_iso), None, "closing")
+        return self.get(bid_id) or bid
 
     def changes(self, bid_id: int, limit: int = 50) -> list[dict]:
         with self.lock:
@@ -796,7 +993,7 @@ class BidBook:
                 raise BidError(f"That file does not look like a real {ext} file. Check that you chose the right one")
             self.vault_dir.mkdir(parents=True, exist_ok=True)
             stored = uuid.uuid4().hex + ext
-            (self.vault_dir / stored).write_bytes(data)
+            self.sealer.write_file(self.vault_dir / stored, data)
             size, shown = len(data), re.sub(r"[^\w.\- ()]", "_", Path(filename).name)[:120]
         with self.lock:
             cur = self.db.execute(
@@ -839,6 +1036,44 @@ class BidBook:
         if self.vault_dir.resolve() not in path.parents or not path.is_file():
             return None
         return path, d["filename"] or d["stored"]
+
+    def vault_bytes(self, doc_id: int) -> tuple[bytes, str] | None:
+        """(content, file name) of a Vault file, decrypted. None when there is no file."""
+        found = self.vault_file(doc_id)
+        return (self.sealer.read_file(found[0]), found[1]) if found else None
+
+    def seal_existing(self) -> dict[str, int]:
+        """Encrypts files stored before a key was set, and re-encrypts files stored under an old key. Run at start. Returns how many of each."""
+        done = {"sealed": 0, "rotated": 0, "failed": 0}
+        if not self.sealer.enabled or not self.vault_dir or not self.vault_dir.is_dir():
+            return done
+        with self.lock:
+            stored = [r["stored"] for r in self.db.execute("SELECT stored FROM vault WHERE stored IS NOT NULL AND stored != ''")]
+        files = [self.vault_dir / n for n in stored]
+        if (self.vault_dir / "sources").is_dir():
+            files += sorted((self.vault_dir / "sources").glob("*"))
+        for f in files:
+            if not f.is_file() or f.name.endswith(".part"):
+                continue
+            try:
+                what = self.sealer.rotate_file(f)
+            except Exception:  # noqa: BLE001 - one unreadable file must not stop the rest
+                log.exception("could not encrypt %s", f.name)
+                done["failed"] += 1
+                continue
+            if what:
+                done[what] += 1
+        return done
+
+    def plain_files(self) -> int:
+        """How many stored files are not encrypted (what Settings shows once a key is set)."""
+        n = 0
+        if self.vault_dir and self.vault_dir.is_dir():
+            for f in self.vault_dir.rglob("*"):
+                if f.is_file() and not f.name.endswith(".part"):
+                    with open(f, "rb") as fh:
+                        n += 0 if fh.read(len(b"TNDENC1\n")) == b"TNDENC1\n" else 1
+        return n
 
 
 def default_vault_dir(state_path: str) -> Path:

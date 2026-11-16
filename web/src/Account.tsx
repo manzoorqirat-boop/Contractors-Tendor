@@ -5,6 +5,7 @@ import { Logo } from './Brand';
 import { useConfirm } from './confirm';
 import { useLoad } from './hooks';
 import { useToast } from './ui';
+import { resetPeople } from './Team';
 import type { AuditEntry, Me, Role, UserRow } from './types';
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Never');
@@ -73,6 +74,7 @@ export function AccountPanel({ user, onClose, onChanged }: { user: Me; onClose: 
         <h3>Password</h3>
         {user.owner ? <p className="sub">The owner login's password is set on the server (APP_PASSWORD).</p> : <ChangePassword onDone={onClose} onCancel={onClose} />}
       </section>
+      {!user.owner && <EmailField current={user.email ?? ''} onSaved={onChanged} />}
       <section>
         <h3>Two-step sign-in {user.two_step && <span className="badge ok">On</span>}</h3>
         {user.owner && <p className="sub">The owner login uses the server variable OWNER_TOTP_SECRET to require a code. Ask whoever manages the server to set it.</p>}
@@ -104,12 +106,68 @@ export function AccountPanel({ user, onClose, onChanged }: { user: Me; onClose: 
         ) : <button type="button" className="btn" onClick={() => setAsking(true)}>Turn off two-step sign-in</button>)}
         {err && <div className="alert bad" role="alert" style={{ marginTop: 10 }}>{err}</div>}
       </section>
-      <section>
-        <h3>Devices</h3>
-        <p className="sub">Signed in somewhere you no longer use, like a shared computer? This signs every other browser and phone out of your account. This one stays signed in.</p>
-        <button type="button" className="btn" disabled={busy} onClick={() => run(() => api.endOtherSessions(), 'Other devices were signed out.')}>Sign out other devices</button>
-      </section>
+      <DevicesSection busy={busy} onSignOutOthers={() => run(() => api.endOtherSessions(), 'Other devices were signed out.')} owner={user.owner} />
+      {!user.owner && (
+        <section>
+          <h3>Your data</h3>
+          <p className="sub">A copy of what TendAI keeps about you: your account details (never the password), your activity, comments and tasks.</p>
+          <a className="btn" href={api.exportOwnUrl} download>Download my data (.json)</a>
+        </section>
+      )}
     </div>
+  );
+}
+
+function DevicesSection({ busy, onSignOutOthers, owner }: { busy: boolean; onSignOutOthers: () => void; owner: boolean }) {
+  const toast = useToast();
+  const list = useLoad(() => api.mySessions(), []);
+  const sessions = list.data?.sessions ?? [];
+  async function end(ref: string) {
+    try { await api.endSession(ref); toast('That device was signed out.'); list.reload(); } catch (e) { toast((e as Error).message, 'bad'); list.reload(); }
+  }
+  const seen = (t: number) => new Date(t * 1000).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  return (
+    <section>
+      <h3>Devices</h3>
+      <p className="sub">Where you are signed in. Spot one you do not recognise, or one on a shared computer you no longer use? Sign it out.</p>
+      {list.error && <div className="alert bad">{list.error}</div>}
+      {sessions.length > 0 && (
+        <ul className="plain" style={{ margin: '0 0 10px', padding: 0, listStyle: 'none' }}>
+          {sessions.map((d) => (
+            <li key={d.ref} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid var(--border)' }}>
+              <span><strong>{d.device}</strong>{d.current && <span className="badge ok" style={{ marginLeft: 6 }}>This device</span>}<div className="muted small">Last used {seen(d.last_seen)}{d.client ? ` · ${d.client}` : ''}</div></span>
+              {!d.current && <button type="button" className="btn small" onClick={() => end(d.ref)}>Sign out</button>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {sessions.length > 1 && <button type="button" className="btn" disabled={busy} onClick={() => { onSignOutOthers(); setTimeout(list.reload, 400); }}>Sign out all other devices</button>}
+      {owner && <p className="muted small">The owner login can be used on several devices at once.</p>}
+    </section>
+  );
+}
+
+function EmailField({ current, onSaved }: { current: string; onSaved: () => void }) {
+  const toast = useToast();
+  const [v, setV] = useState(current);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    try { await api.setOwnEmail(v.trim()); toast(v.trim() ? 'Email saved' : 'Email removed'); onSaved(); } catch (er) { setErr((er as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <section>
+      <h3>Email</h3>
+      <p className="sub">Used to tell you when a task is given to you, when someone mentions you, and when a bid you asked about is approved. It is not shown to other people.</p>
+      <form onSubmit={save} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <label className="lf" style={{ margin: 0, flex: '1 1 220px' }}><span>Your email address</span>
+          <input type="email" value={v} onChange={(e) => setV(e.target.value)} autoComplete="email" aria-invalid={!!err || undefined} aria-describedby={err ? 'email-err' : undefined} />
+          {err && <em className="lf-warn" id="email-err" style={{ fontStyle: 'normal' }}>{err}</em>}</label>
+        <button className="btn" style={{ marginTop: 22 }} disabled={busy || v.trim() === current}>{busy ? 'Saving…' : 'Save'}</button>
+      </form>
+    </section>
   );
 }
 
@@ -120,11 +178,13 @@ export function UsersPanel() {
   const toast = useToast();
   const confirm = useConfirm();
   const { data, error, reload } = useLoad(() => api.users(), []);
-  const [form, setForm] = useState({ username: '', name: '', role: 'bidder', password: '' });
+  const [form, setForm] = useState({ username: '', name: '', role: 'bidder', password: '', email: '' });
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState<number | null>(null);
   const [resetPw, setResetPw] = useState('');
+  const [erasing, setErasing] = useState<number | null>(null);
+  const [eraseText, setEraseText] = useState('');
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -132,7 +192,7 @@ export function UsersPanel() {
     try {
       await api.createUser(form);
       toast(`Account created for ${form.username}. Give them the temporary password; they will choose their own at first sign-in.`);
-      setForm({ username: '', name: '', role: 'bidder', password: '' }); reload();
+      setForm({ username: '', name: '', role: 'bidder', password: '', email: '' }); resetPeople(); reload();
     } catch (err) { setFormError((err as Error).message); } finally { setBusy(false); }
   }
   async function change(u: UserRow, patch: { role?: string; active?: boolean; password?: string; reset_2fa?: boolean }) {
@@ -145,6 +205,13 @@ export function UsersPanel() {
   async function resetTwoStep(u: UserRow) {
     if (!(await confirm({ title: `Reset two-step sign-in for ${u.username}?`, body: 'Use this when they have lost their phone. They sign in with just their password, and can set the app up again under Account & security.', confirmLabel: 'Reset two-step', danger: true }))) return;
     if (await change(u, { reset_2fa: true })) toast(`Two-step sign-in reset for ${u.username}.`);
+  }
+  async function erase(u: UserRow) {
+    try {
+      const r = await api.erasePerson(u.id, eraseText);
+      toast(`Erased. Their name was removed from ${r.changed.comments ?? 0} comment(s), ${r.changed.activity ?? 0} log entries and ${r.changed.bids_owned ?? 0} bid(s). It now reads ${r.handle}.`);
+      setErasing(null); setEraseText(''); reload();
+    } catch (err) { toast((err as Error).message, 'bad'); }
   }
   async function reset(u: UserRow) {
     if (await change(u, { password: resetPw })) { toast(`Password reset. ${u.username} is signed out and must choose a new password at the next sign-in.`); setResetting(null); setResetPw(''); }
@@ -163,7 +230,7 @@ export function UsersPanel() {
             <tbody>
               {data.users.map((u) => (
                 <tr key={u.id}>
-                  <td><strong>{u.name || u.username}</strong><div className="muted small">{u.username}</div></td>
+                  <td><strong>{u.name || u.username}</strong><div className="muted small">{u.username}{u.email ? ` · ${u.email}` : ''}</div></td>
                   <td>{u.owner ? <span className="badge ok">Admin (owner)</span>
                     : <select aria-label={`Role of ${u.username}`} value={u.role} onChange={(e) => change(u, { role: e.target.value })} style={{ width: 'auto' }}>
                         {data.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
@@ -180,7 +247,15 @@ export function UsersPanel() {
                       : <>
                           <button type="button" className="btn small" onClick={() => { setResetting(u.id); setResetPw(''); }}>Reset password</button>{' '}
                           {u.two_step && <><button type="button" className="btn small" onClick={() => resetTwoStep(u)}>Reset two-step</button>{' '}</>}
-                          <button type="button" className="btn small" onClick={() => toggleActive(u)}>{u.active ? 'Switch off' : 'Switch on'}</button>
+                          <button type="button" className="btn small" onClick={() => toggleActive(u)}>{u.active ? 'Switch off' : 'Switch on'}</button>{' '}
+                          <a className="btn small" href={api.exportPersonUrl(u.id)} download title="Everything stored about this person, as a file">Download data</a>
+                          {!u.active && !u.username.startsWith('erased-') && (erasing === u.id
+                            ? <span style={{ display: 'inline-flex', gap: 6, marginLeft: 6 }}>
+                                <input type="text" autoComplete="off" placeholder={`Type ${u.username} to confirm`} aria-label={`Type ${u.username} to confirm erasing`} value={eraseText} onChange={(e) => setEraseText(e.target.value)} style={{ width: 200 }} />
+                                <button type="button" className="btn small danger" disabled={eraseText.trim().toLowerCase() !== u.username} onClick={() => erase(u)}>Erase</button>
+                                <button type="button" className="btn small" onClick={() => { setErasing(null); setEraseText(''); }}>Cancel</button>
+                              </span>
+                            : <button type="button" className="btn small danger" style={{ marginLeft: 6 }} onClick={() => { setErasing(u.id); setEraseText(''); }} title="Remove who this person was: name, email, password, and their name on comments and the log">Erase data</button>)}
                         </>)}
                   </td>
                 </tr>
@@ -195,12 +270,14 @@ export function UsersPanel() {
           {formError && <div className="alert bad" role="alert">{formError}</div>}
           <label className="field">Name<input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="off" /></label>
           <label className="field">Username<span className="hint">Letters, numbers, dot, dash or underscore. They type this to sign in.</span><input type="text" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase() })} autoComplete="off" autoCapitalize="none" spellCheck={false} /></label>
+          <label className="field">Email (optional)<span className="hint">For task, mention and approval notices.</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} autoComplete="off" /></label>
           <label className="field">Role<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{data.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select>
             <span className="hint">{data.roles.find((r) => r.key === form.role)?.text}</span></label>
           <label className="field">Temporary password<span className="hint">At least {data.min_password} characters. Tell them in person or by phone, not by email. They must replace it at first sign-in.</span><input type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="off" spellCheck={false} /></label>
           <button className="btn primary" disabled={busy || !form.username || form.password.length < data.min_password}>{busy ? 'Adding…' : 'Add person'}</button>
         </form>
       </section>
+      <ApprovalSetting />
       <section className="card">
         <h2>What each role can do</h2>
         <dl className="roles">
@@ -209,6 +286,24 @@ export function UsersPanel() {
         <p className="muted small">Role changes apply at the next click. Switching someone off signs them out at once.</p>
       </section>
     </div>
+  );
+}
+
+/** One switch: must an administrator approve a bid before it moves from Interested to Preparing? Saves at once. */
+function ApprovalSetting() {
+  const toast = useToast();
+  const cur = useLoad(() => api.settings(), []);
+  const [busy, setBusy] = useState(false);
+  async function toggle(on: boolean) {
+    setBusy(true);
+    try { await api.saveSettings({ require_signoff: on }); cur.reload(); toast(on ? 'Bids now need an administrator\'s approval before Preparing.' : 'Approval is optional again.'); } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
+  }
+  return (
+    <section className="card">
+      <h2>Approval before bidding</h2>
+      <p className="sub">When on, a bidder asks for approval on the bid's Team tab, and an administrator approves or declines it. Administrators are not held up by this.</p>
+      <label className="check"><input type="checkbox" checked={!!cur.data?.require_signoff} disabled={busy || !cur.data} onChange={(e) => toggle(e.target.checked)} />Require approval before a bid moves from Interested to Preparing</label>
+    </section>
   );
 }
 

@@ -1,7 +1,7 @@
 export interface PortalInfo { key: string; name: string; state: string; search_url: string }
 export interface Dimension { key: string; label: string; time: boolean }
 export interface AppConfig {
-  portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number; ai_enabled?: boolean; storage_warning?: string;
+  portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number; ai_enabled?: boolean; storage_warning?: string; require_signoff?: boolean;
 }
 
 export interface PortalReport { portal: string; name: string; departments: number; listed: number; new_civil: number; errors: string[]; failed: boolean; access?: string }
@@ -22,7 +22,7 @@ export interface Related { key: string; tender_id: string; title: string; closin
 export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[]; bid_id?: number | null; history?: string[]; manual?: boolean; has_source?: boolean }
 export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number; calls_today?: number; daily_limit?: number }
 export interface AskResult { filters: Record<string, unknown>; sort: string | null; explanation: string }
-export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[] }
+export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[]; understood?: string; suggest?: string | null }
 
 export interface Stats {
   kpi: {
@@ -51,7 +51,7 @@ export interface NewPortal { name: string; state: string; base_url: string }
 
 export interface Settings {
   recipients: string[]; send_time: string; schedule_enabled: boolean; send_empty: boolean; portals: string[]; min_value: number;
-  extra_keywords: string[]; exclude_words: string[]; company_profile: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string;
+  extra_keywords: string[]; exclude_words: string[]; company_profile: string; require_signoff?: boolean; reminders_on?: boolean; webhook_url?: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; audit_days?: number; tender_days?: number; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string;
 }
 
 export type Status = 'open' | 'closing_soon' | 'closed' | 'all';
@@ -87,6 +87,7 @@ export interface EligibilityCheck { requirement: string; status: 'met' | 'gap' |
 export interface Eligibility { verdict: string; summary: string; checks: EligibilityCheck[]; checked?: string }
 export interface BidDetail extends Omit<BidSummary, 'has_doc'> {
   published: string | null; category: string; location: string; emd: number | null; notes: string | null; l1_bidder: string | null; result_note: string | null; search_url: string;
+  signoff?: Signoff | null; comment_count?: number;
   doc: DocFacts | null; doc_checked?: { by: string; at: string } | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null; manual?: boolean; has_source?: boolean; portal_checked?: string | null;
   items: BidItem[]; changes: BidChange[]; unseen: number; history: string[];
 }
@@ -109,7 +110,7 @@ export interface BoqCandidate { code: string; name: string; spec: string; uom: s
 export interface BoqLine {
   line_no: number; sr: string | null; section: string | null; description: string; uom: string | null; uom_raw: string | null; qty: number | null;
   est_rate: number | null; est_amount: number | null; status: BoqStatus; tier: string | null; confidence: number | null; item_code: string | null; item_name: string;
-  candidates: BoqCandidate[]; reason: string | null; cost: BoqCost | null;
+  candidates: BoqCandidate[]; reason: string | null; cost: BoqCost | null; manual_cost: number | null; lump_sum: boolean;
 }
 export interface BoqPricing {
   estimate_total: number; priced_lines: number; total_lines: number; coverage_pct: number; priced_estimate: number; priced_cost: number;
@@ -143,13 +144,36 @@ export interface SimInput { l1_price: number | null; quoted_pct: number | null; 
 export interface ManualListing { tender_id: string; reference: string; title: string; description: string; organisation: string; location: string; value: number | null; emd: number | null; published: string; closing: string; opening: string; portal_name: string; form_of_contract: string }
 export interface ManualFields { tender_id?: string; title?: string; description?: string; reference?: string; organisation?: string; location?: string; value?: number | null; emd?: number | null; published?: string; closing?: string; opening?: string; portal_name?: string; clear_value?: boolean; clear_emd?: boolean }
 
+export interface Bidder { id?: number; name: string; price: number | null; rank: number | null; status: string; mine?: boolean }
+export interface Competitor { key: string; name: string; bids: number; wins: number; avg_vs_estimate: number | null; quotes: number; departments: string[]; last_seen: string }
+export interface Person { username: string; name: string }
+export interface BidComment { id: number; at: string; username: string; text: string }
+export interface Signoff { state: 'requested' | 'approved' | 'declined'; requested_by: string; by: string; at: string; note: string }
 export type Role = 'viewer' | 'bidder' | 'admin';
-export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean; two_step: boolean }
-export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; two_step?: boolean; created: string | null; last_login: string | null; owner: boolean }
+export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean; two_step: boolean; email?: string }
+export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; two_step?: boolean; email?: string; created: string | null; last_login: string | null; owner: boolean }
 export interface UsersData { users: UserRow[]; roles: { key: Role; label: string; text: string }[]; min_password: number }
 export interface AuditEntry { id: number; at: string; username: string; role: string | null; action: string; target: string; detail: string; client: string }
 
 export interface BackupStatus {
   enabled: boolean; keep_days: number; latest_day: string | null; days: string[]; storage_warning: string;
+  encryption?: { enabled: boolean; problem: string; plain_files: number; plain_secrets: number; rotating: boolean };
   offsite: { configured: boolean; bucket: string; endpoint: string; last_ok: string | null; last_error: string | null; last_daily: string | null; last_weekly: string | null; keep_daily: number; keep_weekly: number };
 }
+
+export interface LetterTemplate { id: number; name: string; version: number; body: string; note: string; author: string; created: string; updated: string; placeholders: string[] }
+export interface TemplateVersion { version: number; body: string; note: string | null; author: string | null; created: string }
+export interface TemplateField { key: string; label: string }
+export interface FilledLetter { text: string; missing: string[]; template: string; version: number }
+export interface CompareTender {
+  key: string; tender_id: string; title: string; description: string; organisation: string; portal_name: string; category: string; location: string; work_type: string | null;
+  value: number | null; value_text: string; emd: number | null; emd_pct: number | null; published: string | null; closing: string | null; opening: string | null;
+  days_left: number | null; fit: number | null; fit_reason: string | null; starred: boolean; manual: boolean; bid_id: number | null;
+}
+
+export interface Device { ref: string; device: string; client: string; created: number; last_seen: number; current: boolean }
+export interface ApiToken { id: number; name: string; hint: string; role: 'viewer' | 'bidder'; created_by: string | null; created: string; expires: string | null; last_used: number | null; revoked: boolean }
+export interface Webhook { id: number; name: string; url: string; events: string[]; active: boolean; created: string; secret_hint: string; last_at: string | null; last_status: 'ok' | 'retrying' | 'failed' | null; last_error: string | null; waiting: number }
+export interface EraseResult { handle: string; changed: Record<string, number>; when: string; note: string }
+export interface SetupStep { key: string; title: string; why: string; done: boolean; href: string; where: string; optional?: boolean; admin?: boolean }
+export interface SetupStatus { steps: SetupStep[]; done: number; total: number; sample: { loaded: boolean; tenders: number } }
