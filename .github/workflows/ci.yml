@@ -90,6 +90,12 @@ jobs:
           A11Y_URL: http://localhost:8000/
           A11Y_PASS: a11y-check-password
         run: npm run a11y
+      - name: Check menus, panels and dialogs fit short windows
+        working-directory: web
+        env:
+          A11Y_URL: http://localhost:8000/
+          A11Y_PASS: a11y-check-password
+        run: npm run fit
       - name: App log (on failure)
         if: failure()
         run: tail -50 /tmp/app.log

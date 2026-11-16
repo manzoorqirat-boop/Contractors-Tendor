@@ -11,6 +11,7 @@ import { AssigneeSelect, MyWork, TeamTab } from '../Team';
 import { BiddersCard, CompetitorsCard } from '../Bidders';
 import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
+import { useKeepActiveVisible } from '../Tabs';
 import { Skeleton, useToast } from '../ui';
 import { Only, ReadOnly } from '../session';
 import { useConfirm } from '../confirm';
@@ -205,6 +206,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [tabSel, setTabSel] = useState<WsTab | null>(null);
+  const tabsRef = useKeepActiveVisible(tabSel);  // a hook, so it stays above the early returns below
   const vault = useLoad(() => api.vault(), []);
   const load = () => api.bid(id).then(setBid, (e: Error) => setError(e.message));
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -292,7 +294,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         {bid.history.length > 0 && <div className="alert warn" style={{ marginTop: 10, marginBottom: 0 }}>{bid.history.map((h) => <div key={h}>{h}</div>)}</div>}
       </section>
 
-      <div className="ws-tabs" role="tablist" aria-label="Bid sections" onKeyDown={(e) => {
+      <div className="ws-tabs" role="tablist" aria-label="Bid sections" ref={tabsRef} onKeyDown={(e) => {
         if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
         const order: WsTab[] = ['decide', 'checklist', 'price', 'letters', 'result', 'team'];
         const next = order[(order.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length];

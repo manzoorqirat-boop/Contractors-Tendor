@@ -340,4 +340,5 @@ export const MR: Record<string, string> = {
   "or": "किंवा",
   "Colour": "रंग",
   "Company colour": "कंपनीचा रंग",
+  "Appearance": "स्वरूप",
 };

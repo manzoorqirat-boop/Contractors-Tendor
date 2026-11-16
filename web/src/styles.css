@@ -743,3 +743,28 @@ html:lang(hi) body, html:lang(mr) body { line-height: 1.65; }   /* Devanagari ha
 .accent-dot.big { width: 32px; height: 32px; }
 .sidebar .accent-row .accent-dot, .accent-row .accent-dot { display: block; flex: none; width: 22px; min-width: 22px; height: 22px; padding: 0; }
 .accent-row .accent-dot.big { width: 32px; min-width: 32px; height: 32px; }
+
+/* ---- the menu always fits: it scrolls when the window is short, and the rarely used choices (theme, language, colour) fold away ---- */
+.sidebar { height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.side-foot { margin-top: auto; }
+.side-appearance summary { list-style: none; display: flex; align-items: center; cursor: pointer; }
+.side-appearance summary::-webkit-details-marker { display: none; }
+.side-appearance .chev { margin-left: auto; transition: transform .15s; }
+.side-appearance[open] .chev { transform: rotate(180deg); }
+@media (max-width: 860px) {
+  .sidebar { height: auto; overflow: visible; }
+  .side-foot.open .side-more { max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; }
+}
+
+/* ---- panels and dialogs never outgrow the window: they scroll inside ---- */
+.pop-panel { overflow-y: auto; overscroll-behavior: contain; }
+.confirm-box { max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
+.confirm-wrap { overflow-y: auto; }
+@media (max-width: 860px) { .pop-panel { max-height: calc(100dvh - 16px); } }
+
+/* a row of tabs that scrolls sideways shows a soft edge where there is more, and none where it has reached the end */
+.ws-tabs { background:
+  linear-gradient(to right, var(--bg) 30%, transparent) left / 40px 100% no-repeat local,
+  linear-gradient(to left, var(--bg) 30%, transparent) right / 40px 100% no-repeat local,
+  radial-gradient(farthest-side at 0 50%, rgba(16, 24, 40, .22), transparent) left / 12px 100% no-repeat scroll,
+  radial-gradient(farthest-side at 100% 50%, rgba(16, 24, 40, .22), transparent) right / 12px 100% no-repeat scroll; }

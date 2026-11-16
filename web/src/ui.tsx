@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 // ---- toasts ----------------------------------------------------------------------------------------------------
 type Toast = { id: number; text: string; tone: 'ok' | 'bad' };
@@ -54,6 +54,28 @@ export function Popover({ label, children, active, align = 'left', name }: { lab
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const panelId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  // Keep the panel inside the window: slide it sideways if it would run off an edge, and give it the room that is left (it scrolls inside)
+  // or open it upward when there is more room above the button.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const el = panel.current, btn = button.current;
+      if (!el || !btn) return;
+      if (getComputedStyle(el).position === 'fixed') { el.style.cssText = ''; return; } // phones show it as a bottom sheet (CSS)
+      el.style.cssText = '';
+      const vw = document.documentElement.clientWidth, vh = window.innerHeight, m = 8;
+      const r = el.getBoundingClientRect(), b = btn.getBoundingClientRect();
+      if (r.right > vw - m) el.style.marginLeft = `${-(r.right - (vw - m))}px`;
+      else if (r.left < m) el.style.marginLeft = `${m - r.left}px`;
+      const below = vh - b.bottom - m - 6, above = b.top - m - 6;
+      if (el.scrollHeight > below && above > below) { el.style.top = 'auto'; el.style.bottom = 'calc(100% + 6px)'; el.style.maxHeight = `${Math.max(120, above)}px`; }
+      else el.style.maxHeight = `${Math.max(120, below)}px`;
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open]);
   const close = useCallback((restoreFocus: boolean) => { setOpen(false); if (restoreFocus) button.current?.focus(); }, []);
   useEffect(() => {
     if (!open) return;
@@ -69,7 +91,7 @@ export function Popover({ label, children, active, align = 'left', name }: { lab
     <div className="popover" ref={ref} onBlur={leave}>
       <button ref={button} type="button" className={`btn pop-btn${active ? ' active' : ''}`} aria-expanded={open} aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((o) => !o)} onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true); } }}>{label}<span aria-hidden>▾</span></button>
-      {open && <div id={panelId} role="group" aria-label={name} className={`pop-panel ${align}`}>{children}</div>}
+      {open && <div id={panelId} ref={panel} role="group" aria-label={name} className={`pop-panel ${align}`}>{children}</div>}
     </div>
   );
 }
