@@ -2,7 +2,7 @@ import { toParams } from './filters';
 import type { AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public needCode = false) { super(message); }
 }
 
 let onUnauthorised: () => void = () => {};
@@ -18,12 +18,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401 && path !== '/api/login') onUnauthorised();
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
+    let needCode = false;
     try {
       const body = await res.json();
+      needCode = body.need_code === true;
       if (typeof body.detail === 'string') message = body.detail;
       else if (Array.isArray(body.detail)) message = 'Some of the values are not valid.';
     } catch { /* not JSON: keep the generic message */ }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, needCode);
   }
   return res.json() as Promise<T>;
 }
@@ -50,10 +52,14 @@ export const api = {
   me: () => call<{ authenticated: boolean; user: Me | null }>('/api/me'),
   users: () => call<UsersData>('/api/users'),
   createUser: (b: { username: string; name: string; role: string; password: string }) => call<UserRow>('/api/users', { method: 'POST', body: JSON.stringify(b) }),
-  editUser: (id: number, b: { name?: string; role?: string; active?: boolean; password?: string }) => call<UserRow>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  editUser: (id: number, b: { name?: string; role?: string; active?: boolean; password?: string; reset_2fa?: boolean }) => call<UserRow>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   audit: (user: string, before?: number) => call<{ entries: AuditEntry[]; next: number | null }>(`/api/audit?limit=50${user ? `&user=${encodeURIComponent(user)}` : ''}${before ? `&before=${before}` : ''}`),
   changePassword: (current: string, next: string) => call<{ ok: boolean }>('/api/account/password', { method: 'POST', body: JSON.stringify({ current, new: next }) }),
-  login: (username: string, password: string) => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  login: (username: string, password: string, code = '') => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password, code }) }),
+  twoStepStart: () => call<{ secret: string; uri: string }>('/api/account/2fa/start', { method: 'POST' }),
+  twoStepEnable: (code: string) => call<{ ok: boolean }>('/api/account/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) }),
+  twoStepDisable: (password: string) => call<{ ok: boolean }>('/api/account/2fa/disable', { method: 'POST', body: JSON.stringify({ password }) }),
+  endOtherSessions: () => call<{ ok: boolean }>('/api/account/sessions/end-others', { method: 'POST' }),
   logout: () => call<{ ok: boolean }>('/api/logout', { method: 'POST' }),
   config: () => call<AppConfig>('/api/config'),
   stats: (f: Filters) => call<Stats>(`/api/stats?${toParams(f)}`),

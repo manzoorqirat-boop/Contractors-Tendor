@@ -119,6 +119,7 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `AI_MAX_CALLS_PER_DAY` | Optional | Default `300`. Most AI requests people can start from the page in a day (`0` = no limit). Cached answers cost nothing. Settings > AI shows today's count. The daily run's labelling has its own cap, `AI_MAX_PER_RUN`. |
 | `AI_MAX_CALLS_PER_MINUTE` | Optional | Default `20` (`0` = no limit). |
 | `BACKUP_KEEP_DAYS` | Optional | Default `7`. How many days of automatic database copies to keep on the volume. |
+| `OWNER_TOTP_SECRET` | Optional | A base32 secret (for example from an authenticator app's "setup key"). When set, the owner login also needs the 6-digit code from the app. Secret. To lose the requirement, remove the variable. |
 | `ALLOW_EPHEMERAL_STORAGE` | Optional | Set `true` to silence the "no volume" warning on Railway (not recommended: a redeploy then loses all data). |
 | `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
 | `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
@@ -158,6 +159,8 @@ Sign in with a username and password. Administrators add people in **Settings > 
 - The login in the server variables (`APP_USERNAME` / `APP_PASSWORD`) is the **owner**: always an admin, always able to sign in, and the way back in if every other account is lost. It is not stored in the database and is changed only on the server.
 - A password an administrator sets is temporary: the person must choose their own (12 or more characters) before doing anything else. Resetting a password or switching a person off signs them out at once; a role change applies at their next click.
 - Passwords are stored as salted scrypt hashes. Signing in has the same limits as before (per address, never a lock-out of the owner).
+- **Two-step sign-in** (optional): each person can turn it on under **Account & security** with any authenticator app (Google/Microsoft Authenticator, Authy, 1Password): add the setup key shown, then type a code to confirm. At sign-in a right password is followed by a request for the current code; each code works once. An administrator can reset a lost phone in Settings > People. The secret is stored in the database, so keep backups private. For the owner login set `OWNER_TOTP_SECRET`.
+- **Sign out other devices** (Account & security) ends every other session of your account.
 - **Settings > Activity** records who signed in, what each person changed, refusals ("view-only account tried to ...") and downloads of backups, Vault files and the spreadsheet. Reading pages is not logged. The last 20,000 entries are kept.
 - Rules are enforced on the server (one table, `required_role` in `tender_digest/accounts.py`); the page only hides what a person cannot use.
 
@@ -165,7 +168,7 @@ Sign in with a username and password. Administrators add people in **Settings > 
 
 - Everything except the login and a health check needs the password. Cookies are `HttpOnly`, `SameSite=Strict` and signed.
 - Logins are kept on the server: **Log out ends the session for good** (a copied cookie stops working), a login unused for `SESSION_IDLE_HOURS` ends, and **changing `APP_PASSWORD` signs everyone out**.
-- Wrong-password attempts are limited per address (8 in 10 minutes). Many wrong guesses from many addresses only slow logins down; they never lock the owner out. Use a password of 12 or more characters.
+- Wrong-password attempts are limited per address (8 in 10 minutes), and the count survives a restart. Many wrong guesses from many addresses only slow logins down; they never lock the owner out. Use a password of 12 or more characters.
 - The portal reader only ever talks to the portal's own host: a link or a redirect to any other address (or to a private network) is refused, so a portal page cannot aim this server elsewhere.
 - Headers: strict `Content-Security-Policy` (no inline styles or scripts), HSTS on https, `Permissions-Policy`, `Cross-Origin-Opener-Policy`.
 - AI use is capped per day and per minute (`AI_MAX_CALLS_PER_DAY`, `AI_MAX_CALLS_PER_MINUTE`), so a stuck button or a stolen session cannot run up the bill.

@@ -17,6 +17,8 @@ import hashlib
 import hmac
 import re
 import secrets
+import struct
+import time
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -43,6 +45,7 @@ class Principal:
     name: str
     role: str
     must_change: bool = False
+    two_step: bool = False
 
     @property
     def owner(self) -> bool:
@@ -52,7 +55,7 @@ class Principal:
         return RANK[self.role] >= RANK[role]
 
     def public(self) -> dict[str, Any]:
-        return {"id": self.id, "username": self.username, "name": self.name, "role": self.role, "owner": self.owner, "must_change": self.must_change}
+        return {"id": self.id, "username": self.username, "name": self.name, "role": self.role, "owner": self.owner, "must_change": self.must_change, "two_step": self.two_step}
 
 
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
@@ -63,8 +66,8 @@ _VAULT_FILE = re.compile(r"^/api/vault/\d+/file$")
 
 def required_role(method: str, path: str) -> str:
     """The least role allowed to make this request. One table for the whole app, so it can be read, and tested, in one place."""
-    if path == "/api/account/password":
-        return "viewer"  # everyone may change their own password
+    if path.startswith("/api/account/"):
+        return "viewer"  # everyone manages their own password, two-step sign-in and devices
     if _ADMIN_AREAS.match(path):
         return "admin"
     if method in ("GET", "HEAD", "OPTIONS"):
@@ -114,6 +117,41 @@ def password_problem(password: str, username: str = "") -> str:
     return ""
 
 
+# ---- two-step sign-in: time-based one-time codes (RFC 6238), as shown by any authenticator app --------------------------------
+
+TOTP_STEP = 30
+
+
+def new_totp_secret() -> str:
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def totp_code(secret: str, step: int, digits: int = 6) -> str:
+    key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    mac = hmac.new(key, struct.pack(">Q", step), hashlib.sha1).digest()
+    offset = mac[-1] & 0x0F
+    number = (struct.unpack(">I", mac[offset:offset + 4])[0] & 0x7FFFFFFF) % (10 ** digits)
+    return str(number).zfill(digits)
+
+
+def totp_match(secret: str, code: str, now: float | None = None, after_step: int = 0) -> int | None:
+    """The time step the code belongs to when it is right (allowing one step either side for clock drift), else None.
+    A step at or before `after_step` is refused, so a code that was already used cannot be used again."""
+    code = re.sub(r"\s+", "", code or "")
+    if not re.fullmatch(r"\d{6}", code):
+        return None
+    current = int((now if now is not None else time.time()) // TOTP_STEP)
+    for step in (current, current - 1, current + 1):
+        if step > after_step and hmac.compare_digest(totp_code(secret, step), code):
+            return step
+    return None
+
+
+def totp_uri(secret: str, account: str, issuer: str = "TendAI") -> str:
+    from urllib.parse import quote
+    return f"otpauth://totp/{quote(issuer)}:{quote(account)}?secret={secret}&issuer={quote(issuer)}&period={TOTP_STEP}&digits=6"
+
+
 # ---- the stored accounts and the activity log ----------------------------------------------------------------------------
 
 class AccountError(Exception):
@@ -133,14 +171,19 @@ class Accounts:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, username TEXT NOT NULL, role TEXT, action TEXT NOT NULL, target TEXT, detail TEXT, client TEXT);
                 CREATE INDEX IF NOT EXISTS audit_at ON audit (id DESC);
                 """)
+            have = {r["name"] for r in self.db.execute("PRAGMA table_info(users)")}
+            for col, kind in (("totp_secret", "TEXT"), ("totp_on", "INTEGER NOT NULL DEFAULT 0"), ("totp_last", "INTEGER NOT NULL DEFAULT 0")):
+                if col not in have:
+                    self.db.execute(f"ALTER TABLE users ADD COLUMN {col} {kind}")
             self.db.commit()
         self._audit_writes = 0
+        self._code_fails: dict[int, list[float]] = {}
         self._guard = threading.Lock()
 
     # -- people --
 
     def _principal(self, r: Any) -> Principal:
-        return Principal(int(r["id"]), r["username"], r["name"] or r["username"], r["role"], bool(r["must_change"]))
+        return Principal(int(r["id"]), r["username"], r["name"] or r["username"], r["role"], bool(r["must_change"]), bool(r["totp_on"]))
 
     def get(self, user_id: int) -> Principal | None:
         with self.lock:
@@ -153,6 +196,50 @@ class Accounts:
         ok = verify_password(password, r["pw_hash"] if r else _DUMMY_HASH)
         return self._principal(r) if (r and ok) else None
 
+    # -- two-step sign-in --
+
+    def totp_start(self, user_id: int) -> str:
+        """Makes a new secret for the person to add to their authenticator app. It is not required at sign-in until they confirm a code."""
+        secret = new_totp_secret()
+        with self.lock:
+            self.db.execute("UPDATE users SET totp_secret = ?, totp_on = 0, totp_last = 0 WHERE id = ?", (secret, user_id))
+            self.db.commit()
+        return secret
+
+    def totp_enable(self, user_id: int, code: str, now: float | None = None) -> None:
+        with self.lock:
+            r = self.db.execute("SELECT totp_secret FROM users WHERE id = ?", (user_id,)).fetchone()
+        step = totp_match(r["totp_secret"], code, now) if r and r["totp_secret"] else None
+        if step is None:
+            raise AccountError("That code is not right. Check the app, wait for a new code, and try again")
+        with self.lock:
+            self.db.execute("UPDATE users SET totp_on = 1, totp_last = ? WHERE id = ?", (step, user_id))
+            self.db.commit()
+
+    def totp_off(self, user_id: int) -> None:
+        with self.lock:
+            self.db.execute("UPDATE users SET totp_secret = NULL, totp_on = 0, totp_last = 0 WHERE id = ?", (user_id,))
+            self.db.commit()
+
+    def totp_check(self, user_id: int, code: str, now: float | None = None) -> bool:
+        """Checks a sign-in code. Each code works once, and ten wrong ones in ten minutes pause that account's codes for a while."""
+        t = now if now is not None else time.time()
+        fails = [x for x in self._code_fails.get(user_id, []) if t - x < 600]
+        self._code_fails[user_id] = fails
+        if len(fails) >= 10:
+            return False
+        with self.lock:
+            r = self.db.execute("SELECT totp_secret, totp_last FROM users WHERE id = ? AND totp_on = 1", (user_id,)).fetchone()
+            step = totp_match(r["totp_secret"], code, t, r["totp_last"]) if r else None
+            if step is not None:
+                self.db.execute("UPDATE users SET totp_last = ? WHERE id = ?", (step, user_id))
+                self.db.commit()
+        if step is None:
+            fails.append(t)
+            return False
+        self._code_fails[user_id] = []
+        return True
+
     def record_login(self, user_id: int, now: datetime) -> None:
         with self.lock:
             self.db.execute("UPDATE users SET last_login = ? WHERE id = ?", (now.isoformat(timespec="seconds"), user_id))
@@ -160,8 +247,8 @@ class Accounts:
 
     def list(self) -> list[dict[str, Any]]:
         with self.lock:
-            rows = self.db.execute("SELECT id, username, name, role, active, must_change, created, last_login FROM users ORDER BY active DESC, username").fetchall()
-        return [{**dict(r), "active": bool(r["active"]), "must_change": bool(r["must_change"])} for r in rows]
+            rows = self.db.execute("SELECT id, username, name, role, active, must_change, created, last_login, totp_on FROM users ORDER BY active DESC, username").fetchall()
+        return [{**{k: v for k, v in dict(r).items() if k != "totp_on"}, "active": bool(r["active"]), "must_change": bool(r["must_change"]), "two_step": bool(r["totp_on"])} for r in rows]
 
     def exists(self, username: str) -> bool:
         with self.lock:
@@ -186,7 +273,8 @@ class Accounts:
             self.db.commit()
         return next(u for u in self.list() if u["id"] == cur.lastrowid)
 
-    def update(self, user_id: int, *, name: str | None = None, role: str | None = None, active: bool | None = None, password: str | None = None) -> dict[str, Any]:
+    def update(self, user_id: int, *, name: str | None = None, role: str | None = None, active: bool | None = None, password: str | None = None,
+               reset_two_step: bool = False) -> dict[str, Any]:
         with self.lock:
             r = self.db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not r:
@@ -205,6 +293,8 @@ class Accounts:
             if problem:
                 raise AccountError(problem)
             sets.update(pw_hash=hash_password(password), must_change=1)  # a password set by someone else must be replaced by its owner
+        if reset_two_step:
+            sets.update(totp_secret=None, totp_on=0, totp_last=0)  # a lost phone: they set it up again after signing in
         if not sets:
             raise AccountError("Nothing to change")
         with self.lock:
@@ -293,6 +383,10 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/users"): "Created an account",
     ("PATCH", "/api/users/{user_id}"): "Changed an account",
     ("POST", "/api/account/password"): "Changed own password",
+    ("POST", "/api/account/2fa/start"): "Began setting up two-step sign-in",
+    ("POST", "/api/account/2fa/enable"): "Turned on two-step sign-in",
+    ("POST", "/api/account/2fa/disable"): "Turned off two-step sign-in",
+    ("POST", "/api/account/sessions/end-others"): "Signed out other devices",
     ("GET", "/api/backup"): "Downloaded a backup",
     ("GET", "/api/vault/{doc_id}/file"): "Downloaded a Vault file",
     ("GET", "/api/tenders/export"): "Downloaded the tender spreadsheet",

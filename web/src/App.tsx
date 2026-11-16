@@ -10,7 +10,7 @@ import { loadBranding, Logo } from './Brand';
 import { ToastProvider, Drawer } from './ui';
 import { ConfirmProvider } from './confirm';
 import { SessionProvider, useSession } from './session';
-import { ChangePassword } from './Account';
+import { AccountPanel, ChangePassword } from './Account';
 import type { Display, Facets, Filters, Me } from './types';
 
 const BidsPage = lazy(() => import('./pages/Bids').then((m) => ({ default: m.BidsPage })));
@@ -84,13 +84,13 @@ export function App() {
         {me === undefined ? <div className="login"><span className="spinner" aria-label="Loading" /></div>
           : me === null ? <Login onDone={refresh} />
           : me.must_change ? <ChangePassword forced onDone={refresh} onLogout={logout} />
-          : <SessionProvider user={me}><Main onLogout={logout} /></SessionProvider>}
+          : <SessionProvider user={me}><Main onLogout={logout} refreshMe={refresh} /></SessionProvider>}
       </ConfirmProvider>
     </ToastProvider>
   );
 }
 
-function Main({ onLogout }: { onLogout: () => void }) {
+function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => void }) {
   const initial = useRef(parseHash()).current;
   const [tab, setTab] = useState<Tab>(initial.tab);
   const [bidId, setBidId] = useState<number | null>(initial.bidId);
@@ -166,7 +166,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="app">
       <AddTenderHost />
-      {changingPassword && <Drawer title="Change your password" onClose={() => setChangingPassword(false)}><ChangePassword onDone={() => setChangingPassword(false)} onCancel={() => setChangingPassword(false)} /></Drawer>}
+      {changingPassword && user && <Drawer title="Account & security" onClose={() => setChangingPassword(false)}><AccountPanel user={user} onClose={() => setChangingPassword(false)} onChanged={refreshMe} /></Drawer>}
       <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
       <aside className="sidebar">
         <div className="brand" aria-label="TendAI by QMSofts">
@@ -186,7 +186,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
               <span className="who-name">{user.name || user.username}</span><span className="who-role">{user.role}</span>
             </div>
           )}
-          {user && !user.owner && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">Change password</span></button>}
+          {user && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">Account &amp; security</span></button>}
           <button className="link-btn" onClick={onLogout}><span className="nav-label">Log out</span></button>
           </div>
         </div>

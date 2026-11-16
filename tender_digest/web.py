@@ -100,6 +100,7 @@ class AppConfig:
     idle_seconds: int = 24 * 3600  # a session unused for this long ends; it also ends after SESSION_SECONDS whatever happens
     ai_per_day: int = 300  # most AI requests a person can start in a day (0 = no limit); scheduled labelling has its own cap, AI_MAX_PER_RUN
     ai_per_minute: int = 20
+    owner_totp: str = ""  # a base32 secret: when set, the owner login also needs the six-digit code from an authenticator app
     background_jobs: bool = False  # True in the real service: long actions run in the background and the page polls. Tests run them inline.
     trusted_proxy_hops: int = 1  # how many reverse proxies sit in front (Railway: 1). 0 = ignore X-Forwarded-For
 
@@ -136,6 +137,7 @@ def config_from_env() -> AppConfig:
         password=password, secret_key=key, username=os.environ.get("APP_USERNAME", "admin").strip(), cookie_secure=os.environ.get("COOKIE_SECURE", "true").lower() not in ("0", "false", "no"),
         tz_name=os.environ.get("TZ_NAME", "Asia/Kolkata"),
         idle_seconds=max(1, _int_env("SESSION_IDLE_HOURS", 24)) * 3600, background_jobs=True, trusted_proxy_hops=max(0, _int_env("TRUSTED_PROXY_HOPS", 1)),
+        owner_totp=re.sub(r"[\s=-]", "", os.environ.get("OWNER_TOTP_SECRET", "")).upper(),
         ai_per_day=max(0, _int_env("AI_MAX_CALLS_PER_DAY", 300)), ai_per_minute=max(0, _int_env("AI_MAX_CALLS_PER_MINUTE", 20)),
         static_dir=Path(os.environ.get("STATIC_DIR") or Path(__file__).resolve().parent.parent / "web" / "dist"),
     )
@@ -180,9 +182,10 @@ class LoginLimiter:
     trigger would also lock the owner out.
     """
 
-    def __init__(self, per_client: int = 8, overall: int = 40, window: int = 600, slow_seconds: float = 1.5):
+    def __init__(self, per_client: int = 8, overall: int = 40, window: int = 600, slow_seconds: float = 1.5, store: SeenStore | None = None):
         self.per_client, self.overall, self.window, self.slow_seconds = per_client, overall, window, slow_seconds
-        self.fails: list[tuple[float, str]] = []
+        self.store = store  # when given, failures are kept in the database so a restart does not reset the count
+        self.fails: list[tuple[float, str]] = store.login_fails_recent(time.time() - window) if store else []
 
     def _recent(self, now: float) -> list[tuple[float, str]]:
         self.fails = [(t, c) for t, c in self.fails if now - t < self.window]
@@ -195,10 +198,15 @@ class LoginLimiter:
         return len(self._recent(now or time.time())) >= self.overall
 
     def failed(self, client: str, now: float | None = None) -> None:
-        self.fails.append((now or time.time(), client))
+        at = now or time.time()
+        self.fails.append((at, client))
+        if self.store:
+            self.store.login_fail_add(client, at)
 
     def succeeded(self, client: str) -> None:
         self.fails = [(t, c) for t, c in self.fails if c != client]
+        if self.store:
+            self.store.login_fails_clear(client)
 
 
 class AiBudget:
@@ -376,6 +384,7 @@ class UserEdit(BaseModel):
     role: str | None = None
     active: bool | None = None
     password: str | None = None
+    reset_2fa: bool = False
 
 
 class PasswordChange(BaseModel):
@@ -385,6 +394,15 @@ class PasswordChange(BaseModel):
 
 class LoginBody(BaseModel):
     username: str = ""
+    password: str
+    code: str = ""
+
+
+class TwoStepCode(BaseModel):
+    code: str
+
+
+class TwoStepOff(BaseModel):
     password: str
 
 
@@ -522,7 +540,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     backups = Backups(store, boq.store, env.state_path, vault_dir, keep_days=max(1, _int_env("BACKUP_KEEP_DAYS", 7)))
     scheduler = Scheduler(manager, housekeeping=backups.daily) if config.run_scheduler else None
-    limiter = LoginLimiter()
+    limiter = LoginLimiter(store=store)
     jobs = Jobs()
     people = Accounts(store)
 
@@ -704,6 +722,21 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             limiter.failed(client)
             people.log(now(), typed[:80] or "?", None, "Failed sign-in", client=client)
             raise HTTPException(401, "Wrong username or password")
+        if (who.owner and config.owner_totp) or (not who.owner and who.two_step):
+            code = body.code.strip()
+            if not code:  # the password was right: ask for the code. Nothing is signed in yet.
+                return JSONResponse({"detail": "Enter the 6-digit code from your authenticator app.", "need_code": True}, status_code=401)
+            if who.owner:
+                step = accounts.totp_match(config.owner_totp, code, time.time(), int(store.get_settings().get("owner_totp_last", 0)))
+                if step is not None:
+                    store.put_settings({"owner_totp_last": step})
+                good = step is not None
+            else:
+                good = people.totp_check(who.id, code)
+            if not good:
+                limiter.failed(client)
+                people.log(now(), who.username, who.role, "Failed sign-in (wrong two-step code)", client=client)
+                raise HTTPException(401, "That code is not right. Wait for a new one from the app and try again.")
         limiter.succeeded(client)
         sid = secrets.token_urlsafe(24)
         store.session_start(sid, time.time(), SESSION_SECONDS, who.id)
@@ -1525,6 +1558,35 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         store.sessions_end_for(user.id, except_sid=session_id(request))  # every other device is signed out
         return {"ok": True}
 
+    @app.post("/api/account/2fa/start", dependencies=auth)
+    def two_step_start(request: Request) -> dict:
+        user: Principal = request.state.user
+        if user.owner:
+            raise HTTPException(422, "The owner login's two-step code is set on the server with OWNER_TOTP_SECRET")
+        secret = people.totp_start(user.id)
+        return {"secret": secret, "uri": accounts.totp_uri(secret, user.username)}
+
+    @app.post("/api/account/2fa/enable", dependencies=auth)
+    def two_step_enable(body: TwoStepCode, request: Request) -> dict:
+        try:
+            people.totp_enable(request.state.user.id, body.code)
+        except AccountError as e:
+            raise HTTPException(422, str(e)) from None
+        return {"ok": True}
+
+    @app.post("/api/account/2fa/disable", dependencies=auth)
+    def two_step_disable(body: TwoStepOff, request: Request) -> dict:
+        user: Principal = request.state.user
+        if user.owner or people.authenticate(user.username, body.password) is None:
+            raise HTTPException(422, "The password is not right")
+        people.totp_off(user.id)
+        return {"ok": True}
+
+    @app.post("/api/account/sessions/end-others", dependencies=auth)
+    def end_other_sessions(request: Request) -> dict:
+        store.sessions_end_for(request.state.user.id, except_sid=session_id(request))
+        return {"ok": True}
+
     @app.get("/api/users", dependencies=auth)
     def list_users() -> dict:
         owner_row = {"id": accounts.OWNER_ID, "username": owner.username, "name": "Owner (server login)", "role": "admin", "active": True, "must_change": False,
@@ -1547,7 +1609,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if user_id == me.id and (body.active is False or (body.role is not None and body.role != me.role)):
             raise HTTPException(422, "You cannot remove your own access or change your own role. Ask another administrator")
         try:
-            out = people.update(user_id, name=body.name, role=body.role, active=body.active, password=body.password)
+            out = people.update(user_id, name=body.name, role=body.role, active=body.active, password=body.password, reset_two_step=body.reset_2fa)
         except AccountError as e:
             raise HTTPException(404 if "No such" in str(e) else 422, str(e)) from None
         if body.active is False or body.password is not None:
