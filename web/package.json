@@ -9,7 +9,8 @@
     "typecheck": "tsc -b",
     "a11y": "node a11y/check.cjs",
     "i18n": "node scripts/i18n-check.cjs",
-    "colours": "node scripts/colour-check.cjs"
+    "colours": "node scripts/colour-check.cjs",
+    "fit": "node a11y/fit.cjs"
   },
   "dependencies": {
     "react": "19.0.0",

@@ -340,4 +340,5 @@ export const HI: Record<string, string> = {
   "or": "या",
   "Colour": "रंग",
   "Company colour": "कंपनी का रंग",
+  "Appearance": "रूप-रंग",
 };

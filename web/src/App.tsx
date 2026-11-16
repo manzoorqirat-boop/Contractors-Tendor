@@ -199,7 +199,6 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
           <button type="button" className="more-toggle" aria-expanded={moreOpen} aria-controls="side-more" onClick={() => setMoreOpen((o) => !o)}>{user?.name || tr('Menu')} <span aria-hidden>▾</span></button>
           <div id="side-more" className="side-more" onClick={() => setMoreOpen(false)}>
           {UTILITY_TABS.filter((t) => t.id !== 'settings' || can('admin')).map((t) => <a key={t.id} className="link-btn nav-link" href={`#/${t.id}`} aria-current={tab === t.id ? 'page' : undefined} onClick={(e) => go1(e, t.id)}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span></a>)}
-          <button className="link-btn" onClick={cycleTheme} title={tr('Change colour theme')} aria-label={`${themeLabel}. ${tr('Change colour theme')}`}><span className={`theme-dot ${theme}`} aria-hidden /><span className="nav-label">{themeLabel}</span></button>
           {user && (
             <div className="who" title={`${user.name} · ${user.role}`}>
               <span className="who-name">{user.name || user.username}</span><span className="who-role">{user.role}</span>
@@ -207,8 +206,12 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
           )}
           {user && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">{tr('Account & security')}</span></button>}
           <InstallButton />
-          <div className="link-btn" style={{ padding: '4px 10px' }}><LanguageSwitch /></div>
-          <div className="link-btn" style={{ padding: '4px 10px' }}><AccentPicker /></div>
+          <details className="side-appearance" onClick={(e) => e.stopPropagation()}>
+            <summary className="link-btn"><span className="nav-label">{tr('Appearance')}</span><span className="chev" aria-hidden>▾</span></summary>
+            <button className="link-btn" onClick={cycleTheme} title={tr('Change colour theme')} aria-label={`${themeLabel}. ${tr('Change colour theme')}`}><span className={`theme-dot ${theme}`} aria-hidden /><span className="nav-label">{themeLabel}</span></button>
+            <div className="link-btn" style={{ padding: '4px 10px' }}><LanguageSwitch /></div>
+            <div className="link-btn" style={{ padding: '4px 10px' }}><AccentPicker /></div>
+          </details>
           <button className="link-btn" onClick={() => setHelp(true)}><span className="nav-label">{tr('Keyboard shortcuts')}</span></button>
           <button className="link-btn" onClick={onLogout}><span className="nav-label">{tr('Log out')}</span></button>
           </div>
