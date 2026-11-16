@@ -2461,6 +2461,23 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         refresh_portals()
         return portal_entry(Portal(**new), store.get_settings(), store.portal_statuses())
 
+    @app.get("/api/portals/{key}/sample", dependencies=auth)
+    def portal_sample(key: str):
+        """What the portal actually returns to this server, saved as a file. For fixing or writing a reader for a portal the app cannot read yet."""
+        portal = next((p for p in portals_now() if p.key == key), None)
+        if not portal:
+            raise HTTPException(404, "No such portal")
+        client = manager.client_factory(portal, env)
+        fetch = getattr(client, "sample", None)
+        if fetch is None:
+            raise HTTPException(422, "This portal's reader cannot make a sample")
+        try:
+            ctype, body = fetch()
+        except PortalError as e:
+            raise HTTPException(502, f"The portal could not be read: {e}") from None
+        ext = "json" if "json" in ctype else "html"
+        return Response(body, media_type="application/octet-stream", headers={"Content-Disposition": f'attachment; filename="sample-{re.sub(r"[^a-z0-9-]", "", key)}.{ext}"'})
+
     @app.post("/api/portals/{key}/check", dependencies=auth)
     def check_portal(key: str) -> dict:
         portal = next((p for p in portals_now() if p.key == key), None)

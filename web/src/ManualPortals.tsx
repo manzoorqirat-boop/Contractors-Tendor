@@ -43,6 +43,9 @@ const SUGGESTED = [
   { name: 'Himachal Pradesh (HP Tenders)', state: 'Himachal Pradesh', base_url: 'https://hptenders.gov.in/nicgep' },
   { name: 'Jammu & Kashmir (JK Tenders)', state: 'Jammu & Kashmir', base_url: 'https://jktenders.gov.in/nicgep' },
   { name: 'Jharkhand (Jharkhand Tenders)', state: 'Jharkhand', base_url: 'https://jharkhandtenders.gov.in/nicgep' },
+  { name: 'GeM bids (experimental reader)', state: 'Central', base_url: 'https://bidplus.gem.gov.in' },
+  { name: 'Indian Railways (IREPS)', state: 'Railways', base_url: 'https://www.ireps.gov.in' },
+  { name: 'Gujarat (nProcure)', state: 'Gujarat', base_url: 'https://tender.nprocure.com' },
 ];
 
 /** Add portals, see which ones the app can read, and keep the list of those that need a person. */
@@ -130,6 +133,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
             {p.detail && <p className="sub" style={{ margin: '0 0 6px' }}>{p.detail}</p>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <a className="btn small" href={p.base_url} target="_blank" rel="noopener noreferrer">Open the portal</a>
+              <a className="btn small" href={`/api/portals/${p.key}/sample`} download title="Saves what the portal returns to this server, so a reader can be written or corrected from it">Download a sample</a>
               <button type="button" className="btn small" onClick={() => check([p.key])} disabled={disabled}>{busy === p.key ? tr('Checking…') : 'Check again'}</button>
             </div>
           </div>
@@ -167,6 +171,11 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
         <details style={{ marginBottom: 12 }}>
           <summary>Suggestions (not tested from this server)</summary>
           <p className="muted small">These portals run the same software as the built-in ones. Choosing one fills in the form; Add and check then tells you whether this server can read it (some portals refuse requests from data centres, and some addresses change).</p>
+          <ul className="muted small" style={{ margin: '6px 0 6px 18px', padding: 0 }}>
+            <li><strong>GeM</strong> has its own reader, written without access to the live site. Add and check says whether it works; if it fails, <em>Download a sample</em> on the portal's row saves what GeM returned so the reader can be corrected. GeM lists goods and services too: only civil work is kept, and GeM bids show no estimated value.</li>
+            <li><strong>IREPS</strong> needs a mobile-OTP login for its tender lists. The app never gets past a login, captcha or OTP, so it will go on the check-by-hand list; bring a tender in with <em>Add a tender</em>.</li>
+            <li><strong>nProcure (Gujarat)</strong> is different software with no reader yet, and its address ends in .com, so your administrator must add <code>.nprocure.com</code> to <code>PORTAL_HOST_SUFFIXES</code> first. After adding it, <em>Download a sample</em> gives what a reader needs to be written.</li>
+          </ul>
           <div className="chips">
             {SUGGESTED.filter((x) => !portals.some((p) => p.base_url === x.base_url)).map((x) => <button key={x.base_url} type="button" className="chip-btn" onClick={() => setForm(x)}>{x.name}</button>)}
           </div>

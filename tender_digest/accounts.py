@@ -72,7 +72,7 @@ class Principal:
 
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
 
-_ADMIN_AREAS = re.compile(r"^/api/((users|audit|backup|settings|calendar|tokens|webhooks|sample-data)(/|$)|sso/info$)")
+_ADMIN_AREAS = re.compile(r"^/api/((users|audit|backup|settings|calendar|tokens|webhooks|sample-data)(/|$)|sso/info$|portals/[^/]+/sample$)")
 _VAULT_FILE = re.compile(r"^/api/(vault/\d+/file|bids/\d+/pack)$")
 
 
@@ -556,6 +556,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/account/2fa/disable"): "Turned off two-step sign-in",
     ("POST", "/api/account/sessions/end-others"): "Signed out other devices",
     ("GET", "/api/backup"): "Downloaded a backup",
+    ("GET", "/api/portals/{key}/sample"): "Downloaded a sample of what a portal returns",
     ("POST", "/api/sample-data"): "Loaded sample tenders",
     ("DELETE", "/api/sample-data"): "Removed the sample tenders",
     ("GET", "/api/account/export"): "Downloaded own data",

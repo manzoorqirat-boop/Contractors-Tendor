@@ -182,7 +182,7 @@ AI can be wrong: check every figure and date on the portal before bidding.
 - **Install as an app**: on Chrome, Edge or Android the menu offers **Install app**; on an iPhone use Share > Add to Home Screen. The installed app opens from the phone's home screen. With no network it opens and says it is offline; it never stores tenders, bids or papers on the device (the service worker leaves `/api` alone). There are no push notifications: deadline reminders come by email and the optional webhook.
 - **Search** in the tender list needs no AI: every word must match (work, department, place or Tender ID), a word also finds its civil-works synonyms (drain finds nala, sewer, storm water), `"quoted words"` must appear together, `-word` leaves a word out, and amounts become value limits (`bridge above 2 crore`, `road under 50 lakh`). A line under the filters says how the search was read, and a misspelt word gets a "Did you mean" from the words in collected tenders.
 - **First run**: the Dashboard shows a short checklist worked out from what is stored (company profile and facts, Vault papers, daily email, first collection, first bid, item catalogue). Administrators can load **sample tenders** (marked "Sample data", never emailed, never sent to the AI) to try every page, and remove them again with any bids started on them.
-- **More portals**: Settings > Portals > Add a portal offers suggestions (CPWD and several state portals on the same software). They are **not tested from this server**: Add and check reads the portal and says whether it works.
+- **More portals**: Settings > Portals > Add a portal offers suggestions (CPWD, several state portals on the same software, GeM, IREPS and nProcure; see *Not covered yet* for what each can and cannot do). They are **not tested from this server**: Add and check reads the portal and says whether it works, and *Download a sample* saves what a portal returned.
 
 ## People and roles
 
@@ -271,8 +271,9 @@ Removing one keeps the tenders already collected from it.
 - **CPWD** (`etender.cpwd.gov.in`) refused connections (403) from the build environment, probably blocking data-centre
   addresses. It is offered as a suggestion under Settings > Portals > Add a portal: add it from Railway and the check says
   whether it can be read. (CPWD tenders also appear on CPPP, which is covered.)
-- **Gujarat** (`tender.nprocure.com`) is different software and closed the connection when contacted. Needs its own reader.
-- **Railways**: IREPS needs a mobile-OTP login. Some railway units also publish on CPPP, which is covered.
+- **GeM** (`bidplus.gem.gov.in`, Government e-Marketplace) has an **experimental reader** (`tender_digest/gem.py`): it searches the public bid page for ten civil-works words, reads the rows the page itself loads, and keeps only civil bids. It was written from how that page behaves **without being able to reach it from the build environment, so it is unproven**. Add it under Settings > Portals > Add a portal (suggestion list). If the check fails, *Download a sample* on its row saves exactly what GeM returned, which is what is needed to correct the reader. GeM bids carry no estimated value, and there is no corrigendum list to watch.
+- **Gujarat** (`tender.nprocure.com`) is different software and has **no reader**. It needs `.nprocure.com` added to `PORTAL_HOST_SUFFIXES` before it can be added at all; once added, *Download a sample* saves what it returns so a reader can be written from real data rather than guessed.
+- **Railways (IREPS)**: its tender lists need a mobile-OTP login. The app never gets past a login, captcha or OTP, so **no reader will be built**: IREPS stays on the check-by-hand list, and a tender is brought in with *Add a tender* (paste or upload its notice). Some railway units also publish on CPPP, which is covered.
 
 ## Develop
 

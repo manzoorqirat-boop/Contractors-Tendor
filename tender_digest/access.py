@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+from . import gem
 from .gepnic import GepnicClient, PortalError, is_public_host
 
 MANUAL_STEP = "Open it in your own browser and check it by hand."
@@ -37,7 +38,8 @@ def probe(base_url: str, delay: float = 0.6, timeout: int = 20) -> dict[str, Any
     if not is_public_host(host):
         return {"kind": "blocked", "detail": "The address points to a private network, so it was not contacted", "departments": 0, "tenders": 0}
     try:
-        orgs = GepnicClient(base_url, delay=delay, timeout=timeout).organisations(attempts=1)
+        client = gem.GemClient(base_url, delay=delay, timeout=timeout) if gem.is_gem(base_url) else GepnicClient(base_url, delay=delay, timeout=timeout)
+        orgs = client.organisations(attempts=1)
     except PortalError as e:
         return {"kind": e.kind, "detail": str(e)[:300], "departments": 0, "tenders": 0}
     except Exception as e:  # noqa: BLE001 - a check must always give an answer
