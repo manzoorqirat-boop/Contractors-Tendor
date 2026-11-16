@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "a11y": "node a11y/check.cjs",
-    "i18n": "node scripts/i18n-check.cjs"
+    "i18n": "node scripts/i18n-check.cjs",
+    "colours": "node scripts/colour-check.cjs"
   },
   "dependencies": {
     "react": "19.0.0",

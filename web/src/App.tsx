@@ -8,6 +8,7 @@ import { AddTenderHost } from './AddTender';
 import { Login } from './pages/Login';
 import { InstallButton, OfflineBar } from './pwa';
 import { LanguageSwitch } from './LanguageSwitch';
+import { AccentPicker } from './AccentPicker';
 import { loadBranding, Logo } from './Brand';
 import { ToastProvider, Drawer } from './ui';
 import { ConfirmProvider } from './confirm';
@@ -207,6 +208,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
           {user && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">{tr('Account & security')}</span></button>}
           <InstallButton />
           <div className="link-btn" style={{ padding: '4px 10px' }}><LanguageSwitch /></div>
+          <div className="link-btn" style={{ padding: '4px 10px' }}><AccentPicker /></div>
           <button className="link-btn" onClick={() => setHelp(true)}><span className="nav-label">{tr('Keyboard shortcuts')}</span></button>
           <button className="link-btn" onClick={onLogout}><span className="nav-label">{tr('Log out')}</span></button>
           </div>

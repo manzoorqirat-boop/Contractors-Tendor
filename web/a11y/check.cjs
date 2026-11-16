@@ -25,10 +25,14 @@ async function scan(page, name) {
   const browser = await chromium.launch();
   const modes = [['desktop light', { width: 1440, height: 900 }, 'light', false], ['desktop dark', { width: 1440, height: 900 }, 'dark', false], ['phone light', { width: 390, height: 844 }, 'light', true],
   // Hindi and Marathi: the main screens (the steps below that find buttons by their English words are skipped)
-  ['desktop Hindi', { width: 1440, height: 900 }, 'light', false, 'hi'], ['phone Marathi', { width: 390, height: 844 }, 'light', true, 'mr']];
-  for (const [mode, viewport, scheme, mobile, language] of modes) {
+  ['desktop Hindi', { width: 1440, height: 900 }, 'light', false, 'hi'], ['phone Marathi', { width: 390, height: 844 }, 'light', true, 'mr'],
+  // the other accent colours, where their pairs are most likely to fail: dark mode, and the lightest light-mode ones
+  ['desktop amber dark', { width: 1440, height: 900 }, 'dark', false, '', 'amber'], ['desktop teal light', { width: 1440, height: 900 }, 'light', false, '', 'teal'], ['phone rose dark', { width: 390, height: 844 }, 'dark', true, '', 'rose']];
+  for (const [mode, viewport, scheme, mobile, language, accent] of modes) {
+    const reduced = !!(language || accent);
     const ctx = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: 'reduce', isMobile: mobile, hasTouch: mobile });
     if (language) await ctx.addInitScript((l) => { try { localStorage.setItem('lang', l); } catch { /* ignore */ } }, language);
+    if (accent) await ctx.addInitScript((a) => { try { localStorage.setItem('accent', a); } catch { /* ignore */ } }, accent);
     const page = await ctx.newPage();
     await page.goto(URL_);
     await page.waitForSelector('input[autocomplete=username]');
@@ -55,15 +59,15 @@ async function scan(page, name) {
     await visit('dashboard', '#/dashboard');
     await visit('explore', '#/explore');
     await visit('tenders', '#/tenders');
-    await visit('tenders table', '#/tenders', () => page.click(language ? '.seg button >> nth=-1' : 'button:has-text("Table")'));
+    await visit('tenders table', '#/tenders', () => page.click(reduced ? '.seg button >> nth=-1' : 'button:has-text("Table")'));
     await visit('tender details', '#/tenders', () => page.locator('.tender .work').first().click());
     await visit('bids', '#/bids');
     await visit('bid', '#/bids/1');
-    if (!language) {
+    if (!reduced) {
       for (const t of ['Checklist', 'Price', 'Letters']) await visit(`bid ${t}`, '#/bids/1', () => page.click(`[role=tab]:has-text("${t}")`));
     }
     await visit('vault', '#/vault');
-    if (!language) {
+    if (!reduced) {
       await visit('vault letters', '#/vault', () => page.click('[role=tab]:has-text("Letters")'));
       await visit('bid letter filled in', '#/bids/1', async () => { await page.click('[role=tab]:has-text("Letters")'); await page.click('[aria-label=Template] button >> nth=0'); await page.waitForSelector('textarea[aria-label="The letter"]'); });
       await visit('record a corrigendum', '#/bids/1', () => page.click('text=Record a corrigendum'));
@@ -75,14 +79,14 @@ async function scan(page, name) {
       });
     }
     await visit('runs', '#/runs');
-    if (!language) {
+    if (!reduced) {
       for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Integrations', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => page.click(`[role=tab]:has-text("${t}")`));
       await visit('account', '#/dashboard', async () => { if (mobile) await page.click('.more-toggle'); await page.click('text=Account & security'); });
       await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?'));
       await visit('add a tender', '#/tenders', async () => { await page.click('text=Add a tender'); await page.click('button:has-text("Continue"), button:has-text("Type the details myself")'); });
       await visit('confirm dialog', '#/bids/1', () => page.click('text=Remove this bid'));
     }
-    else { await visit('settings', '#/settings'); await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?')); }
+    else { await visit('settings', '#/settings'); await visit('bid tabs', '#/bids/1', () => page.click('.ws-tabs [role=tab] >> nth=1')); await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?')); }
     await ctx.close();
   }
   await browser.close();

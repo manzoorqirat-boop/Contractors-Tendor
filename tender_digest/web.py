@@ -987,7 +987,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.get("/api/branding")
     def branding() -> dict:
         # Public on purpose: the login screen shows the logo before anyone has signed in. Nothing secret is in it.
-        return {"logo_text": appsettings.current(env, store.get_settings())["logo_text"]}
+        cur = appsettings.current(env, store.get_settings())
+        return {"logo_text": cur["logo_text"], "accent": cur["accent"]}
 
     @app.get("/api/me")
     def me(request: Request) -> dict:

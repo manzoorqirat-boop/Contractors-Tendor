@@ -338,4 +338,6 @@ export const MR: Record<string, string> = {
   "{n} civil tender": "{n} सिव्हिल निविदा",
   "{n} civil tenders": "{n} सिव्हिल निविदा",
   "or": "किंवा",
+  "Colour": "रंग",
+  "Company colour": "कंपनीचा रंग",
 };
