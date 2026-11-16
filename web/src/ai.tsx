@@ -5,6 +5,7 @@ import { fmtDate, inr } from './format';
 import { useToast } from './ui';
 import type { Nav } from './App';
 import type { AiStatus, Brief, DocFacts, Filters, TenderDetail } from './types';
+import { tr } from './i18n';
 
 /** Asked once per page load: lets the AI sections stay out of the way when no key is set. */
 let statusPromise: Promise<AiStatus | null> | null = null;
@@ -123,14 +124,14 @@ export function AiSections({ t, onChange }: { t: TenderDetail; onChange: (patch:
       <div className="ai-actions">
         <button className="btn ai" onClick={summarise} disabled={busy !== null}>{busy === 'summary' ? 'Reading…' : summary ? 'Summarise again' : 'Summarise'}</button>
         <button className="btn ai" onClick={makeBrief} disabled={busy !== null}>{busy === 'brief' ? 'Thinking…' : brief ? 'Refresh bid brief' : 'Bid / no-bid brief'}</button>
-        <button className="btn ai" onClick={() => setShowDoc((v) => !v)} disabled={busy !== null} aria-expanded={showDoc}>{doc ? 'Read another document' : 'Read tender document'}</button>
+        <button className="btn ai" onClick={() => setShowDoc((v) => !v)} disabled={busy !== null} aria-expanded={showDoc}>{doc ? tr('Read another document') : 'Read tender document'}</button>
       </div>
       {error && <div className="alert warn" style={{ marginTop: 10 }}>{error}</div>}
       {showDoc && (
         <div className="ai-doc">
           <label className="field">Upload the tender PDF (up to 10 MB)<input type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
           <label className="field">Or paste the text<textarea value={text} onChange={(e) => setText(e.target.value)} disabled={!!file} placeholder="Paste the NIT or key pages here" spellCheck={false} /></label>
-          <button className="btn ai primary" onClick={readDoc} disabled={busy !== null || (!file && !text.trim())}>{busy === 'doc' ? 'Reading document…' : 'Extract key facts'}</button>
+          <button className="btn ai primary" onClick={readDoc} disabled={busy !== null || (!file && !text.trim())}>{busy === 'doc' ? tr('Reading document…') : 'Extract key facts'}</button>
         </div>
       )}
       {brief && <><h4 className="ai-h">Bid / no-bid brief</h4><BriefView b={brief} /></>}

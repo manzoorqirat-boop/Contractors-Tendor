@@ -13,9 +13,10 @@ import { Skeleton, useToast } from '../ui';
 import { Only } from '../session';
 import { useConfirm } from '../confirm';
 import type { AppConfig, Tender } from '../types';
+import { tr } from '../i18n';
 
 const SORTS: [string, string][] = [
-  ['closing', 'Closing soonest'], ['closing_desc', 'Closing latest'], ['value', 'Highest value'], ['value_asc', 'Lowest value'], ['published', 'Newest published'], ['first_seen', 'Newly found'], ['fit', 'Best fit'],
+  ['closing', tr('Closing soonest')], ['closing_desc', tr('Closing latest')], ['value', tr('Highest value')], ['value_asc', tr('Lowest value')], ['published', tr('Newest published')], ['first_seen', tr('Newly found')], ['fit', tr('Best fit')],
 ];
 const PAGE_SIZE = 25;
 
@@ -41,11 +42,11 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   const togglePage = () => setPicked((p) => (allOnPage ? p.filter((k) => !pageKeys.includes(k)) : [...new Set([...p, ...pageKeys])].slice(0, MAX_PICK)));
   async function bulkStar(starred: boolean) {
     setBulkBusy(true);
-    try { const r = await api.starBulk(picked, starred); setItems((xs) => xs.map((t) => (picked.includes(t.key) ? { ...t, starred } : t))); toast(`${starred ? 'Starred' : 'Removed the star from'} ${r.changed} tender${r.changed === 1 ? '' : 's'}`); }
+    try { const r = await api.starBulk(picked, starred); setItems((xs) => xs.map((t) => (picked.includes(t.key) ? { ...t, starred } : t))); toast(`${starred ? tr('Starred') : 'Removed the star from'} ${r.changed} tender${r.changed === 1 ? '' : 's'}`); }
     catch (e) { toast((e as Error).message, 'bad'); } finally { setBulkBusy(false); }
   }
   async function bulkBids() {
-    if (picked.length > 5 && !(await confirm({ title: `Start ${picked.length} bids?`, body: 'Each tender gets its own bid with the standard checklist. Tenders that already have a bid are left alone.', confirmLabel: 'Start bids' }))) return;
+    if (picked.length > 5 && !(await confirm({ title: `Start ${picked.length} bids?`, body: 'Each tender gets its own bid with the standard checklist. Tenders that already have a bid are left alone.', confirmLabel: tr('Start bids') }))) return;
     setBulkBusy(true);
     try {
       const r = await api.createBidsBulk(picked);
@@ -65,25 +66,25 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   async function startBid(key: string) {
     try {
       const r = await api.createBid(key);
-      if (r.created) toast('Added to your bids');
+      if (r.created) toast(tr('Added to your bids'));
       window.dispatchEvent(new CustomEvent('open-bid', { detail: r.id }));
     } catch (e) { toast((e as Error).message, 'bad'); }
   }
 
   async function copyId(id: string) {
-    try { await navigator.clipboard.writeText(id); toast('Tender ID copied'); } catch { toast('Could not copy', 'bad'); }
+    try { await navigator.clipboard.writeText(id); toast(tr('Tender ID copied')); } catch { toast(tr('Could not copy'), 'bad'); }
   }
 
   return (
     <>
       <div className="page-head">
         <div>
-          <h1>Tenders</h1>
-          <p className="sub">{data ? `${data.total.toLocaleString('en-IN')} civil tender${data.total === 1 ? '' : 's'}` : 'Loading…'}</p>
+          <h1>{tr('Tenders')}</h1>
+          <p className="sub">{data ? (data.total === 1 ? tr('{n} civil tender', { n: 1 }) : tr('{n} civil tenders', { n: data.total.toLocaleString('en-IN') })) : tr('Loading…')}</p>
         </div>
         <div className="head-actions">
-          <Only role="bidder"><button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender</button></Only>
-          <a className="btn" href={api.exportUrl(filters, display.sort, 'xlsx')} download>Download Excel</a>
+          <Only role="bidder"><button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>{tr('Add a tender')}</button></Only>
+          <a className="btn" href={api.exportUrl(filters, display.sort, 'xlsx')} download>{tr('Download Excel')}</a>
           <a className="btn" href={api.exportUrl(filters, display.sort)} download>CSV</a>
         </div>
       </div>
@@ -92,26 +93,25 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
 
       <section className="card">
         <div className="list-tools">
-          <label className="field-inline">Sort
-            <select value={display.sort} onChange={(e) => sortBy(e.target.value)} aria-label="Sort">{SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <label className="field-inline">{tr('Sort')}<select value={display.sort} onChange={(e) => sortBy(e.target.value)} aria-label={tr('Sort')}>{SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           </label>
-          <div className="seg" role="group" aria-label="Layout">
-            <button type="button" className={layout === 'cards' ? 'on' : ''} aria-pressed={layout === 'cards'} onClick={() => nav.setDisplay({ layout: 'cards' })}>Cards</button>
-            <button type="button" className={layout === 'table' ? 'on' : ''} aria-pressed={layout === 'table'} onClick={() => nav.setDisplay({ layout: 'table' })}>Table</button>
+          <div className="seg" role="group" aria-label={tr('Layout')}>
+            <button type="button" className={layout === 'cards' ? 'on' : ''} aria-pressed={layout === 'cards'} onClick={() => nav.setDisplay({ layout: 'cards' })}>{tr('Cards')}</button>
+            <button type="button" className={layout === 'table' ? 'on' : ''} aria-pressed={layout === 'table'} onClick={() => nav.setDisplay({ layout: 'table' })}>{tr('Table')}</button>
           </div>
         </div>
 
-        {error && <div className="alert bad">{error} <button className="link-btn" onClick={reload}>Try again</button></div>}
+        {error && <div className="alert bad">{error} <button className="link-btn" onClick={reload}>{tr('Try again')}</button></div>}
         {!data && !error && Array.from({ length: 5 }, (_, i) => <div key={i} className="tender"><div><Skeleton h={16} w="80%" style={{ marginBottom: 8 }} /><Skeleton h={12} w="55%" /></div><Skeleton h={30} w={110} /></div>)}
         {data?.understood && <p className="muted small" role="status" style={{ margin: '0 0 8px' }}>{data.understood}.</p>}
-        {data && items.length === 0 && <div className="empty"><h2>No tenders match these filters</h2>{data.suggest && <p className="sub">Did you mean <button type="button" className="link-btn" onClick={() => nav.setFilters({ ...filters, q: data.suggest! })}>{data.suggest}</button>?</p>}<p className="sub">Widen the closing window or remove a filter to see more.</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>Clear all filters</button></div>}
+        {data && items.length === 0 && <div className="empty"><h2>{tr('No tenders match these filters')}</h2>{data.suggest && <p className="sub">{tr('Did you mean')} <button type="button" className="link-btn" onClick={() => nav.setFilters({ ...filters, q: data.suggest! })}>{data.suggest}</button>?</p>}<p className="sub">{tr('Widen the closing window or remove a filter to see more.')}</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>{tr('Clear all filters')}</button></div>}
 
         <div style={{ opacity: loading && data ? 0.55 : 1 }} aria-busy={loading}>
           {layout === 'cards' && items.map((t) => <Card key={t.key} picked={isPicked(t.key)} onPick={() => togglePick(t.key)} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}
           {layout === 'table' && items.length > 0 && (
-            <ScrollX label="Tenders">
+            <ScrollX label={tr('Tenders')}>
               <table className="tbl">
-                <thead><tr><th><input type="checkbox" checked={allOnPage} onChange={togglePage} aria-label="Select all tenders on this page" /></th><th><span className="sr-only">Star</span></th><th>Work</th>{showFit && <th>Fit</th>}<th>Department</th><th>Portal</th><th className="num">Value</th><th>Closes</th></tr></thead>
+                <thead><tr><th><input type="checkbox" checked={allOnPage} onChange={togglePage} aria-label={tr('Select all tenders on this page')} /></th><th><span className="sr-only">{tr('Star')}</span></th><th>{tr('Work')}</th>{showFit && <th>{tr('Fit')}</th>}<th>{tr('Department')}</th><th>{tr('Portal')}</th><th className="num">{tr('Value')}</th><th>{tr('Closes')}</th></tr></thead>
                 <tbody>
                   {items.map((t) => {
                     const rel = relative(t.closing, config.now);
@@ -123,7 +123,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
                         {showFit && <td className="nowrap"><FitBadge fit={t.fit} reason={t.fit_reason} notCivil={t.ai_civil} /></td>}
                         <td className="muted small">{chain(t.organisation)[0]}</td>
                         <td className="nowrap">{t.portal_name.split(' (')[0]}</td>
-                        <td className="num nowrap">{t.value === null ? <span className="muted">Not stated</span> : t.value_text.split(' (')[0]}</td>
+                        <td className="num nowrap">{t.value === null ? <span className="muted">{tr('Not stated')}</span> : t.value_text.split(' (')[0]}</td>
                         <td className="nowrap">{fmtDate(t.closing)}{rel.text && <div className={`when ${rel.tone} small`}>{rel.text}</div>}</td>
                       </tr>
                     );
@@ -138,27 +138,27 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
           <div className="pager">
             <span className="muted">Showing {((display.page - 1) * PAGE_SIZE + 1).toLocaleString('en-IN')}–{Math.min(display.page * PAGE_SIZE, data.total).toLocaleString('en-IN')} of {data.total.toLocaleString('en-IN')}</span>
             <span style={{ display: 'flex', gap: 8 }}>
-              <button className="btn small" disabled={display.page <= 1} onClick={() => nav.setDisplay({ page: display.page - 1 })}>Previous</button>
-              <button className="btn small" disabled={display.page >= pages} onClick={() => nav.setDisplay({ page: display.page + 1 })}>Next</button>
+              <button className="btn small" disabled={display.page <= 1} onClick={() => nav.setDisplay({ page: display.page - 1 })}>{tr('Previous')}</button>
+              <button className="btn small" disabled={display.page >= pages} onClick={() => nav.setDisplay({ page: display.page + 1 })}>{tr('Next')}</button>
             </span>
           </div>
         )}
       </section>
 
       {picked.length > 0 && (
-        <div className="bulkbar" role="region" aria-label="Actions for the selected tenders">
-          <strong>{picked.length} selected</strong>
-          {layout === 'cards' && !allOnPage && <button type="button" className="link-btn" onClick={togglePage}>Select this page</button>}
+        <div className="bulkbar" role="region" aria-label={tr('Actions for the selected tenders')}>
+          <strong>{tr('{n} selected', { n: picked.length })}</strong>
+          {layout === 'cards' && !allOnPage && <button type="button" className="link-btn" onClick={togglePage}>{tr('Select this page')}</button>}
           <span className="bulk-actions">
             <Only role="bidder">
-              <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(true)}>Star</button>
-              <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(false)}>Unstar</button>
-              <button type="button" className="btn small primary" disabled={bulkBusy} onClick={bulkBids}>Start bids</button>
+              <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(true)}>{tr('Star')}</button>
+              <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(false)}>{tr('Unstar')}</button>
+              <button type="button" className="btn small primary" disabled={bulkBusy} onClick={bulkBids}>{tr('Start bids')}</button>
             </Only>
-            <button type="button" className="btn small" disabled={picked.length < 2 || picked.length > 4} title={picked.length < 2 || picked.length > 4 ? 'Select two to four tenders to compare them' : 'Compare side by side'} onClick={() => setComparing(true)}>Compare</button>
+            <button type="button" className="btn small" disabled={picked.length < 2 || picked.length > 4} title={picked.length < 2 || picked.length > 4 ? tr('Select two to four tenders to compare them') : tr('Compare side by side')} onClick={() => setComparing(true)}>{tr('Compare')}</button>
             <a className="btn small" href={api.exportUrl(filters, display.sort, 'xlsx', picked)} download>Excel</a>
             <a className="btn small" href={api.exportUrl(filters, display.sort, 'csv', picked)} download>CSV</a>
-            <button type="button" className="btn small ghost" onClick={() => setPicked([])}>Clear</button>
+            <button type="button" className="btn small ghost" onClick={() => setPicked([])}>{tr('Clear')}</button>
           </span>
         </div>
       )}
@@ -187,12 +187,12 @@ function Card({ t, now, picked, onPick, onOpen, onStar, onCopy, onStart }: { t: 
           {!t.work_type && t.category && <span className="badge plain">{t.category}</span>}
           {t.location && <span className="badge plain">{t.location}</span>}
           <span className="mono">{t.tender_id}</span>
-          <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`Copy Tender ID ${t.tender_id}`}>Copy ID</button>
-          <Only role="bidder"><button className="btn small primary" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start bid</button></Only>
+          <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`Copy Tender ID ${t.tender_id}`}>{tr('Copy ID')}</button>
+          <Only role="bidder"><button className="btn small primary" onClick={(e) => { e.stopPropagation(); onStart(); }}>{tr('Start bid')}</button></Only>
         </div>
       </div>
       <div className="side">
-        <div className="value">{t.value === null ? 'Value not stated' : t.value_text}</div>
+        <div className="value">{t.value === null ? tr('Value not stated') : t.value_text}</div>
         <div className="closes">Closes {fmtDate(t.closing, true)}</div>
         {rel.text && <div className={`when pill ${rel.tone}`}>{rel.text}</div>}
       </div>

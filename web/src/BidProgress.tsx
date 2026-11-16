@@ -3,6 +3,7 @@ import { api } from './api';
 import { plural } from './format';
 import { useToast } from './ui';
 import type { BidDetail } from './types';
+import { tr } from './i18n';
 
 export type WsTab = 'decide' | 'checklist' | 'price' | 'letters' | 'result';
 
@@ -17,19 +18,19 @@ export function readiness(bid: BidDetail, aiOn: boolean): { pct: number; todo: s
   const docsNotReady = docs.filter((i) => !i.done && i.match && PROBLEM.includes(i.match.status)).length;
   const open = items.filter((i) => !i.done).length;
   const parts: Part[] = [
-    { label: 'Checklist', weight: 50, score: items.length ? 50 * (items.length - open) / items.length : 0, todo: items.length ? `${plural(open, 'checklist item')} not ticked` : 'The checklist is empty: read the tender document or add steps' },
-    { label: 'Papers', weight: 15, score: docs.length ? 15 * (docs.length - docsNotReady) / docs.length : 15, todo: `${plural(docsNotReady, 'required paper')} not ready in the Vault (missing, expired or expiring before closing)` },
+    { label: tr('Checklist'), weight: 50, score: items.length ? 50 * (items.length - open) / items.length : 0, todo: items.length ? `${plural(open, 'checklist item')} not ticked` : 'The checklist is empty: read the tender document or add steps' },
+    { label: tr('Papers'), weight: 15, score: docs.length ? 15 * (docs.length - docsNotReady) / docs.length : 15, todo: `${plural(docsNotReady, 'required paper')} not ready in the Vault (missing, expired or expiring before closing)` },
   ];
-  if (aiOn || bid.doc) parts.push({ label: 'Document', weight: 10, score: bid.doc ? 10 : 0, todo: 'The tender document has not been read yet' });
-  if (aiOn || bid.eligibility) parts.push({ label: 'Eligibility', weight: 10, score: bid.eligibility ? 10 : 0, todo: 'The eligibility check has not been run' });
-  parts.push({ label: 'Price', weight: 15, score: bid.my_value ? 15 : 0, todo: 'Your quoted price is not recorded yet (Result tab)' });
+  if (aiOn || bid.doc) parts.push({ label: tr('Document'), weight: 10, score: bid.doc ? 10 : 0, todo: 'The tender document has not been read yet' });
+  if (aiOn || bid.eligibility) parts.push({ label: tr('Eligibility'), weight: 10, score: bid.eligibility ? 10 : 0, todo: 'The eligibility check has not been run' });
+  parts.push({ label: tr('Price'), weight: 15, score: bid.my_value ? 15 : 0, todo: 'Your quoted price is not recorded yet (Result tab)' });
   const total = parts.reduce((a, p) => a + p.weight, 0);
   const got = parts.reduce((a, p) => a + p.score, 0);
   return { pct: Math.round((100 * got) / total), todo: parts.filter((p) => p.score < p.weight).map((p) => p.todo) };
 }
 
 const STEPS: { tab: WsTab; label: string }[] = [
-  { tab: 'decide', label: 'Decide' }, { tab: 'checklist', label: 'Checklist' }, { tab: 'price', label: 'Price' }, { tab: 'letters', label: 'Letters' }, { tab: 'result', label: 'Result' },
+  { tab: 'decide', label: tr('Decide') }, { tab: 'checklist', label: tr('Checklist') }, { tab: 'price', label: tr('Price') }, { tab: 'letters', label: tr('Letters') }, { tab: 'result', label: tr('Result') },
 ];
 
 function stepDone(bid: BidDetail, tab: WsTab): boolean {
@@ -57,7 +58,7 @@ export function BidProgress({ bid, aiOn, tab, onGo, onChange }: { bid: BidDetail
   }
 
   return (
-    <section className="card bidprog" aria-label="Bid progress">
+    <section className="card bidprog" aria-label={tr('Bid progress')}>
       <ol className="steps">
         {STEPS.map((s, i) => {
           const done = stepDone(bid, s.tab);
@@ -74,10 +75,10 @@ export function BidProgress({ bid, aiOn, tab, onGo, onChange }: { bid: BidDetail
       {active && (
         <div className="ready">
           <div className="ready-head">
-            <strong>Ready to submit</strong>
+            <strong>{tr('Ready to submit')}</strong>
             <span className={`badge ${tone}`}>{r.pct}%</span>
           </div>
-          <div className="meter" role="progressbar" aria-valuenow={r.pct} aria-valuemin={0} aria-valuemax={100} aria-label="Ready to submit"><span className={tone} style={{ width: `${r.pct}%` }} /></div>
+          <div className="meter" role="progressbar" aria-valuenow={r.pct} aria-valuemin={0} aria-valuemax={100} aria-label={tr('Ready to submit')}><span className={tone} style={{ width: `${r.pct}%` }} /></div>
           {r.todo.length > 0
             ? <ul className="ready-todo">{r.todo.slice(0, 4).map((t) => <li key={t}>{t}</li>)}{r.todo.length > 4 && <li>and {r.todo.length - 4} more</li>}</ul>
             : <p className="muted small" style={{ margin: '6px 0 0' }}>Everything the app can check is in place. Do a last read of the notice before you submit.</p>}

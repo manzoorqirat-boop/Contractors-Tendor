@@ -6,6 +6,7 @@ import { useLoad } from './hooks';
 import { Only } from './session';
 import { useConfirm } from './confirm';
 import type { PortalStatus } from './types';
+import { tr } from './i18n';
 
 const tone = (k: PortalStatus['kind']) => (k === 'ok' ? 'ok' : k === 'unknown' ? 'plain' : 'warn');
 type Msg = { tone: 'ok' | 'bad' | 'warn'; text: string } | null;
@@ -129,7 +130,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
             {p.detail && <p className="sub" style={{ margin: '0 0 6px' }}>{p.detail}</p>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <a className="btn small" href={p.base_url} target="_blank" rel="noopener noreferrer">Open the portal</a>
-              <button type="button" className="btn small" onClick={() => check([p.key])} disabled={disabled}>{busy === p.key ? 'Checking…' : 'Check again'}</button>
+              <button type="button" className="btn small" onClick={() => check([p.key])} disabled={disabled}>{busy === p.key ? tr('Checking…') : 'Check again'}</button>
             </div>
           </div>
         ))}
@@ -149,7 +150,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
                   <td className="num">{p.kind === 'ok' ? p.departments : '-'}</td>
                   <td>{p.checked ? fmtDate(p.checked, true) : '-'}</td>
                   <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
-                    <button type="button" className="btn small" onClick={() => check([p.key])} disabled={disabled}>{busy === p.key ? 'Checking…' : 'Check'}</button>
+                    <button type="button" className="btn small" onClick={() => check([p.key])} disabled={disabled}>{busy === p.key ? tr('Checking…') : 'Check'}</button>
                     {p.custom && <> <button type="button" className="btn small" onClick={() => remove(p)} disabled={disabled}>Remove</button></>}
                   </td>
                 </tr>

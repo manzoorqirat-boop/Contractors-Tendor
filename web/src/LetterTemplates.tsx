@@ -4,6 +4,7 @@ import { fmtDate } from './format';
 import { useLoad } from './hooks';
 import { Skeleton, useToast } from './ui';
 import { useConfirm } from './confirm';
+import { tr } from './i18n';
 import { useSession } from './session';
 import type { LetterTemplate, TemplateVersion } from './types';
 
@@ -83,7 +84,7 @@ export function TemplateManager() {
   const fields = data.data?.fields ?? [];
   return (
     <section className="card stack-fields">
-      <div className="card-head"><div><h2>Letter templates</h2><p className="sub">Wording you use again and again. Placeholders such as <code>{'{{tender_id}}'}</code> are filled from the bid and your company facts. Every save keeps the earlier wording.</p></div>
+      <div className="card-head"><div><h2>{tr('Letter templates')}</h2><p className="sub">Wording you use again and again. Placeholders such as <code>{'{{tender_id}}'}</code> are filled from the bid and your company facts. Every save keeps the earlier wording.</p></div>
         {editable && <div className="head-actions"><button type="button" className="btn small" onClick={() => setSel('new')}>New template</button></div>}</div>
       {list.length === 0 && sel !== 'new' && <div className="empty"><h2>No templates yet</h2><p className="sub">Add a covering letter, an extension request or an undertaking once, then use it on any bid.</p></div>}
       {(list.length > 0 || sel === 'new') && (
@@ -148,7 +149,7 @@ export function UseTemplate({ bidId, tenderId }: { bidId: number; tenderId: stri
   }
   return (
     <section className="card" style={{ marginBottom: 14 }}>
-      <h2>Letter templates</h2>
+      <h2>{tr('Letter templates')}</h2>
       <p className="sub">Your own wording, filled in from this bid and your company facts. No AI needed. Templates are kept in the <a href="#/vault">Vault</a>.</p>
       {data.loading && !data.data && <Skeleton h={40} />}
       {data.data && list.length === 0 && <p className="muted small">No templates yet. Add one in the Vault, under Letters.</p>}

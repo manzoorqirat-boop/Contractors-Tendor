@@ -5,6 +5,7 @@ import { fmtDate, plural } from './format';
 import { useSession } from './session';
 import { useToast } from './ui';
 import type { AppConfig, BidComment, BidDetail, Person } from './types';
+import { tr } from './i18n';
 
 let cached: Promise<Person[]> | null = null;
 /** Everyone a task can be given to (names only). Loaded once, shared by every picker. */
@@ -21,7 +22,7 @@ export function AssigneeSelect({ value, onChange, label, className = 'mini-selec
   const known = people.some((p) => p.username.toLowerCase() === (value ?? '').toLowerCase());
   return (
     <select className={className} value={value ?? ''} aria-label={label} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Unassigned</option>
+      <option value="">{tr('Unassigned')}</option>
       {value && !known && <option value={value}>{value}</option>}
       {people.map((p) => <option key={p.username} value={p.username}>{p.name}</option>)}
     </select>
@@ -36,7 +37,7 @@ export function MyWork({ onOpen }: { onOpen: (bidId: number) => void }) {
   useEffect(() => { api.myWork().then((r) => setItems(r.items), () => setItems([])); }, []);
   if (!items || items.length === 0) return null;
   return (
-    <section className="card" style={{ marginBottom: 14 }} aria-label="Assigned to me">
+    <section className="card" style={{ marginBottom: 14 }} aria-label={tr('Assigned to me')}>
       <h2>Assigned to me <span className="count-pill">{items.length}</span></h2>
       <ul className="soon-list">
         {items.slice(0, 8).map((i) => (
@@ -81,7 +82,7 @@ export function TeamTab({ bid, config, onChange }: { bid: BidDetail; config: App
     catch (err) { toast((err as Error).message, 'bad'); } finally { setBusy(false); }
   }
   async function remove(c: BidComment) {
-    if (!(await confirm({ title: 'Remove this comment?', body: 'It is deleted for everyone.', confirmLabel: 'Remove', danger: true }))) return;
+    if (!(await confirm({ title: 'Remove this comment?', body: 'It is deleted for everyone.', confirmLabel: tr('Remove'), danger: true }))) return;
     try { await api.deleteComment(bid.id, c.id); await load(); onChange({ comment_count: Math.max(0, (comments?.length ?? 1) - 1) }); } catch (e) { toast((e as Error).message, 'bad'); }
   }
 
@@ -89,7 +90,7 @@ export function TeamTab({ bid, config, onChange }: { bid: BidDetail; config: App
   return (
     <>
       <section className="card" style={{ marginBottom: 14 }}>
-        <h2>Approval to bid {so && <span className={`badge ${tone}`} style={{ marginLeft: 6 }}>{so.state === 'requested' ? 'Waiting for approval' : so.state === 'approved' ? 'Approved' : 'Declined'}</span>}</h2>
+        <h2>Approval to bid {so && <span className={`badge ${tone}`} style={{ marginLeft: 6 }}>{so.state === 'requested' ? tr('Waiting for approval') : so.state === 'approved' ? 'Approved' : 'Declined'}</span>}</h2>
         <p className="sub">{config.require_signoff ? 'An administrator must approve a bid before it moves from Interested to Preparing.' : 'Approval is optional here. Ask a colleague or an administrator to confirm that the company should bid.'}</p>
         {so && <div className={`alert ${so.state === 'declined' ? 'bad' : so.state === 'approved' ? 'ok' : 'warn'}`}>
           {so.state === 'requested' ? <><strong>{nameOf(so.requested_by)}</strong> asked on {when(so.at)}.</> : <><strong>{nameOf(so.by)}</strong> {so.state === 'approved' ? 'approved' : 'declined'} this on {when(so.at)}.</>}
@@ -100,10 +101,10 @@ export function TeamTab({ bid, config, onChange }: { bid: BidDetail; config: App
             {(!so || so.state === 'declined' || (can('admin') && so.state === 'requested')) && <label className="field">{can('admin') ? 'Note (optional)' : 'Why should we bid? (optional)'}
               <textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {bid.stage === 'interested' && !so && <button type="button" className="btn primary" disabled={busy} onClick={() => signoff('request')}>Ask for approval</button>}
+              {bid.stage === 'interested' && !so && <button type="button" className="btn primary" disabled={busy} onClick={() => signoff('request')}>{tr('Ask for approval')}</button>}
               {bid.stage === 'interested' && so?.state === 'declined' && <button type="button" className="btn" disabled={busy} onClick={() => signoff('request')}>Ask again</button>}
-              {can('admin') && so?.state !== 'approved' && <button type="button" className="btn primary" disabled={busy} onClick={() => signoff('approve')}>Approve</button>}
-              {can('admin') && so?.state !== 'declined' && <button type="button" className="btn" disabled={busy} onClick={() => signoff('decline')}>Decline</button>}
+              {can('admin') && so?.state !== 'approved' && <button type="button" className="btn primary" disabled={busy} onClick={() => signoff('approve')}>{tr('Approve')}</button>}
+              {can('admin') && so?.state !== 'declined' && <button type="button" className="btn" disabled={busy} onClick={() => signoff('decline')}>{tr('Decline')}</button>}
               {so && (so.requested_by === user?.username || can('admin')) && <button type="button" className="link-btn" disabled={busy} onClick={() => signoff('withdraw')}>{so.state === 'requested' ? 'Withdraw the request' : 'Clear the decision'}</button>}
             </div>
           </>
@@ -114,12 +115,12 @@ export function TeamTab({ bid, config, onChange }: { bid: BidDetail; config: App
       <section className="card" style={{ marginBottom: 14 }}>
         <h2>Discussion {comments && comments.length > 0 && <span className="count-pill">{comments.length}</span>}</h2>
         <p className="sub">Notes for the team. Write @name to tell someone by email; the bid's owner is told of every comment.</p>
-        {comments === null ? <span className="spinner" aria-label="Loading" /> : comments.length === 0 ? <p className="muted">No comments yet.</p> : (
+        {comments === null ? <span className="spinner" aria-label={tr('Loading')} /> : comments.length === 0 ? <p className="muted">{tr('No comments yet.')}</p> : (
           <ul className="comments">
             {comments.map((c) => (
               <li key={c.id}>
                 <div className="comment-head"><strong>{nameOf(c.username)}</strong><span className="muted small">{when(c.at)}</span>
-                  {(c.username === user?.username || can('admin')) && <button type="button" className="link-btn small" aria-label={`Remove comment by ${nameOf(c.username)}`} onClick={() => remove(c)}>Remove</button>}</div>
+                  {(c.username === user?.username || can('admin')) && <button type="button" className="link-btn small" aria-label={`Remove comment by ${nameOf(c.username)}`} onClick={() => remove(c)}>{tr('Remove')}</button>}</div>
                 <p>{c.text}</p>
               </li>
             ))}
@@ -129,7 +130,7 @@ export function TeamTab({ bid, config, onChange }: { bid: BidDetail; config: App
           <label className="field">Add a comment
             <textarea rows={3} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. @meera the GST certificate is renewed, please attach it" />
           </label>
-          <button className="btn primary" disabled={busy || !text.trim()}>Post comment</button>
+          <button className="btn primary" disabled={busy || !text.trim()}>{tr('Post comment')}</button>
           <span className="muted small" style={{ marginLeft: 10 }}>{plural(2000 - text.length, 'character')} left</span>
         </form>
       </section>

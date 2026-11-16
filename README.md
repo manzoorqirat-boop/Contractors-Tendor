@@ -172,6 +172,14 @@ Set `ANTHROPIC_API_KEY` and these appear. Fill in **Settings > AI assistant > Ab
 Labelling runs after each collection, newest tenders first, up to `AI_MAX_PER_RUN`. **Label tenders now** in Settings does 45 at a time.
 AI can be wrong: check every figure and date on the portal before bidding.
 
+## Language, install and search
+
+- **Hindi and Marathi**: choose the language under the menu (bottom of the sidebar) or on the sign-in page; it is remembered in that browser and the page reloads. The page's own words are translated: menus, sign-in, the dashboard, the tender list and filters, the main bid screens, the Vault and common buttons. **Not translated**: messages from the server, text written by the AI, tender titles and anything people typed, and many longer help texts, which stay in English. `npm run i18n` (also run by CI) checks that Hindi and Marathi cover the same texts and that nothing the code asks for is missing. To add a language, copy `web/src/lang/hi.ts`, translate the values, and list it in `web/src/i18n.ts`.
+- **Install as an app**: on Chrome, Edge or Android the menu offers **Install app**; on an iPhone use Share > Add to Home Screen. The installed app opens from the phone's home screen. With no network it opens and says it is offline; it never stores tenders, bids or papers on the device (the service worker leaves `/api` alone). There are no push notifications: deadline reminders come by email and the optional webhook.
+- **Search** in the tender list needs no AI: every word must match (work, department, place or Tender ID), a word also finds its civil-works synonyms (drain finds nala, sewer, storm water), `"quoted words"` must appear together, `-word` leaves a word out, and amounts become value limits (`bridge above 2 crore`, `road under 50 lakh`). A line under the filters says how the search was read, and a misspelt word gets a "Did you mean" from the words in collected tenders.
+- **First run**: the Dashboard shows a short checklist worked out from what is stored (company profile and facts, Vault papers, daily email, first collection, first bid, item catalogue). Administrators can load **sample tenders** (marked "Sample data", never emailed, never sent to the AI) to try every page, and remove them again with any bids started on them.
+- **More portals**: Settings > Portals > Add a portal offers suggestions (CPWD and several state portals on the same software). They are **not tested from this server**: Add and check reads the portal and says whether it works.
+
 ## People and roles
 
 Sign in with a username and password. Administrators add people in **Settings > People** and give each a role:
@@ -247,8 +255,8 @@ Removing one keeps the tenders already collected from it.
 ### Not covered yet
 
 - **CPWD** (`etender.cpwd.gov.in`) refused connections (403) from the build environment, probably blocking data-centre
-  addresses. Try `curl -I https://etender.cpwd.gov.in` from Railway. If it works it is the same NIC software and needs
-  one line in `tender_digest/portals.json`.
+  addresses. It is offered as a suggestion under Settings > Portals > Add a portal: add it from Railway and the check says
+  whether it can be read. (CPWD tenders also appear on CPPP, which is covered.)
 - **Gujarat** (`tender.nprocure.com`) is different software and closed the connection when contacted. Needs its own reader.
 - **Railways**: IREPS needs a mobile-OTP login. Some railway units also publish on CPPP, which is covered.
 

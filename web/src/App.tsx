@@ -7,6 +7,7 @@ import { Dashboard } from './pages/Dashboard';
 import { AddTenderHost } from './AddTender';
 import { Login } from './pages/Login';
 import { InstallButton, OfflineBar } from './pwa';
+import { LanguageSwitch } from './LanguageSwitch';
 import { loadBranding, Logo } from './Brand';
 import { ToastProvider, Drawer } from './ui';
 import { ConfirmProvider } from './confirm';
@@ -14,6 +15,7 @@ import { SessionProvider, useSession } from './session';
 import { AccountPanel, ChangePassword } from './Account';
 import { ShortcutsHelp, useShortcuts } from './Shortcuts';
 import type { Display, Facets, Filters, Me } from './types';
+import { tr } from './i18n';
 
 const BidsPage = lazy(() => import('./pages/Bids').then((m) => ({ default: m.BidsPage })));
 const Explore = lazy(() => import('./pages/Explore').then((m) => ({ default: m.Explore })));
@@ -24,7 +26,7 @@ const VaultPage = lazy(() => import('./pages/Vault').then((m) => ({ default: m.V
 
 export type Tab = 'dashboard' | 'explore' | 'tenders' | 'bids' | 'vault' | 'runs' | 'settings';
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'dashboard', label: 'Dashboard' }, { id: 'explore', label: 'Explore' }, { id: 'tenders', label: 'Tenders' }, { id: 'bids', label: 'Bids' }, { id: 'vault', label: 'Vault' }, { id: 'runs', label: 'Runs' }, { id: 'settings', label: 'Settings' },
+  { id: 'dashboard', label: tr('Dashboard') }, { id: 'explore', label: tr('Explore') }, { id: 'tenders', label: tr('Tenders') }, { id: 'bids', label: tr('Bids') }, { id: 'vault', label: tr('Vault') }, { id: 'runs', label: tr('Runs') }, { id: 'settings', label: tr('Settings') },
 ];
 
 // Daily work stays in the main bar; Runs and Settings are set-up pages, so they sit with the account links.
@@ -89,11 +91,11 @@ export function App() {
       <ConfirmProvider>
         {me === undefined && unreachable ? (
           <div className="login"><main className="login-card" style={{ maxWidth: 420, margin: 'auto' }}>
-            <h1>You are offline</h1>
-            <p className="login-sub">TendAI cannot reach the server. Check your connection. The page tries again by itself when the connection returns.</p>
-            <button className="btn primary" onClick={() => { setUnreachable(false); refresh(); }}>Try again</button>
+            <h1>{tr('You are offline')}</h1>
+            <p className="login-sub">{tr('TendAI cannot reach the server. Check your connection. The page tries again by itself when the connection returns.')}</p>
+            <button className="btn primary" onClick={() => { setUnreachable(false); refresh(); }}>{tr('Try again')}</button>
           </main></div>)
-          : me === undefined ? <div className="login"><span className="spinner" aria-label="Loading" /></div>
+          : me === undefined ? <div className="login"><span className="spinner" aria-label={tr('Loading')} /></div>
           : me === null ? <Login onDone={refresh} />
           : me.must_change ? <ChangePassword forced onDone={refresh} onLogout={logout} />
           : <SessionProvider user={me}><Main onLogout={logout} refreshMe={refresh} /></SessionProvider>}
@@ -175,43 +177,45 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
   const nav: Nav = { filters, display, facets: facets.data, setFilters, setDisplay, go };
   const tabAllowed = useCallback((t: Tab) => t !== 'settings' || can('admin'), [can]);
   const [help, setHelp] = useShortcuts(useCallback((t: Tab) => go(t), [go]), tabAllowed);
+  const themeLabel = theme === 'dark' ? tr('Theme: Dark') : theme === 'light' ? tr('Theme: Light') : tr('Theme: Auto');
   const cycleTheme = () => { const next = THEMES[(THEMES.indexOf(theme) + 1) % 3]; setTheme(next); applyTheme(next); try { localStorage.setItem('theme', next); } catch { /* ignore */ } };
 
   return (
     <div className="app">
       <AddTenderHost />
       {help && <ShortcutsHelp onClose={() => setHelp(false)} allowed={tabAllowed} />}
-      {changingPassword && user && <Drawer title="Account & security" onClose={() => setChangingPassword(false)}><AccountPanel user={user} onClose={() => setChangingPassword(false)} onChanged={refreshMe} /></Drawer>}
-      <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
+      {changingPassword && user && <Drawer title={tr('Account & security')} onClose={() => setChangingPassword(false)}><AccountPanel user={user} onClose={() => setChangingPassword(false)} onChanged={refreshMe} /></Drawer>}
+      <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>{tr('Skip to content')}</a>
       <aside className="sidebar">
         <div className="brand" aria-label="TendAI by QMSofts">
           <Logo />
           <span className="brand-name"><span className="brand-word">Tend<span className="brand-ai">AI</span></span><span className="brand-by">by QMSofts</span></span>
         </div>
-        <nav className="nav" aria-label="Main">
-          {MAIN_TABS.map((t) => <a key={t.id} className="nav-link" href={hrefFor(t.id)} aria-current={tab === t.id ? 'page' : undefined} onClick={(e) => go1(e, t.id, t.id === 'explore' || t.id === 'tenders')}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span>{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title="Changes on tenders you are bidding for">{alerts.data!.unseen}</span>}</a>)}
+        <nav className="nav" aria-label={tr('Main')}>
+          {MAIN_TABS.map((t) => <a key={t.id} className="nav-link" href={hrefFor(t.id)} aria-current={tab === t.id ? 'page' : undefined} onClick={(e) => go1(e, t.id, t.id === 'explore' || t.id === 'tenders')}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span>{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title={tr('Changes on tenders you are bidding for')}>{alerts.data!.unseen}</span>}</a>)}
         </nav>
         <div className={`side-foot${moreOpen ? ' open' : ''}`}>
-          <button type="button" className="more-toggle" aria-expanded={moreOpen} aria-controls="side-more" onClick={() => setMoreOpen((o) => !o)}>{user?.name || 'Menu'} <span aria-hidden>▾</span></button>
+          <button type="button" className="more-toggle" aria-expanded={moreOpen} aria-controls="side-more" onClick={() => setMoreOpen((o) => !o)}>{user?.name || tr('Menu')} <span aria-hidden>▾</span></button>
           <div id="side-more" className="side-more" onClick={() => setMoreOpen(false)}>
           {UTILITY_TABS.filter((t) => t.id !== 'settings' || can('admin')).map((t) => <a key={t.id} className="link-btn nav-link" href={`#/${t.id}`} aria-current={tab === t.id ? 'page' : undefined} onClick={(e) => go1(e, t.id)}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span></a>)}
-          <button className="link-btn" onClick={cycleTheme} title="Change colour theme" aria-label={`Theme: ${theme}. Click to change.`}><span className={`theme-dot ${theme}`} aria-hidden /><span className="nav-label">Theme: {theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'Auto'}</span></button>
+          <button className="link-btn" onClick={cycleTheme} title={tr('Change colour theme')} aria-label={`${themeLabel}. ${tr('Change colour theme')}`}><span className={`theme-dot ${theme}`} aria-hidden /><span className="nav-label">{themeLabel}</span></button>
           {user && (
             <div className="who" title={`${user.name} · ${user.role}`}>
               <span className="who-name">{user.name || user.username}</span><span className="who-role">{user.role}</span>
             </div>
           )}
-          {user && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">Account &amp; security</span></button>}
+          {user && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">{tr('Account & security')}</span></button>}
           <InstallButton />
-          <button className="link-btn" onClick={() => setHelp(true)}><span className="nav-label">Keyboard shortcuts</span></button>
-          <button className="link-btn" onClick={onLogout}><span className="nav-label">Log out</span></button>
+          <div className="link-btn" style={{ padding: '4px 10px' }}><LanguageSwitch /></div>
+          <button className="link-btn" onClick={() => setHelp(true)}><span className="nav-label">{tr('Keyboard shortcuts')}</span></button>
+          <button className="link-btn" onClick={onLogout}><span className="nav-label">{tr('Log out')}</span></button>
           </div>
         </div>
       </aside>
       <div className="content">
       <OfflineBar />
       {config.error && <div className="alert bad">{config.error}</div>}
-      {config.data?.storage_warning && <div className="alert bad" role="alert"><strong>Your data is not safe.</strong> {config.data.storage_warning}</div>}
+      {config.data?.storage_warning && <div className="alert bad" role="alert"><strong>{tr('Your data is not safe.')}</strong> {config.data.storage_warning}</div>}
       {config.data?.ai_enabled && (tab === 'dashboard' || tab === 'explore' || tab === 'tenders') && <div className="askwrap"><AskBar nav={nav} /></div>}
       <main id="main" tabIndex={-1}>
         {config.data && (
@@ -222,7 +226,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
             {tab === 'bids' && <BidsPage config={config.data} bidId={bidId} onOpen={(id) => { push.current = true; setBidId(id); window.scrollTo(0, 0); }} />}
             {tab === 'vault' && <VaultPage config={config.data} />}
             {tab === 'runs' && <RunsPage config={config.data} />}
-            {tab === 'settings' && (can('admin') ? <SettingsPage config={config.data} onSaved={config.reload} /> : <div className="alert warn">Settings are for administrators.</div>)}
+            {tab === 'settings' && (can('admin') ? <SettingsPage config={config.data} onSaved={config.reload} /> : <div className="alert warn">{tr('Settings are for administrators.')}</div>)}
           </Suspense>
         )}
       </main>

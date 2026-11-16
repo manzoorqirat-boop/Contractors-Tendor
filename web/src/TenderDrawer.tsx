@@ -5,6 +5,7 @@ import { AiSections, FitBadge, RelatedNote } from './ai';
 import { Drawer, Skeleton, useToast } from './ui';
 import { useSession } from './session';
 import type { Tender, TenderDetail } from './types';
+import { tr } from './i18n';
 
 export function StarButton({ t, onChange }: { t: Pick<Tender, 'key' | 'starred'>; onChange: (starred: boolean) => void }) {
   const toast = useToast();
@@ -19,7 +20,7 @@ export function StarButton({ t, onChange }: { t: Pick<Tender, 'key' | 'starred'>
     catch (err) { onChange(!next); toast((err as Error).message, 'bad'); }
     finally { setBusy(false); }
   }
-  return <button type="button" className={`star${t.starred ? ' on' : ''}`} onClick={toggle} disabled={busy || !can('bidder')} aria-pressed={t.starred} aria-label={t.starred ? 'Remove star' : 'Star this tender'} title={t.starred ? 'Starred' : 'Star to keep an eye on it'}>{t.starred ? '★' : '☆'}</button>;
+  return <button type="button" className={`star${t.starred ? ' on' : ''}`} onClick={toggle} disabled={busy || !can('bidder')} aria-pressed={t.starred} aria-label={t.starred ? tr('Remove star') : tr('Star this tender')} title={t.starred ? tr('Starred') : tr('Star to keep an eye on it')}>{t.starred ? '★' : '☆'}</button>;
 }
 
 export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: string; now: string; onClose: () => void; onStar: (key: string, starred: boolean) => void }) {
@@ -38,7 +39,7 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
     if (!t) return;
     try {
       const r = await api.createBid(t.key);
-      if (r.created) toast('Added to your bids');
+      if (r.created) toast(tr('Added to your bids'));
       onClose();
       window.dispatchEvent(new CustomEvent('open-bid', { detail: r.id }));
     } catch (err) { toast((err as Error).message, 'bad'); }
@@ -46,12 +47,12 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
 
   async function copy() {
     if (!t) return;
-    try { await navigator.clipboard.writeText(t.tender_id); toast('Tender ID copied'); } catch { toast('Could not copy', 'bad'); }
+    try { await navigator.clipboard.writeText(t.tender_id); toast(tr('Tender ID copied')); } catch { toast(tr('Could not copy'), 'bad'); }
   }
 
   const rel = t ? relative(t.closing, now) : null;
   return (
-    <Drawer title="Tender details" onClose={onClose}>
+    <Drawer title={tr('Tender details')} onClose={onClose}>
       {error && <div className="alert bad">{error}</div>}
       {!t && !error && <><Skeleton h={22} style={{ marginBottom: 10 }} /><Skeleton h={14} w="70%" style={{ marginBottom: 20 }} /><Skeleton h={160} /></>}
       {t && (
@@ -71,22 +72,22 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
           )}
           <RelatedNote t={t} />
           <dl className="facts">
-            <dt>Estimated value</dt><dd><strong>{t.value === null ? 'Not stated' : inr(t.value, false)}</strong>{t.value !== null && t.value >= 1e5 && <span className="muted"> ({inr(t.value)})</span>}</dd>
-            <dt>EMD</dt><dd>{t.emd ? inr(t.emd, false) : '-'}</dd>
-            <dt>Closes</dt><dd>{fmtDate(t.closing, true)}</dd>
-            <dt>Bid opening</dt><dd>{fmtDate(t.opening, true)}</dd>
-            <dt>Published</dt><dd>{fmtDate(t.published, true)}</dd>
-            <dt>First found</dt><dd>{fmtDate(t.first_seen, true)}</dd>
-            <dt>Portal</dt><dd>{t.portal_name}</dd>
-            <dt>Category</dt><dd>{t.category || '-'}</dd>
-            <dt>Location</dt><dd>{t.location || '-'}</dd>
-            <dt>Tender ID</dt><dd className="mono">{t.tender_id}</dd>
+            <dt>{tr('Estimated value')}</dt><dd><strong>{t.value === null ? tr('Not stated') : inr(t.value, false)}</strong>{t.value !== null && t.value >= 1e5 && <span className="muted"> ({inr(t.value)})</span>}</dd>
+            <dt>{tr('EMD')}</dt><dd>{t.emd ? inr(t.emd, false) : '-'}</dd>
+            <dt>{tr('Closes')}</dt><dd>{fmtDate(t.closing, true)}</dd>
+            <dt>{tr('Bid opening')}</dt><dd>{fmtDate(t.opening, true)}</dd>
+            <dt>{tr('Published')}</dt><dd>{fmtDate(t.published, true)}</dd>
+            <dt>{tr('First found')}</dt><dd>{fmtDate(t.first_seen, true)}</dd>
+            <dt>{tr('Portal')}</dt><dd>{t.portal_name}</dd>
+            <dt>{tr('Category')}</dt><dd>{t.category || '-'}</dd>
+            <dt>{tr('Location')}</dt><dd>{t.location || '-'}</dd>
+            <dt>{tr('Tender ID')}</dt><dd className="mono">{t.tender_id}</dd>
           </dl>
           <div className="d-actions">
-            <button className="btn" onClick={copy}>Copy Tender ID</button>
-            {t.search_url && <a className="btn" href={t.search_url} target="_blank" rel="noopener noreferrer">Find on portal</a>}
-            {t.manual && <button className="btn" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('add-tender', { detail: { editKey: t.key } })); }}>Edit details</button>}
-            {(t.bid_id || can('bidder')) && <button className="btn primary" onClick={startBid}>{t.bid_id ? 'Open bid workspace' : 'Start a bid'}</button>}
+            <button className="btn" onClick={copy}>{tr('Copy Tender ID')}</button>
+            {t.search_url && <a className="btn" href={t.search_url} target="_blank" rel="noopener noreferrer">{tr('Find on portal')}</a>}
+            {t.manual && <button className="btn" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('add-tender', { detail: { editKey: t.key } })); }}>{tr('Edit details')}</button>}
+            {(t.bid_id || can('bidder')) && <button className="btn primary" onClick={startBid}>{t.bid_id ? tr('Open bid workspace') : tr('Start a bid')}</button>}
           </div>
           {t.history && t.history.length > 0 && <div className="alert warn" style={{ marginTop: 12 }}>{t.history.map((h) => <div key={h}>{h}</div>)}</div>}
           <AiSections t={t} onChange={(patch) => setT((cur) => (cur ? { ...cur, ...patch } : cur))} />

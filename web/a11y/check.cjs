@@ -23,18 +23,21 @@ async function scan(page, name) {
 (async () => {
   if (!PASS) { console.error('Set A11Y_PASS to the sign-in password.'); process.exit(2); }
   const browser = await chromium.launch();
-  const modes = [['desktop light', { width: 1440, height: 900 }, 'light', false], ['desktop dark', { width: 1440, height: 900 }, 'dark', false], ['phone light', { width: 390, height: 844 }, 'light', true]];
-  for (const [mode, viewport, scheme, mobile] of modes) {
+  const modes = [['desktop light', { width: 1440, height: 900 }, 'light', false], ['desktop dark', { width: 1440, height: 900 }, 'dark', false], ['phone light', { width: 390, height: 844 }, 'light', true],
+  // Hindi and Marathi: the main screens (the steps below that find buttons by their English words are skipped)
+  ['desktop Hindi', { width: 1440, height: 900 }, 'light', false, 'hi'], ['phone Marathi', { width: 390, height: 844 }, 'light', true, 'mr']];
+  for (const [mode, viewport, scheme, mobile, language] of modes) {
     const ctx = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: 'reduce', isMobile: mobile, hasTouch: mobile });
+    if (language) await ctx.addInitScript((l) => { try { localStorage.setItem('lang', l); } catch { /* ignore */ } }, language);
     const page = await ctx.newPage();
     await page.goto(URL_);
     await page.waitForSelector('input[autocomplete=username]');
     await scan(page, `${mode} sign-in`);
-    await page.click('button:has-text("Forgot password?")');
-    await page.waitForSelector('text=Email me a link');
+    await page.click('.lf-forgot');
+    await page.waitForSelector('form.lf-help');
     await scan(page, `${mode} sign-in, forgot password`);
     await page.goto('about:blank'); await page.goto(URL_ + '#/reset/' + 'a1b2c3d4'.repeat(4));
-    await page.waitForSelector('text=Choose a new password');
+    await page.waitForSelector('.login-card form');
     await scan(page, `${mode} choose a new password`);
     await page.goto('about:blank'); await page.goto(URL_);
     await page.waitForSelector('input[autocomplete=username]');
@@ -52,27 +55,34 @@ async function scan(page, name) {
     await visit('dashboard', '#/dashboard');
     await visit('explore', '#/explore');
     await visit('tenders', '#/tenders');
-    await visit('tenders table', '#/tenders', () => page.click('button:has-text("Table")'));
+    await visit('tenders table', '#/tenders', () => page.click(language ? '.seg button >> nth=-1' : 'button:has-text("Table")'));
     await visit('tender details', '#/tenders', () => page.locator('.tender .work').first().click());
     await visit('bids', '#/bids');
     await visit('bid', '#/bids/1');
-    for (const t of ['Checklist', 'Price', 'Letters']) await visit(`bid ${t}`, '#/bids/1', () => page.click(`[role=tab]:has-text("${t}")`));
+    if (!language) {
+      for (const t of ['Checklist', 'Price', 'Letters']) await visit(`bid ${t}`, '#/bids/1', () => page.click(`[role=tab]:has-text("${t}")`));
+    }
     await visit('vault', '#/vault');
-    await visit('vault letters', '#/vault', () => page.click('[role=tab]:has-text("Letters")'));
-    await visit('bid letter filled in', '#/bids/1', async () => { await page.click('[role=tab]:has-text("Letters")'); await page.click('[aria-label=Template] button >> nth=0'); await page.waitForSelector('textarea[aria-label="The letter"]'); });
-    await visit('record a corrigendum', '#/bids/1', () => page.click('text=Record a corrigendum'));
-    await visit('compare tenders', '#/tenders', async () => {
-      await page.click('button:has-text("Table")');
-      const boxes = page.locator('table input[type=checkbox]');
-      await boxes.nth(1).check(); await boxes.nth(2).check();
-      await page.click('button:has-text("Compare")'); await page.waitForSelector('table.cmp');
-    });
+    if (!language) {
+      await visit('vault letters', '#/vault', () => page.click('[role=tab]:has-text("Letters")'));
+      await visit('bid letter filled in', '#/bids/1', async () => { await page.click('[role=tab]:has-text("Letters")'); await page.click('[aria-label=Template] button >> nth=0'); await page.waitForSelector('textarea[aria-label="The letter"]'); });
+      await visit('record a corrigendum', '#/bids/1', () => page.click('text=Record a corrigendum'));
+      await visit('compare tenders', '#/tenders', async () => {
+        await page.click('button:has-text("Table")');
+        const boxes = page.locator('table input[type=checkbox]');
+        await boxes.nth(1).check(); await boxes.nth(2).check();
+        await page.click('button:has-text("Compare")'); await page.waitForSelector('table.cmp');
+      });
+    }
     await visit('runs', '#/runs');
-    for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Integrations', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => page.click(`[role=tab]:has-text("${t}")`));
-    await visit('account', '#/dashboard', async () => { if (mobile) await page.click('.more-toggle'); await page.click('text=Account & security'); });
-    await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?'));
-    await visit('add a tender', '#/tenders', async () => { await page.click('text=Add a tender'); await page.click('button:has-text("Continue"), button:has-text("Type the details myself")'); });
-    await visit('confirm dialog', '#/bids/1', () => page.click('text=Remove this bid'));
+    if (!language) {
+      for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Integrations', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => page.click(`[role=tab]:has-text("${t}")`));
+      await visit('account', '#/dashboard', async () => { if (mobile) await page.click('.more-toggle'); await page.click('text=Account & security'); });
+      await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?'));
+      await visit('add a tender', '#/tenders', async () => { await page.click('text=Add a tender'); await page.click('button:has-text("Continue"), button:has-text("Type the details myself")'); });
+      await visit('confirm dialog', '#/bids/1', () => page.click('text=Remove this bid'));
+    }
+    else { await visit('settings', '#/settings'); await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?')); }
     await ctx.close();
   }
   await browser.close();
