@@ -10,13 +10,14 @@ import { useToast } from '../ui';
 import { useConfirm } from '../confirm';
 import { ActivityPanel, UsersPanel } from '../Account';
 import { DataPrivacyCard, IntegrationsPanel } from '../Integrations';
+import { ACCENTS, setCompanyAccent } from '../theme';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
 type Tab = 'email' | 'reminders' | 'portals' | 'filters' | 'ai' | 'people' | 'integrations' | 'activity' | 'backup';
 let lastTab: Tab = 'email';
 const norm = (v: { recipients: string; extra: string; exclude: string; minValue: string; logoText: string; f: Settings }) => JSON.stringify([
   lines(v.recipients), lines(v.extra), lines(v.exclude), Number(v.minValue) || 0, v.logoText, v.f.send_time, v.f.schedule_enabled, v.f.send_empty,
-  [...v.f.portals].sort(), v.f.ai_digest_intro, v.f.ai_hide_noncivil]);
+  [...v.f.portals].sort(), v.f.ai_digest_intro, v.f.ai_hide_noncivil, v.f.accent ?? 'blue']);
 const lines = (s: string) => s.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
 
 export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => void }) {
@@ -78,11 +79,12 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
       const saved = await api.saveSettings({
         recipients: lines(recipients), send_time: form.send_time, schedule_enabled: form.schedule_enabled, send_empty: form.send_empty,
         portals: form.portals, min_value: Number(minValue) || 0, extra_keywords: lines(extra), exclude_words: lines(exclude),
-        logo_text: logoText, ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil, reminders_on: form.reminders_on ?? true, webhook_url: form.webhook_url ?? '',
+        logo_text: logoText, accent: form.accent ?? 'blue', ai_digest_intro: form.ai_digest_intro, ai_hide_noncivil: form.ai_hide_noncivil, reminders_on: form.reminders_on ?? true, webhook_url: form.webhook_url ?? '',
       });
       loadAi();
       load(saved);
       setLogoText(saved.logo_text);
+      setCompanyAccent(saved.accent);
       onSaved();
       setMsg({ tone: 'ok', text: 'Saved. Changes apply from the next run.' });
     } catch (err) {
@@ -230,6 +232,14 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
                   <input value={logoText} onChange={(e) => setLogoTextField(e.target.value.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 3))} maxLength={3} style={{ maxWidth: 120 }} aria-label="Logo letters" />
                 </label>
                 <PreviewLogo text={logoText} />
+              </div>
+              <h3 style={{ margin: '18px 0 4px' }}>Company colour</h3>
+              <p className="sub">The colour of tabs, links, buttons and highlights for everyone who has not picked their own (each person can, from the menu). Every colour is checked to be readable in light and dark.</p>
+              <div className="accent-row" role="radiogroup" aria-label="Company colour">
+                {ACCENTS.map((a) => (
+                  <button key={a.id} type="button" role="radio" aria-checked={(form.accent ?? 'blue') === a.id} aria-label={a.name} title={a.name}
+                    className={`accent-dot big${(form.accent ?? 'blue') === a.id ? ' on' : ''}`} style={{ background: a.swatch }} onClick={() => patch({ accent: a.id })} />
+                ))}
               </div>
             </section>
           </div>

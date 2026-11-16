@@ -338,4 +338,6 @@ export const HI: Record<string, string> = {
   "{n} civil tender": "{n} सिविल निविदा",
   "{n} civil tenders": "{n} सिविल निविदाएँ",
   "or": "या",
+  "Colour": "रंग",
+  "Company colour": "कंपनी का रंग",
 };

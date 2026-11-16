@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
+import { setCompanyAccent } from './theme';
 
 /** The product name, the logo and the browser-tab icon, in one place so every screen says the same thing. */
 export const BRAND = 'TendAI by QMSofts';
@@ -29,7 +30,7 @@ export function setLogoText(text: string | undefined) {
 
 /** Reads the saved logo. It needs no login, so the sign-in screen can show it. A failure keeps the default. */
 export function loadBranding() {
-  api.branding().then((b) => setLogoText(b.logo_text), () => { /* keep the default */ });
+  api.branding().then((b) => { setLogoText(b.logo_text); setCompanyAccent(b.accent); }, () => { /* keep the default */ });
 }
 
 export function useLogoText(): string {
