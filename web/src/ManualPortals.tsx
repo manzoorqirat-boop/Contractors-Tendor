@@ -1,3 +1,4 @@
+import { ScrollX } from './ScrollX';
 import { useState } from 'react';
 import { api } from './api';
 import { fmtDate } from './format';
@@ -122,9 +123,9 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
       <section className="card" style={{ marginBottom: 14 }}>
         <h2>All portals</h2>
         <p className="sub">What the app found the last time it looked: when a run reads a portal, or when you press Check.</p>
-        <div className="scroll-x">
+        <ScrollX label="Portals">
           <table className="tbl">
-            <thead><tr><th>Portal</th><th>Status</th><th className="num">Departments</th><th>Last checked</th><th /></tr></thead>
+            <thead><tr><th>Portal</th><th>Status</th><th className="num">Departments</th><th>Last checked</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {portals.map((p) => (
                 <tr key={p.key}>
@@ -140,7 +141,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollX>
       </section>
 
       <section className="card" style={{ marginBottom: 14 }}>

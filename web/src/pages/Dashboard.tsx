@@ -27,6 +27,10 @@ function fillDays(p: Pivot | null, start: string, n: number, measure: Measure) {
   });
 }
 
+const FIRST = ['soonest', 'closing', 'biggest', 'found'];  // widget ids shown first, in this order; the rest keep their order after them
+
+const rankOf = (id: string) => { const i = FIRST.indexOf(id); return i < 0 ? FIRST.length : i; };
+
 function usePivot(f: Filters, groupBy: string, top = 12) {
   return useLoad(() => api.pivot(f, groupBy, '', top), [JSON.stringify(f), groupBy, top]);
 }
@@ -149,7 +153,8 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
             <Kpi loading={!k} label="Starred" value={k?.starred.toLocaleString('en-IN')} note="your watchlist" onClick={() => kpiGo({ starred: true, status: 'open' })} />
           </div>
 
-          <DashGrid widgets={widgets} wide={['depts']} />
+          {/* What needs doing first: tenders about to close, then the biggest ones; the charts follow. A layout a person arranged themselves is kept. */}
+          <DashGrid widgets={[...widgets].sort((a, b) => rankOf(a.id) - rankOf(b.id) || widgets.indexOf(a) - widgets.indexOf(b))} wide={['depts']} />
         </>
       )}
       <p className="muted small" style={{ marginTop: 6 }}>{k ? `Showing ${plural(k.total_kept, 'tender')} that match your filters.` : ''}</p>

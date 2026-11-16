@@ -1,3 +1,4 @@
+import { ScrollX } from '../ScrollX';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { Nav } from '../App';
@@ -9,6 +10,7 @@ import { chain, fmtDate, headline, relative } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
 import { Only } from '../session';
+import { useConfirm } from '../confirm';
 import type { AppConfig, Tender } from '../types';
 
 const SORTS: [string, string][] = [
@@ -19,9 +21,36 @@ const PAGE_SIZE = 25;
 export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   const { filters, display } = nav;
   const toast = useToast();
+  const confirm = useConfirm();
   const { data, error, loading, reload } = useLoad(() => api.tenders(filters, display.sort, display.page, PAGE_SIZE), [JSON.stringify(filters), display.sort, display.page]);
   const [items, setItems] = useState<Tender[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  // Tenders ticked for a bulk action. Kept across pages; at most MAX_PICK so the download address stays short.
+  const [picked, setPicked] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const MAX_PICK = 100;
+  const isPicked = (k: string) => picked.includes(k);
+  const togglePick = (k: string) => {
+    if (!isPicked(k) && picked.length >= MAX_PICK) { toast(`You can select up to ${MAX_PICK} tenders at a time.`, 'bad'); return; }
+    setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
+  };
+  const pageKeys = items.map((t) => t.key);
+  const allOnPage = pageKeys.length > 0 && pageKeys.every(isPicked);
+  const togglePage = () => setPicked((p) => (allOnPage ? p.filter((k) => !pageKeys.includes(k)) : [...new Set([...p, ...pageKeys])].slice(0, MAX_PICK)));
+  async function bulkStar(starred: boolean) {
+    setBulkBusy(true);
+    try { const r = await api.starBulk(picked, starred); setItems((xs) => xs.map((t) => (picked.includes(t.key) ? { ...t, starred } : t))); toast(`${starred ? 'Starred' : 'Removed the star from'} ${r.changed} tender${r.changed === 1 ? '' : 's'}`); }
+    catch (e) { toast((e as Error).message, 'bad'); } finally { setBulkBusy(false); }
+  }
+  async function bulkBids() {
+    if (picked.length > 5 && !(await confirm({ title: `Start ${picked.length} bids?`, body: 'Each tender gets its own bid with the standard checklist. Tenders that already have a bid are left alone.', confirmLabel: 'Start bids' }))) return;
+    setBulkBusy(true);
+    try {
+      const r = await api.createBidsBulk(picked);
+      toast(`Started ${r.created.length} bid${r.created.length === 1 ? '' : 's'}${r.existing.length ? `, ${r.existing.length} already had one` : ''}.`);
+      setPicked([]); reload();
+    } catch (e) { toast((e as Error).message, 'bad'); } finally { setBulkBusy(false); }
+  }
   useEffect(() => { if (data) setItems(data.items); }, [data]);
   useEffect(() => { window.addEventListener('tenders-changed', reload); return () => window.removeEventListener('tenders-changed', reload); }, [reload]);
 
@@ -52,7 +81,8 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
         </div>
         <div className="head-actions">
           <Only role="bidder"><button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('add-tender'))}>Add a tender</button></Only>
-          <a className="btn" href={api.exportUrl(filters, display.sort)} download>Download spreadsheet</a>
+          <a className="btn" href={api.exportUrl(filters, display.sort, 'xlsx')} download>Download Excel</a>
+          <a className="btn" href={api.exportUrl(filters, display.sort)} download>CSV</a>
         </div>
       </div>
 
@@ -74,16 +104,17 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
         {data && items.length === 0 && <div className="empty"><h2>No tenders match these filters</h2><p className="sub">Widen the closing window or remove a filter to see more.</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>Clear all filters</button></div>}
 
         <div style={{ opacity: loading && data ? 0.55 : 1 }} aria-busy={loading}>
-          {layout === 'cards' && items.map((t) => <Card key={t.key} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}
+          {layout === 'cards' && items.map((t) => <Card key={t.key} picked={isPicked(t.key)} onPick={() => togglePick(t.key)} t={t} now={config.now} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}
           {layout === 'table' && items.length > 0 && (
-            <div className="scroll-x">
+            <ScrollX label="Tenders">
               <table className="tbl">
-                <thead><tr><th aria-label="Star" /><th>Work</th>{showFit && <th>Fit</th>}<th>Department</th><th>Portal</th><th className="num">Value</th><th>Closes</th></tr></thead>
+                <thead><tr><th><input type="checkbox" checked={allOnPage} onChange={togglePage} aria-label="Select all tenders on this page" /></th><th><span className="sr-only">Star</span></th><th>Work</th>{showFit && <th>Fit</th>}<th>Department</th><th>Portal</th><th className="num">Value</th><th>Closes</th></tr></thead>
                 <tbody>
                   {items.map((t) => {
                     const rel = relative(t.closing, config.now);
                     return (
                       <tr key={t.key} className="click" tabIndex={0} onClick={() => setSelected(t.key)} onKeyDown={(e) => { if (e.key === 'Enter') setSelected(t.key); }}>
+                        <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={isPicked(t.key)} onChange={() => togglePick(t.key)} aria-label={`Select ${t.tender_id}`} /></td>
                         <td><StarButton t={t} onChange={(s) => setStar(t.key, s)} /></td>
                         <td style={{ minWidth: 240 }}><div className="strong">{headline(t).slice(0, 140)}{headline(t).length > 140 ? '…' : ''}</div><div className="mono muted">{t.tender_id}</div></td>
                         {showFit && <td className="nowrap"><FitBadge fit={t.fit} reason={t.fit_reason} notCivil={t.ai_civil} /></td>}
@@ -96,7 +127,7 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
                   })}
                 </tbody>
               </table>
-            </div>
+            </ScrollX>
           )}
         </div>
 
@@ -111,17 +142,35 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
         )}
       </section>
 
+      {picked.length > 0 && (
+        <div className="bulkbar" role="region" aria-label="Actions for the selected tenders">
+          <strong>{picked.length} selected</strong>
+          {layout === 'cards' && !allOnPage && <button type="button" className="link-btn" onClick={togglePage}>Select this page</button>}
+          <span className="bulk-actions">
+            <Only role="bidder">
+              <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(true)}>Star</button>
+              <button type="button" className="btn small" disabled={bulkBusy} onClick={() => bulkStar(false)}>Unstar</button>
+              <button type="button" className="btn small primary" disabled={bulkBusy} onClick={bulkBids}>Start bids</button>
+            </Only>
+            <a className="btn small" href={api.exportUrl(filters, display.sort, 'xlsx', picked)} download>Excel</a>
+            <a className="btn small" href={api.exportUrl(filters, display.sort, 'csv', picked)} download>CSV</a>
+            <button type="button" className="btn small ghost" onClick={() => setPicked([])}>Clear</button>
+          </span>
+        </div>
+      )}
+
       {selected && <TenderDrawer tenderKey={selected} now={config.now} onClose={() => setSelected(null)} onStar={setStar} />}
     </>
   );
 }
 
-function Card({ t, now, onOpen, onStar, onCopy, onStart }: { t: Tender; now: string; onOpen: () => void; onStar: (s: boolean) => void; onCopy: () => void; onStart: () => void }) {
+function Card({ t, now, picked, onPick, onOpen, onStar, onCopy, onStart }: { t: Tender; now: string; picked: boolean; onPick: () => void; onOpen: () => void; onStar: (s: boolean) => void; onCopy: () => void; onStart: () => void }) {
   const rel = relative(t.closing, now);
   return (
     <article className={`tender urg-${rel.tone || 'none'}`} onClick={onOpen}>
       <div>
         <div className="t-title">
+          <input type="checkbox" className="pick" checked={picked} onClick={(e) => e.stopPropagation()} onChange={onPick} aria-label={`Select ${t.tender_id}`} />
           <StarButton t={t} onChange={onStar} />
           <button className="work linkish" onClick={onOpen}>{headline(t)}</button>
         </div>

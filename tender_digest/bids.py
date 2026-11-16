@@ -278,7 +278,7 @@ class BidBook:
                 """
             )
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(bids)")}
-            for col in ("portal_facts", "portal_checked"):
+            for col in ("portal_facts", "portal_checked", "doc_checked"):
                 if col not in have:
                     self.db.execute(f"ALTER TABLE bids ADD COLUMN {col} TEXT")  # added after the first release
             self.db.commit()
@@ -290,7 +290,7 @@ class BidBook:
         if r is None:
             return None
         d = dict(r)
-        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts"):
+        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked"):
             if f in d:
                 try:
                     d[f] = json.loads(d[f]) if d[f] else None
@@ -366,10 +366,12 @@ class BidBook:
         return self.get(bid_id) or bid
 
     def set_json(self, bid_id: int, field: str, value: Any, now: datetime) -> None:
-        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts"):
+        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked"):
             raise ValueError(field)
         with self.lock:
             self.db.execute(f"UPDATE bids SET {field} = ?, updated = ? WHERE id = ?", (json.dumps(value) if value is not None else None, _iso(now), bid_id))
+            if field == "doc":  # new AI-read facts have not been checked by anyone yet
+                self.db.execute("UPDATE bids SET doc_checked = NULL WHERE id = ?", (bid_id,))
             self.db.commit()
 
     # ---- the tender notice itself, kept against the tender so risk and BOQ steps never need it uploaded twice ----------

@@ -177,6 +177,7 @@ class SeenStore:
                   error TEXT, log TEXT NOT NULL DEFAULT '[]');
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS starred (key TEXT PRIMARY KEY, created TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS login_fails (at REAL NOT NULL, client TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, created REAL NOT NULL, last_seen REAL NOT NULL, user_id INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS portal_status (
@@ -309,6 +310,10 @@ class SeenStore:
                 parts.append(none_sql)
             where.append("(" + " OR ".join(parts) + ")")
 
+        if f.get("keys"):  # an explicit list of tenders (the rows a person ticked, or the new ones an alert looks at)
+            keys = [str(k) for k in f["keys"]][:500]
+            where.append(f"key IN ({','.join('?' * len(keys))})")
+            args.extend(keys)
         any_of("portal", f.get("portal"), "portal IS NULL")
         any_of("category", f.get("category"), "(category IS NULL OR category = '')")
         any_of(DEPT_SQL, f.get("department"), f"({DEPT_SQL} IS NULL OR {DEPT_SQL} = '')")
@@ -743,6 +748,24 @@ class SeenStore:
     def session_end(self, sid: str) -> None:
         with self.lock:
             self.db.execute("DELETE FROM sessions WHERE sid = ?", (sid,))
+            self.db.commit()
+
+    # ---- failed sign-ins, kept so a restart does not give a guesser a fresh start ---------------------------------
+
+    def login_fails_recent(self, since: float) -> list[tuple[float, str]]:
+        with self.lock:
+            self.db.execute("DELETE FROM login_fails WHERE at < ?", (since,))
+            self.db.commit()
+            return [(r["at"], r["client"]) for r in self.db.execute("SELECT at, client FROM login_fails ORDER BY at")]
+
+    def login_fail_add(self, client: str, at: float) -> None:
+        with self.lock:
+            self.db.execute("INSERT INTO login_fails (at, client) VALUES (?, ?)", (at, client[:64]))
+            self.db.commit()
+
+    def login_fails_clear(self, client: str) -> None:
+        with self.lock:
+            self.db.execute("DELETE FROM login_fails WHERE client = ?", (client,))
             self.db.commit()
 
     def ping(self) -> None:

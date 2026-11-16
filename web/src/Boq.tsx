@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { api } from './api';
 import { readBase64 } from './ai';
-import { inr, plural } from './format';
+import { inr, parseMoney, plural } from './format';
 import { useLoad } from './hooks';
 import { useToast } from './ui';
 import { useConfirm } from './confirm';
@@ -18,7 +18,7 @@ const KINDS: { key: string; label: string; hint: string }[] = [
   { key: 'sor', label: 'Schedule of rates (DSR / SOR)', hint: 'Columns: source, sor_code, description, uom, rate. Optional: state.' },
   { key: 'locations', label: 'Location cost index', hint: 'Columns: state, cost_index (1.00 = base), hill_carriage_pct. Optional: district, royalty_per_cum, note.' },
 ];
-const num = (v: string): number | null => { const n = Number(v.replace(/[,\s₹]/g, '')); return v.trim() === '' || Number.isNaN(n) ? null : n; };
+const num = parseMoney;
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '-' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
 
 // ---- BOQ card ------------------------------------------------------------------------------------------------------
@@ -282,7 +282,7 @@ export function RiskCard({ bidId, aiOn, hasSource = false }: { bidId: number; ai
 
           <h3 style={{ margin: '16px 0 6px' }}>Margin check</h3>
           <div className="ws-grid">
-            <label className="field">Expected L1 price (₹)<input inputMode="numeric" value={l1} onChange={(e) => setL1(e.target.value)} placeholder="Lowest bid you expect" /></label>
+            <label className="field">Expected L1 price (₹)<input inputMode="numeric" value={l1} onChange={(e) => setL1(e.target.value)} placeholder="Lowest bid you expect" />{num(l1) ? <span className="date-say">{inr(num(l1))}</span> : null}</label>
             <label className="field">Your planned quote (% above + / below −)<input inputMode="decimal" value={quote} onChange={(e) => setQuote(e.target.value)} placeholder="e.g. -8" /></label>
           </div>
           {sim?.unpriced.filter((u) => u.why.startsWith('Needs the share')).map((u) => (

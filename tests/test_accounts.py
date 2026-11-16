@@ -52,7 +52,7 @@ def test_every_route_has_a_deliberate_rule():
     world_app = web.create_app(web.AppConfig(PASSWORD, "k", cookie_secure=False, run_scheduler=False), settings(), SeenStore(":memory:"))
     for route in world_app.routes:
         path = getattr(route, "path", "")
-        if not path.startswith("/api/") or path in ("/api/login", "/api/logout", "/api/health", "/api/me", "/api/branding", "/api/account/password"):
+        if not path.startswith("/api/") or path in ("/api/login", "/api/logout", "/api/health", "/api/me", "/api/branding") or path.startswith("/api/account/"):
             continue
         for method in getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}:
             role = required_role(method, path)
@@ -264,3 +264,119 @@ def test_bidders_keep_the_company_profile_without_access_to_settings(world):
     v, _ = world.person("vera", "viewer")
     assert "roads and bridges" in v.get("/api/company-profile").json()["company_profile"]
     assert v.put("/api/company-profile", json={"company_profile": "x"}).status_code == 403
+
+
+# ---- two-step sign-in -----------------------------------------------------------------------------------------------
+
+def test_totp_matches_the_published_rfc_6238_vectors():
+    secret = accounts.base64.b32encode(b"12345678901234567890").decode()  # the RFC's SHA-1 test key
+    for when, expected in ((59, "94287082"), (1111111109, "07081804"), (1111111111, "14050471"), (1234567890, "89005924"), (2000000000, "69279037")):
+        assert accounts.totp_code(secret, when // 30, digits=8) == expected, when
+    assert accounts.totp_code(secret, 59 // 30) == "287082"  # the same codes as the 6-digit app shows
+
+
+def test_a_code_is_accepted_once_within_the_clock_tolerance_and_never_replayed():
+    secret = accounts.new_totp_secret()
+    now = 1_700_000_000.0
+    step = int(now // 30)
+    good = accounts.totp_code(secret, step)
+    assert accounts.totp_match(secret, good, now) == step
+    assert accounts.totp_match(secret, accounts.totp_code(secret, step - 1), now) == step - 1  # a phone clock slightly behind
+    assert accounts.totp_match(secret, accounts.totp_code(secret, step + 1), now) == step + 1
+    assert accounts.totp_match(secret, accounts.totp_code(secret, step + 3), now) is None       # too far off
+    assert accounts.totp_match(secret, good, now, after_step=step) is None                      # already used
+    assert accounts.totp_match(secret, " " + good[:3] + " " + good[3:], now) == step            # spaces typed by people are fine
+    for bad in ("", "12345", "abcdef", "1234567"):
+        assert accounts.totp_match(secret, bad, now) is None
+
+
+def two_step_for(world, username, role="bidder"):
+    """Signs a person in, turns on two-step sign-in for them, and returns (client, secret)."""
+    c, uid = world.person(username, role)
+    secret = c.post("/api/account/2fa/start").json()["secret"]
+    code = accounts.totp_code(secret, int(web.time.time() // 30))
+    assert c.post("/api/account/2fa/enable", json={"code": code}).status_code == 200
+    return c, uid, secret
+
+
+def test_two_step_sign_in_end_to_end(world):
+    c, uid, secret = two_step_for(world, "tina")
+    me = c.get("/api/me").json()["user"]
+    assert me["two_step"] is True
+    fresh = TestClient(world.app)
+    # right password, no code: asked for the code, and nothing is signed in
+    r = fresh.post("/api/login", json={"username": "tina", "password": GOOD})
+    assert r.status_code == 401 and r.json()["need_code"] is True and fresh.get("/api/me").json()["authenticated"] is False
+    # wrong code
+    assert fresh.post("/api/login", json={"username": "tina", "password": GOOD, "code": "000000"}).status_code == 401
+    # right code works once
+    step = int(web.time.time() // 30)
+    code = accounts.totp_code(secret, step + 1)  # next step: the setup used the current one
+    assert fresh.post("/api/login", json={"username": "tina", "password": GOOD, "code": code}).status_code == 200
+    again = TestClient(world.app)
+    assert again.post("/api/login", json={"username": "tina", "password": GOOD, "code": code}).status_code == 401  # replay refused
+    # a wrong password never gets as far as asking for a code
+    assert fresh.post("/api/login", json={"username": "tina", "password": "wrong-password-1"}).json().get("need_code") is None
+
+
+def test_setting_up_two_step_needs_a_right_code_and_turning_it_off_needs_the_password(world):
+    c, uid = world.person("tina", "bidder")
+    start = c.post("/api/account/2fa/start").json()
+    assert start["uri"].startswith("otpauth://totp/TendAI:tina?secret=" + start["secret"])
+    assert c.post("/api/account/2fa/enable", json={"code": "123456"}).status_code == 422
+    assert c.get("/api/me").json()["user"]["two_step"] is False  # not on until a code was proved
+    code = accounts.totp_code(start["secret"], int(web.time.time() // 30))
+    assert c.post("/api/account/2fa/enable", json={"code": code}).status_code == 200
+    assert c.post("/api/account/2fa/disable", json={"password": "wrong-password-1"}).status_code == 422
+    assert c.post("/api/account/2fa/disable", json={"password": GOOD}).status_code == 200
+    assert c.get("/api/me").json()["user"]["two_step"] is False
+    assert TestClient(world.app).post("/api/login", json={"username": "tina", "password": GOOD}).status_code == 200
+
+
+def test_an_admin_can_reset_a_lost_phone(world):
+    c, uid, secret = two_step_for(world, "tina")
+    assert world.owner.get("/api/users").json()["users"][1]["two_step"] is True
+    assert world.owner.patch(f"/api/users/{uid}", json={"reset_2fa": True}).status_code == 200
+    assert world.owner.get("/api/users").json()["users"][1]["two_step"] is False
+    assert TestClient(world.app).post("/api/login", json={"username": "tina", "password": GOOD}).status_code == 200
+
+
+def test_ten_wrong_codes_pause_that_accounts_codes(world):
+    c, uid, secret = two_step_for(world, "tina")
+    for i in range(10):
+        TestClient(world.app).post("/api/login", json={"username": "tina", "password": GOOD, "code": f"{i:06d}"}, headers={"X-Forwarded-For": f"9.9.9.{i}"})
+    good = accounts.totp_code(secret, int(web.time.time() // 30) + 1)
+    assert TestClient(world.app).post("/api/login", json={"username": "tina", "password": GOOD, "code": good}, headers={"X-Forwarded-For": "9.9.9.99"}).status_code == 401
+
+
+def test_the_owner_can_require_a_code_through_a_server_variable(monkeypatch):
+    monkeypatch.setattr(web.time, "sleep", lambda s: None)
+    secret = accounts.new_totp_secret()
+    app = web.create_app(web.AppConfig(PASSWORD, "k", cookie_secure=False, run_scheduler=False, username="admin", owner_totp=secret), settings(), SeenStore(":memory:"))
+    c = TestClient(app)
+    r = c.post("/api/login", json={"username": "admin", "password": PASSWORD})
+    assert r.status_code == 401 and r.json()["need_code"] is True
+    assert c.post("/api/login", json={"username": "admin", "password": PASSWORD, "code": "000000"}).status_code == 401
+    code = accounts.totp_code(secret, int(web.time.time() // 30))
+    assert c.post("/api/login", json={"username": "admin", "password": PASSWORD, "code": code}).status_code == 200
+    assert TestClient(app).post("/api/login", json={"username": "admin", "password": PASSWORD, "code": code}).status_code == 401  # replay
+
+
+def test_signing_out_other_devices_keeps_this_one(world):
+    laptop, _ = world.person("bob", "bidder")
+    phone = TestClient(world.app)
+    assert phone.post("/api/login", json={"username": "bob", "password": GOOD}).status_code == 200
+    assert laptop.post("/api/account/sessions/end-others").status_code == 200
+    assert laptop.get("/api/stats").status_code == 200 and phone.get("/api/stats").status_code == 401
+
+
+def test_failed_sign_ins_survive_a_restart(tmp_path):
+    path = str(tmp_path / "s.db")
+    a = web.LoginLimiter(store=SeenStore(path))
+    for _ in range(8):
+        a.failed("203.0.113.7")
+    assert a.blocked("203.0.113.7")
+    b = web.LoginLimiter(store=SeenStore(path))  # the service restarted
+    assert b.blocked("203.0.113.7") and not b.blocked("198.51.100.1")
+    b.succeeded("203.0.113.7")
+    assert not web.LoginLimiter(store=SeenStore(path)).blocked("203.0.113.7")

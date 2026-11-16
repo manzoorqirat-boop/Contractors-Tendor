@@ -1,6 +1,6 @@
 import { Logo } from '../Brand';
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, type ApiError } from '../api';
 
 function greeting(): string {
   const h = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' }).format(new Date())) % 24;
@@ -40,6 +40,8 @@ export function Login({ onDone }: { onDone: () => void }) {
   const [show, setShow] = useState(false);
   const [caps, setCaps] = useState(false);
   const [error, setError] = useState('');
+  const [code, setCode] = useState('');
+  const [needCode, setNeedCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(false);
   const [online, setOnline] = useState<boolean | null>(null);
@@ -58,11 +60,13 @@ export function Login({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError('');
     try {
-      await api.login(username.trim(), password);
+      await api.login(username.trim(), password, code.trim());
       onDone();
     } catch (err) {
-      setError((err as Error).message);
-      setPassword('');
+      const e = err as ApiError;
+      if (e.needCode) { setNeedCode(true); setError(''); setCode(''); }
+      else if (needCode) { setError(e.message); setCode(''); }  // a wrong code: keep the password and the code box, clear only the code
+      else { setError(e.message); setPassword(''); setCode(''); }
       setBusy(false);
     }
   }
@@ -103,6 +107,14 @@ export function Login({ onDone }: { onDone: () => void }) {
               {caps && <em className="lf-warn">Caps Lock is on</em>}
             </label>
 
+            {needCode && (
+              <label className="lf">
+                <span>Two-step code</span>
+                <input type="text" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code from your app" aria-describedby="code-hint" />
+                <em className="lf-warn" id="code-hint" style={{ fontStyle: 'normal' }}>Open your authenticator app and type the current code for TendAI.</em>
+              </label>
+            )}
+
             {forgot && (
               <div className="alert warn lf-help" role="note">
                 <strong>Reset the password</strong>
@@ -110,7 +122,7 @@ export function Login({ onDone }: { onDone: () => void }) {
               </div>
             )}
 
-            <button className="btn primary login-submit" disabled={busy || !username.trim() || !password}>{busy ? 'Signing in…' : 'Sign in'}</button>
+            <button className="btn primary login-submit" disabled={busy || !username.trim() || !password || (needCode && code.replace(/\s/g, '').length < 6)}>{busy ? 'Signing in…' : 'Sign in'}</button>
           </form>
 
           <p className="login-status">

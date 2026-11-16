@@ -24,19 +24,24 @@ tenders, and gives you:
 - **Filters** (portal, category, department, location, value, closing window, search, starred) are shared by the Dashboard,
   Explore and Tenders pages. The address bar always holds the current view, so **Share**, bookmarks and the Back button work.
   **Views** saves a named set of filters and chart choices.
+- **Keyboard**: `/` searches the tender list, `?` lists the shortcuts, and `g` then `d` / `e` / `t` / `b` / `v` / `r` / `s` jumps to Dashboard, Explore, Tenders, Bids, Vault, Runs or Settings. Shortcuts pause while you type in a box.
+- **Amounts** can be typed the way people say them: `5,00,000`, `50 lakh`, `1.5 cr`, `75k`. The app shows back what it understood.
 - **Dashboard**: summary numbers and charts for whatever the filters select. The Tenders/Value switch changes every chart.
   Click a number or bar to open the tenders behind it.
 - **Explore**: pick a combination (one click) or build your own: *group by* one thing and *split by* another (portal, category,
   department, location, value band, how soon it closes, closing week or day, day found, day published), measured as number of
   tenders, total value or average value, shown as stacked bars, grouped bars or a shaded table. Every bar and cell opens exactly
   the tenders it counts. Tables can be downloaded.
-- **Tenders**: cards or a table, sortable, with a detail panel, stars for a watchlist, and a spreadsheet download.
+- **Tenders**: cards or a table, sortable, with a detail panel, stars for a watchlist, and a download as **Excel** or CSV. Tick tenders (up to 100) to **star, start bids on, or download just those**.
+- **Email alerts for saved searches**: when you save a view, tick *Email me new matches*. The daily digest then gains a section per alert view listing the tenders found since the last email that match it (up to 10 alert views).
 
 ## Bid workspace (tender filing support)
 
 TendAI does not submit bids: portals need your DSC and their own login, and the app never goes around those. It prepares everything around the filing.
 
 - **Start a bid** from any tender's panel. The **Bids** page is your pipeline (Interested, Preparing, Submitted, Bid opened, Won, Lost, Dropped) with a "Coming up" list of closing dates, EMD due, pre-bid meetings and query deadlines.
+- **Progress and readiness**: a five-step strip (Decide, Checklist, Price, Letters, Result) shows how far a bid has got, and a **Ready to submit** percentage lists what is still missing (unticked checklist items, papers missing or expired in the Vault, document not read, eligibility not checked, no price recorded). The last two days before closing are counted in hours and minutes.
+- **AI-read details need a human check**: after the AI reads a tender notice, the bid asks you to compare the details with the notice and press *I checked them against the notice*. It records who and when, and the mark is cleared if the document is read again.
 - **Checklist** per bid: standard steps plus, after *Read tender document*, the required documents and conditions. Each required document is matched to the **Vault** and flagged *Not in vault*, *Expired* or *Expires before closing*.
 - **Vault**: reusable papers (optionally with the file, up to 10 MB) with expiry dates, and **Company facts** (turnover, class, similar work) that the AI uses and never guesses.
 - **Eligibility check** (AI): each condition marked met, gap or unclear, with what to do.
@@ -65,7 +70,17 @@ Everything is in the `/data` volume: `tender_state.db` (tenders, bids, settings)
 - **Daily copy**: each day the service copies both databases into `/data/backups` (the last 7 days are kept; `BACKUP_KEEP_DAYS`). Each copy is checked with SQLite's integrity check. This protects against a bad edit or a damaged file, **not** against losing the volume.
 - **Download backup** (Settings > Backup): one zip with both databases and every vault file. **Save it somewhere other than Railway** (weekly is a good habit, and before any server change). It contains your company papers, so keep it private.
 - **Restore** (on the server, e.g. `railway ssh`, with the zip uploaded there): `python -m tender_digest.backup restore backup.zip --target-dir /data --force`, then restart the service. The zip's databases are checked first; existing data is moved aside (`name.before-restore-TIME`), never deleted. If you changed `VAULT_DIR` or `BOQ_DB_PATH`, copy those two items by hand.
-- Automatic copies to storage outside Railway (S3, R2) are not built in yet: they need a bucket and keys of your own.
+- **Off-site copy** (recommended): every night the two databases (compressed) and, once a week, the full zip with the Vault go to a bucket you own, so losing the Railway volume loses nothing. It works with Amazon S3, Cloudflare R2, Backblaze B2 and MinIO. Create a bucket and an access key limited to it (write, list, delete), then set:
+
+  | Variable | Purpose |
+  |---|---|
+  | `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY` | Required together. Secret. |
+  | `BACKUP_S3_ENDPOINT` | `https://<account>.r2.cloudflarestorage.com` for R2; blank for Amazon S3 |
+  | `BACKUP_S3_REGION` | `auto` for R2 (default); e.g. `ap-south-1` for Amazon S3 |
+  | `BACKUP_S3_PREFIX` | Folder in the bucket (default `tendai/`) |
+  | `BACKUP_S3_KEEP_DAILY`, `BACKUP_S3_KEEP_WEEKLY` | How many nightly and weekly copies to keep (14 and 8) |
+
+  Settings > Backup shows whether it is working, any error from the bucket, and a **Send a full backup now** button. A failed upload is retried within the hour. To restore, download the `.zip` from the bucket and use the restore command above. The bucket holds your company papers: keep it private, and turn on its own encryption if it offers it.
 
 Long actions (reading a notice, matching a BOQ, fetching from a portal, labelling tenders) run in the background and the page waits for the answer, so a slow one is not cut off by Railway's proxy. If the service restarts in the middle, the page says so and you press the button again.
 
@@ -119,6 +134,7 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `AI_MAX_CALLS_PER_DAY` | Optional | Default `300`. Most AI requests people can start from the page in a day (`0` = no limit). Cached answers cost nothing. Settings > AI shows today's count. The daily run's labelling has its own cap, `AI_MAX_PER_RUN`. |
 | `AI_MAX_CALLS_PER_MINUTE` | Optional | Default `20` (`0` = no limit). |
 | `BACKUP_KEEP_DAYS` | Optional | Default `7`. How many days of automatic database copies to keep on the volume. |
+| `OWNER_TOTP_SECRET` | Optional | A base32 secret (for example from an authenticator app's "setup key"). When set, the owner login also needs the 6-digit code from the app. Secret. To lose the requirement, remove the variable. |
 | `ALLOW_EPHEMERAL_STORAGE` | Optional | Set `true` to silence the "no volume" warning on Railway (not recommended: a redeploy then loses all data). |
 | `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
 | `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
@@ -158,6 +174,8 @@ Sign in with a username and password. Administrators add people in **Settings > 
 - The login in the server variables (`APP_USERNAME` / `APP_PASSWORD`) is the **owner**: always an admin, always able to sign in, and the way back in if every other account is lost. It is not stored in the database and is changed only on the server.
 - A password an administrator sets is temporary: the person must choose their own (12 or more characters) before doing anything else. Resetting a password or switching a person off signs them out at once; a role change applies at their next click.
 - Passwords are stored as salted scrypt hashes. Signing in has the same limits as before (per address, never a lock-out of the owner).
+- **Two-step sign-in** (optional): each person can turn it on under **Account & security** with any authenticator app (Google/Microsoft Authenticator, Authy, 1Password): add the setup key shown, then type a code to confirm. At sign-in a right password is followed by a request for the current code; each code works once. An administrator can reset a lost phone in Settings > People. The secret is stored in the database, so keep backups private. For the owner login set `OWNER_TOTP_SECRET`.
+- **Sign out other devices** (Account & security) ends every other session of your account.
 - **Settings > Activity** records who signed in, what each person changed, refusals ("view-only account tried to ...") and downloads of backups, Vault files and the spreadsheet. Reading pages is not logged. The last 20,000 entries are kept.
 - Rules are enforced on the server (one table, `required_role` in `tender_digest/accounts.py`); the page only hides what a person cannot use.
 
@@ -165,7 +183,7 @@ Sign in with a username and password. Administrators add people in **Settings > 
 
 - Everything except the login and a health check needs the password. Cookies are `HttpOnly`, `SameSite=Strict` and signed.
 - Logins are kept on the server: **Log out ends the session for good** (a copied cookie stops working), a login unused for `SESSION_IDLE_HOURS` ends, and **changing `APP_PASSWORD` signs everyone out**.
-- Wrong-password attempts are limited per address (8 in 10 minutes). Many wrong guesses from many addresses only slow logins down; they never lock the owner out. Use a password of 12 or more characters.
+- Wrong-password attempts are limited per address (8 in 10 minutes), and the count survives a restart. Many wrong guesses from many addresses only slow logins down; they never lock the owner out. Use a password of 12 or more characters.
 - The portal reader only ever talks to the portal's own host: a link or a redirect to any other address (or to a private network) is refused, so a portal page cannot aim this server elsewhere.
 - Headers: strict `Content-Security-Policy` (no inline styles or scripts), HSTS on https, `Permissions-Policy`, `Cross-Origin-Opener-Policy`.
 - AI use is capped per day and per minute (`AI_MAX_CALLS_PER_DAY`, `AI_MAX_CALLS_PER_MINUTE`), so a stuck button or a stolen session cannot run up the bill.
@@ -229,6 +247,8 @@ APP_PASSWORD=choose-a-password COOKIE_SECURE=false STATE_PATH=./local.db python 
 cd web && npm ci && npm run dev         # page on :5173, forwards /api to :8000
 npm run build                           # then the Python service serves web/dist itself
 ```
+
+Accessibility: `npm run a11y` (in `web/`) opens every screen and dialog in light and dark, on desktop and phone, and runs axe-core (WCAG 2.2 AA). It needs a running app with demo data (`A11Y_URL`, `A11Y_PASS`) and a browser (`npx playwright install chromium`); CI runs it on every change and fails on any violation.
 
 A command-line mode still exists for headless use: `python -m tender_digest --dry-run --portals delhi --preview out.html`
 reads live and builds the email without sending; `--send-test` sends a test email.

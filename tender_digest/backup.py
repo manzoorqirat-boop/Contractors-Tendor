@@ -22,9 +22,11 @@ import sys
 import tempfile
 import threading
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from . import offsite
 
 log = logging.getLogger("tender_digest.backup")
 
@@ -55,9 +57,11 @@ def copy_database(src: sqlite3.Connection, lock: Any, dest: Path) -> None:
 
 
 class Backups:
-    def __init__(self, main: Any, boq: Any, state_path: str, vault_dir: Path | None, keep_days: int = 7):
-        """`main` and `boq` are the two stores (each has .db and .lock)."""
+    def __init__(self, main: Any, boq: Any, state_path: str, vault_dir: Path | None, keep_days: int = 7,
+                 remote: offsite.OffsiteConfig | None = None, remote_problem: str = "", session: Any = None):
+        """`main` and `boq` are the two stores (each has .db and .lock). `remote` is the off-site bucket, if one is set up."""
         self.main, self.boq, self.vault_dir, self.keep_days = main, boq, vault_dir, keep_days
+        self.remote, self.remote_problem, self.session = remote, remote_problem, session
         self.enabled = state_path != ":memory:"
         self.folder = Path(state_path).expanduser().parent / "backups" if self.enabled else None
         self.busy = threading.Lock()
@@ -82,6 +86,52 @@ class Backups:
         finally:
             self.busy.release()
 
+    # ---- the copy outside Railway ----------------------------------------------------------------------------------
+
+    RETRY_AFTER = timedelta(minutes=30)
+
+    def housekeeping(self, now: datetime) -> None:
+        """Run by the scheduler every half minute: today's local copy, then the off-site upload when one is due."""
+        self.daily(now)
+        self.upload_offsite(now)
+
+    def remote_state(self) -> dict[str, Any]:
+        raw = self.main.get_settings().get("offsite")
+        return raw if isinstance(raw, dict) else {}
+
+    def upload_offsite(self, now: datetime, force: bool = False) -> dict[str, Any]:
+        """Sends today's database copies (and the full zip when the last one is a week old). Failures are recorded and retried, never raised."""
+        state = self.remote_state()
+        if self.remote is None or not self.enabled or self.folder is None:
+            return state
+        day = now.date().isoformat()
+        if not force:
+            if state.get("last_daily") == day:
+                return state
+            tried = state.get("tried")
+            if tried and now - datetime.fromisoformat(tried) < self.RETRY_AFTER:
+                return state
+        state["tried"] = now.isoformat(timespec="seconds")
+        try:
+            self.daily(now)
+            bucket = offsite.Bucket(self.remote, self.session) if self.session else offsite.Bucket(self.remote)
+            offsite.send_daily(bucket, self.folder, day)
+            state["last_daily"] = day
+            if force or offsite.weekly_due(bucket, now):
+                zip_path = self.build_zip(now)
+                try:
+                    offsite.send_weekly(bucket, zip_path, day)
+                finally:
+                    zip_path.unlink(missing_ok=True)
+                state["last_weekly"] = day
+            state.update(last_ok=now.isoformat(timespec="seconds"), last_error=None)
+            log.info("off-site backup sent to %s", self.remote.bucket)
+        except (offsite.OffsiteError, BackupError, OSError) as e:
+            state["last_error"] = str(e)[:300]
+            log.warning("off-site backup failed: %s", e)
+        self.main.put_settings({"offsite": state})
+        return state
+
     def _prune(self, now: datetime) -> None:
         assert self.folder is not None
         cutoff = now.date().toordinal() - self.keep_days
@@ -98,7 +148,10 @@ class Backups:
                 if m:
                     copies.append({"name": f.name, "day": m.group(2), "size": f.stat().st_size})
         days = sorted({c["day"] for c in copies}, reverse=True)
-        return {"enabled": self.enabled, "keep_days": self.keep_days, "latest_day": days[0] if days else None, "days": days, "files": len(copies)}
+        remote = offsite.describe(self.remote, self.remote_state())
+        if self.remote_problem:
+            remote["last_error"] = self.remote_problem
+        return {"enabled": self.enabled, "keep_days": self.keep_days, "latest_day": days[0] if days else None, "days": days, "files": len(copies), "offsite": remote}
 
     # ---- the full download ---------------------------------------------------------------------------------------
 

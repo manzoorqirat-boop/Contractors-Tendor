@@ -68,7 +68,7 @@ export interface Filters {
 
 /** Display choices that are not filters. */
 export interface Display { sort: string; page: number; group_by: string; split_by: string; measure: Measure; chart: ChartKind; layout: 'cards' | 'table' }
-export interface SavedView { id: string; name: string; filters: Record<string, unknown> }
+export interface SavedView { id: string; name: string; filters: Record<string, unknown>; alert?: boolean }
 
 // ---- bid workspace -------------------------------------------------------------------------------------------------
 export type Stage = 'interested' | 'preparing' | 'submitted' | 'opened' | 'won' | 'lost' | 'dropped';
@@ -87,7 +87,7 @@ export interface EligibilityCheck { requirement: string; status: 'met' | 'gap' |
 export interface Eligibility { verdict: string; summary: string; checks: EligibilityCheck[]; checked?: string }
 export interface BidDetail extends Omit<BidSummary, 'has_doc'> {
   published: string | null; category: string; location: string; emd: number | null; notes: string | null; l1_bidder: string | null; result_note: string | null; search_url: string;
-  doc: DocFacts | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null; manual?: boolean; has_source?: boolean; portal_checked?: string | null;
+  doc: DocFacts | null; doc_checked?: { by: string; at: string } | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null; manual?: boolean; has_source?: boolean; portal_checked?: string | null;
   items: BidItem[]; changes: BidChange[]; unseen: number; history: string[];
 }
 export interface BidAlert { bid_id: number | null; kind: string; label: string; date: string; days_left: number; urgency: 'overdue' | 'today' | 'soon' | 'later'; title: string; tender_id: string; extra: string }
@@ -144,7 +144,12 @@ export interface ManualListing { tender_id: string; reference: string; title: st
 export interface ManualFields { tender_id?: string; title?: string; description?: string; reference?: string; organisation?: string; location?: string; value?: number | null; emd?: number | null; published?: string; closing?: string; opening?: string; portal_name?: string; clear_value?: boolean; clear_emd?: boolean }
 
 export type Role = 'viewer' | 'bidder' | 'admin';
-export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean }
-export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; created: string | null; last_login: string | null; owner: boolean }
+export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean; two_step: boolean }
+export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; two_step?: boolean; created: string | null; last_login: string | null; owner: boolean }
 export interface UsersData { users: UserRow[]; roles: { key: Role; label: string; text: string }[]; min_password: number }
 export interface AuditEntry { id: number; at: string; username: string; role: string | null; action: string; target: string; detail: string; client: string }
+
+export interface BackupStatus {
+  enabled: boolean; keep_days: number; latest_day: string | null; days: string[]; storage_warning: string;
+  offsite: { configured: boolean; bucket: string; endpoint: string; last_ok: string | null; last_error: string | null; last_daily: string | null; last_weekly: string | null; keep_daily: number; keep_weekly: number };
+}

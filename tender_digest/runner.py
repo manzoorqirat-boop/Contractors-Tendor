@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from . import ai, appsettings, collector, digest, mailer
+from . import ai, alerts, appsettings, collector, digest, mailer
 from .bids import BidBook
 from .config import Settings
 from .store import SeenStore
@@ -125,7 +125,12 @@ class RunManager:
                             intro = ai.digest_intro(items, profile)
                         except Exception as e:  # noqa: BLE001 - the email goes out without the intro
                             say(f"Claude intro skipped: {str(e)[:120]}")
-                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro, bid_block)
+                    try:
+                        searches = alerts.matches(self.store, now, saved.get("views", []), [t.key for t in pending], settings.closing_soon_days)
+                    except Exception:  # noqa: BLE001 - the email goes out without the saved-search section
+                        log.exception("saved-search section of the digest failed")
+                        searches = []
+                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro, bid_block, searches)
                     say(f"Sending '{built.subject}' to {len(settings.recipients)} recipient(s)")
                     accepted = self.sender(
                         settings.brevo_api_key, settings.mail_from, settings.mail_from_name, settings.recipients, built.subject, built.html, built.text,

@@ -1,10 +1,11 @@
+import { ScrollX } from './ScrollX';
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { Logo } from './Brand';
 import { useConfirm } from './confirm';
 import { useLoad } from './hooks';
 import { useToast } from './ui';
-import type { AuditEntry, Role, UserRow } from './types';
+import type { AuditEntry, Me, Role, UserRow } from './types';
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Never');
 
@@ -55,6 +56,63 @@ export function ChangePassword({ forced, onDone, onCancel, onLogout }: { forced?
   );
 }
 
+/** Account & security: password, two-step sign-in, and signing out other devices. */
+export function AccountPanel({ user, onClose, onChanged }: { user: Me; onClose: () => void; onChanged: () => void }) {
+  const toast = useToast();
+  const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [offPw, setOffPw] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>, done: string) => { setBusy(true); setErr(''); try { await fn(); toast(done); onChanged(); return true; } catch (e) { setErr((e as Error).message); return false; } finally { setBusy(false); } };
+  const group = (s: string) => s.replace(/(.{4})/g, '$1 ').trim();
+  return (
+    <div className="acct">
+      <section>
+        <h3>Password</h3>
+        {user.owner ? <p className="sub">The owner login's password is set on the server (APP_PASSWORD).</p> : <ChangePassword onDone={onClose} onCancel={onClose} />}
+      </section>
+      <section>
+        <h3>Two-step sign-in {user.two_step && <span className="badge ok">On</span>}</h3>
+        {user.owner && <p className="sub">The owner login uses the server variable OWNER_TOTP_SECRET to require a code. Ask whoever manages the server to set it.</p>}
+        {!user.owner && !user.two_step && !setup && (
+          <>
+            <p className="sub">Adds a 6-digit code from an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password) to your password, so a stolen password alone is not enough.</p>
+            <button type="button" className="btn" disabled={busy} onClick={async () => { setBusy(true); setErr(''); try { setSetup(await api.twoStepStart()); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } }}>Set up two-step sign-in</button>
+          </>
+        )}
+        {setup && (
+          <div className="ai-doc">
+            <p><strong>1.</strong> In your authenticator app choose <em>Add account</em> then <em>Enter a setup key</em>, and type this key (account: {user.username}, type: time-based):</p>
+            <p className="mono acct-key" aria-label="Setup key">{group(setup.secret)}</p>
+            <p className="muted small">On a phone you can also <a href={setup.uri}>open the setup link</a> in the authenticator app.</p>
+            <label className="lf"><span><strong>2.</strong> Type the 6-digit code the app shows now</span>
+              <input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} /></label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn primary" disabled={busy || code.replace(/\s/g, '').length < 6} onClick={async () => { if (await run(() => api.twoStepEnable(code), 'Two-step sign-in is on.')) { setSetup(null); setCode(''); } }}>Turn on</button>
+              <button type="button" className="btn" onClick={() => { setSetup(null); setCode(''); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {user.two_step && !user.owner && (asking ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
+            <label className="lf" style={{ margin: 0 }}><span>Your password</span><input type="password" autoComplete="current-password" value={offPw} onChange={(e) => setOffPw(e.target.value)} /></label>
+            <button type="button" className="btn danger" disabled={busy || !offPw} onClick={async () => { if (await run(() => api.twoStepDisable(offPw), 'Two-step sign-in is off.')) { setAsking(false); setOffPw(''); } }}>Turn off</button>
+            <button type="button" className="btn" onClick={() => { setAsking(false); setOffPw(''); }}>Cancel</button>
+          </div>
+        ) : <button type="button" className="btn" onClick={() => setAsking(true)}>Turn off two-step sign-in</button>)}
+        {err && <div className="alert bad" role="alert" style={{ marginTop: 10 }}>{err}</div>}
+      </section>
+      <section>
+        <h3>Devices</h3>
+        <p className="sub">Signed in somewhere you no longer use, like a shared computer? This signs every other browser and phone out of your account. This one stays signed in.</p>
+        <button type="button" className="btn" disabled={busy} onClick={() => run(() => api.endOtherSessions(), 'Other devices were signed out.')}>Sign out other devices</button>
+      </section>
+    </div>
+  );
+}
+
 const ROLE_BADGE: Record<Role, string> = { viewer: 'plain', bidder: 'accent', admin: 'ok' };
 
 /** Settings > People: add accounts, set roles, switch people off, reset passwords. */
@@ -77,12 +135,16 @@ export function UsersPanel() {
       setForm({ username: '', name: '', role: 'bidder', password: '' }); reload();
     } catch (err) { setFormError((err as Error).message); } finally { setBusy(false); }
   }
-  async function change(u: UserRow, patch: { role?: string; active?: boolean; password?: string }) {
+  async function change(u: UserRow, patch: { role?: string; active?: boolean; password?: string; reset_2fa?: boolean }) {
     try { await api.editUser(u.id, patch); reload(); return true; } catch (err) { toast((err as Error).message, 'bad'); return false; }
   }
   async function toggleActive(u: UserRow) {
     if (u.active && !(await confirm({ title: `Switch off ${u.username}?`, body: 'They are signed out at once and cannot sign in again until you switch them back on. Their bids and history stay.', confirmLabel: 'Switch off', danger: true }))) return;
     if (await change(u, { active: !u.active })) toast(u.active ? `${u.username} is switched off.` : `${u.username} can sign in again.`);
+  }
+  async function resetTwoStep(u: UserRow) {
+    if (!(await confirm({ title: `Reset two-step sign-in for ${u.username}?`, body: 'Use this when they have lost their phone. They sign in with just their password, and can set the app up again under Account & security.', confirmLabel: 'Reset two-step', danger: true }))) return;
+    if (await change(u, { reset_2fa: true })) toast(`Two-step sign-in reset for ${u.username}.`);
   }
   async function reset(u: UserRow) {
     if (await change(u, { password: resetPw })) { toast(`Password reset. ${u.username} is signed out and must choose a new password at the next sign-in.`); setResetting(null); setResetPw(''); }
@@ -95,9 +157,9 @@ export function UsersPanel() {
       <section className="card" style={{ gridColumn: '1 / -1' }}>
         <h2>People who can sign in</h2>
         <p className="sub">The owner login is set on the server (APP_USERNAME and APP_PASSWORD) and always works. Everyone else is listed here.</p>
-        <div className="scroll-x">
+        <ScrollX label="People who can sign in">
           <table className="tbl">
-            <thead><tr><th>Person</th><th>Role</th><th>Last sign-in</th><th>Status</th><th /></tr></thead>
+            <thead><tr><th>Person</th><th>Role</th><th>Last sign-in</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {data.users.map((u) => (
                 <tr key={u.id}>
@@ -107,7 +169,7 @@ export function UsersPanel() {
                         {data.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
                       </select>}</td>
                   <td className="muted">{u.owner ? 'Server login' : when(u.last_login)}</td>
-                  <td>{u.active ? (u.must_change ? <span className="badge warn">Must choose a password</span> : <span className="badge ok">Active</span>) : <span className="badge plain">Switched off</span>}</td>
+                  <td>{u.active ? (u.must_change ? <span className="badge warn">Must choose a password</span> : <span className="badge ok">Active</span>) : <span className="badge plain">Switched off</span>}{u.two_step && <span className="badge accent" style={{ marginLeft: 6 }} title="Signs in with a code from an authenticator app">Two-step</span>}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {!u.owner && (resetting === u.id
                       ? <span style={{ display: 'inline-flex', gap: 6 }}>
@@ -117,6 +179,7 @@ export function UsersPanel() {
                         </span>
                       : <>
                           <button type="button" className="btn small" onClick={() => { setResetting(u.id); setResetPw(''); }}>Reset password</button>{' '}
+                          {u.two_step && <><button type="button" className="btn small" onClick={() => resetTwoStep(u)}>Reset two-step</button>{' '}</>}
                           <button type="button" className="btn small" onClick={() => toggleActive(u)}>{u.active ? 'Switch off' : 'Switch on'}</button>
                         </>)}
                   </td>
@@ -124,7 +187,7 @@ export function UsersPanel() {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollX>
       </section>
       <section className="card">
         <h2>Add a person</h2>
@@ -175,7 +238,7 @@ export function ActivityPanel() {
         </select>
       </label>
       {error && <div className="alert bad">{error}</div>}
-      <div className="scroll-x">
+      <ScrollX label="Activity log">
         <table className="tbl">
           <thead><tr><th>When</th><th>Who</th><th>What</th><th>On</th><th>From</th></tr></thead>
           <tbody>
@@ -191,7 +254,7 @@ export function ActivityPanel() {
             {!loading && rows.length === 0 && <tr><td colSpan={5} className="empty">Nothing recorded yet.</td></tr>}
           </tbody>
         </table>
-      </div>
+      </ScrollX>
       {next && <button type="button" className="btn" onClick={() => load(true)} disabled={loading} style={{ marginTop: 10 }}>{loading ? 'Loading…' : 'Show older'}</button>}
     </section>
   );

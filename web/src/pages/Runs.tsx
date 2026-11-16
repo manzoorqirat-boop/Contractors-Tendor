@@ -1,3 +1,4 @@
+import { ScrollX } from '../ScrollX';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { duration, fmtDate } from '../format';
@@ -68,7 +69,7 @@ export function RunsPage({ config }: { config: AppConfig }) {
         <p className="sub">The last 30 runs. Select one for its log.</p>
         {history.error && <div className="alert bad">{history.error}</div>}
         {history.data && history.data.runs.length === 0 && <div className="empty">No runs yet.</div>}
-        <div className="scroll-x">
+        <ScrollX label="Run history">
           <table className="tbl">
             <thead><tr><th>Started</th><th>Type</th><th>Status</th><th className="num">New civil</th><th className="num">Emailed</th><th className="num">Took</th></tr></thead>
             <tbody>
@@ -84,7 +85,7 @@ export function RunsPage({ config }: { config: AppConfig }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollX>
       </section>
     </>
   );
@@ -137,7 +138,7 @@ function Live({ id, onDone }: { id: number; onDone: () => void }) {
       {error && <div className="alert warn">Lost touch with the server for a moment: {error}. Still trying.</div>}
       {run.error && <div className="alert bad">{run.error}</div>}
       {run.reports.length > 0 && (
-        <div className="scroll-x" style={{ marginBottom: 10 }}>
+        <ScrollX label="Run details" style={{ marginBottom: 10 }}>
           <table className="tbl">
             <thead><tr><th>Portal</th><th className="num">Departments</th><th className="num">Listed</th><th className="num">New civil</th><th>Problems</th></tr></thead>
             <tbody>
@@ -147,7 +148,7 @@ function Live({ id, onDone }: { id: number; onDone: () => void }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollX>
       )}
       <div className="log" role="log" aria-live="off" tabIndex={0}>{lines || 'Waiting for the first message…'}</div>
     </section>

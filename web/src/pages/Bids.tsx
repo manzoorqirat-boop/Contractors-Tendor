@@ -1,10 +1,12 @@
+import { ScrollX } from '../ScrollX';
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 import { BriefView, readBase64, useAiStatus } from '../ai';
 import { BoqCard, RiskCard } from '../Boq';
 import { PriceAdvisor } from '../PriceAdvisor';
-import { chain, fmtDate, headline, inr, plural, relative } from '../format';
-import { useLoad } from '../hooks';
+import { chain, fmtDate, headline, inr, parseMoney, plural, relative } from '../format';
+import { useLoad, useServerNow } from '../hooks';
+import { BidProgress } from '../BidProgress';
 import { Skeleton, useToast } from '../ui';
 import { Only, ReadOnly } from '../session';
 import { useConfirm } from '../confirm';
@@ -17,7 +19,7 @@ const ACTIVE: Stage[] = ['interested', 'preparing', 'submitted', 'opened'];
 const CHANGE_TEXT: Record<string, string> = { closing: 'Closing date moved', opening: 'Bid opening date moved', corrigendum: 'Corrigendum', prebid: 'Pre-bid meeting date' };
 
 const whenText = (a: BidAlert) => (a.urgency === 'overdue' ? 'overdue' : a.days_left === 0 ? 'today' : a.days_left === 1 ? 'tomorrow' : `in ${a.days_left} days`);
-const num = (v: string): number | null => { const n = Number(v.replace(/[,\s₹]/g, '')); return v.trim() === '' || Number.isNaN(n) ? null : n; };
+const num = parseMoney;
 
 // Remembered while the app is open, so coming back from a bid returns to the same list.
 let lastMode: 'pipeline' | 'results' = 'pipeline';
@@ -128,10 +130,10 @@ function GroupTable({ title, rows }: { title: string; rows: StatGroup[] }) {
   return (
     <section className="card" style={{ marginBottom: 14 }}>
       <h2>{title}</h2>
-      <div className="scroll-x">
+      <ScrollX label="Bids">
         <table className="tbl"><thead><tr><th>{title.replace('By ', '')}</th><th className="num">Won</th><th className="num">Lost</th><th className="num">Win rate</th><th className="num">Value won</th></tr></thead>
           <tbody>{rows.map((r) => <tr key={r.label}><td>{r.label}</td><td className="num">{r.won}</td><td className="num">{r.lost}</td><td className="num">{Math.round((100 * r.won) / (r.won + r.lost))}%</td><td className="num">{r.won_value ? inr(r.won_value) : '-'}</td></tr>)}</tbody></table>
-      </div>
+      </ScrollX>
     </section>
   );
 }
@@ -175,7 +177,14 @@ function DateField({ label, value, time, onSave }: { label: string; value: strin
 function MoneyField({ label, value, onSave }: { label: string; value: number | null; onSave: (v: number | null) => void }) {
   const [v, setV] = useState(value === null ? '' : String(value));
   useEffect(() => setV(value === null ? '' : String(value)), [value]);
-  return <label className="field-inline">{label}<input inputMode="decimal" value={v} placeholder="₹" onChange={(e) => setV(e.target.value)} onBlur={() => { const n = num(v); if (n !== value) onSave(n); }} /></label>;
+  const parsed = num(v);
+  const bad = v.trim() !== '' && parsed === null;  // never save (or clear) a price the app could not understand
+  return (
+    <label className="field-inline">{label}
+      <input inputMode="decimal" value={v} placeholder="₹" aria-invalid={bad || undefined} aria-describedby={bad ? `money-err-${label}` : undefined} onChange={(e) => setV(e.target.value)} onBlur={() => { if (!bad && parsed !== value) onSave(parsed); }} />
+      {bad ? <span className="field-err" id={`money-err-${label}`}>Not an amount. Try 12500000, 125 lakh or 1.25 crore.</span> : parsed ? <span className="date-say">{inr(parsed)}</span> : null}
+    </label>
+  );
 }
 
 const MATCH: Record<MatchStatus, [string, string]> = { ok: ['ok', 'In vault'], expired: ['bad', 'Expired'], expires_before_close: ['warn', 'Expires before closing'], missing: ['warn', 'Not in vault'], unknown: ['plain', ''] };
@@ -184,6 +193,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const toast = useToast();
   const confirm = useConfirm();
   const ai = useAiStatus();
+  const nowIso = useServerNow(config.now);  // a hook: it must run on every render, before any early return
   const [bid, setBid] = useState<BidDetail | null>(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -205,7 +215,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   if (error) return <><button className="link-btn" onClick={onBack}>← All bids</button><div className="alert bad">{error}</div></>;
   if (!bid) return <><Skeleton h={28} style={{ marginBottom: 12 }} /><Skeleton h={160} /></>;
 
-  const rel = relative(bid.closing, config.now);
+  const rel = relative(bid.closing, nowIso);
   const open = ACTIVE.includes(bid.stage);
   const unseen = bid.changes.filter((c) => !c.seen);
   const tab = tabSel ?? defaultTab(bid.stage);
@@ -246,6 +256,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       )}
 
       <ReadOnly>
+      <BidProgress bid={bid} aiOn={!!ai?.configured} tab={tab} onGo={setTabSel} onChange={(patch) => setBid({ ...bid, ...patch })} />
       <NextStep bid={bid} />
 
       <section className="card" style={{ marginBottom: 14 }}>
@@ -258,7 +269,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           <div className="field-inline">EMD<span className="static">{bid.emd ? inr(bid.emd, false) : '-'}</span></div>
         </div>
         {open && rel.text && <div className={`when-banner ${rel.tone}`} style={{ marginTop: 12 }}>{rel.text}</div>}
-        <h3 style={{ margin: '14px 0 6px' }}>Dates</h3>
+        <h2 className="h3-like" style={{ margin: '14px 0 6px' }}>Dates</h2>
         <div className="ws-grid">
           <DateField label="Bid closes" value={bid.closing} time onSave={(v) => save({ closing: v })} />
           <DateField label="Bids open" value={bid.opening} time onSave={(v) => save({ opening: v })} />

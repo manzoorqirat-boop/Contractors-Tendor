@@ -1,8 +1,8 @@
 import { toParams } from './filters';
-import type { AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public needCode = false) { super(message); }
 }
 
 let onUnauthorised: () => void = () => {};
@@ -18,12 +18,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401 && path !== '/api/login') onUnauthorised();
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
+    let needCode = false;
     try {
       const body = await res.json();
+      needCode = body.need_code === true;
       if (typeof body.detail === 'string') message = body.detail;
       else if (Array.isArray(body.detail)) message = 'Some of the values are not valid.';
     } catch { /* not JSON: keep the generic message */ }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, needCode);
   }
   return res.json() as Promise<T>;
 }
@@ -50,15 +52,22 @@ export const api = {
   me: () => call<{ authenticated: boolean; user: Me | null }>('/api/me'),
   users: () => call<UsersData>('/api/users'),
   createUser: (b: { username: string; name: string; role: string; password: string }) => call<UserRow>('/api/users', { method: 'POST', body: JSON.stringify(b) }),
-  editUser: (id: number, b: { name?: string; role?: string; active?: boolean; password?: string }) => call<UserRow>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  editUser: (id: number, b: { name?: string; role?: string; active?: boolean; password?: string; reset_2fa?: boolean }) => call<UserRow>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   audit: (user: string, before?: number) => call<{ entries: AuditEntry[]; next: number | null }>(`/api/audit?limit=50${user ? `&user=${encodeURIComponent(user)}` : ''}${before ? `&before=${before}` : ''}`),
   changePassword: (current: string, next: string) => call<{ ok: boolean }>('/api/account/password', { method: 'POST', body: JSON.stringify({ current, new: next }) }),
-  login: (username: string, password: string) => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  login: (username: string, password: string, code = '') => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password, code }) }),
+  twoStepStart: () => call<{ secret: string; uri: string }>('/api/account/2fa/start', { method: 'POST' }),
+  twoStepEnable: (code: string) => call<{ ok: boolean }>('/api/account/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) }),
+  twoStepDisable: (password: string) => call<{ ok: boolean }>('/api/account/2fa/disable', { method: 'POST', body: JSON.stringify({ password }) }),
+  endOtherSessions: () => call<{ ok: boolean }>('/api/account/sessions/end-others', { method: 'POST' }),
   logout: () => call<{ ok: boolean }>('/api/logout', { method: 'POST' }),
   config: () => call<AppConfig>('/api/config'),
   stats: (f: Filters) => call<Stats>(`/api/stats?${toParams(f)}`),
   tenders: (f: Filters, sort: string, page: number, pageSize = 25) => call<TenderPage>(`/api/tenders?${toParams(f)}&sort=${sort}&page=${page}&page_size=${pageSize}`),
-  exportUrl: (f: Filters, sort = 'closing') => `/api/tenders/export?${toParams(f)}&sort=${sort}`,
+  exportUrl: (f: Filters, sort = 'closing', format: 'csv' | 'xlsx' = 'csv', keys: string[] = []) => `/api/tenders/export?${toParams(f)}&sort=${sort}&format=${format}${keys.map((k) => `&keys=${encodeURIComponent(k)}`).join('')}`,
+  starBulk: (keys: string[], starred: boolean) => call<{ changed: number; starred: boolean }>('/api/tenders/star-bulk', { method: 'POST', body: JSON.stringify({ keys, starred }) }),
+  docChecked: (id: number, checked: boolean) => call<{ doc_checked: { by: string; at: string } | null }>(`/api/bids/${id}/doc-checked`, { method: 'POST', body: JSON.stringify({ checked }) }),
+  createBidsBulk: (keys: string[]) => call<{ created: number[]; existing: number[]; missing: string[] }>('/api/bids/bulk', { method: 'POST', body: JSON.stringify({ keys }) }),
   pivot: (f: Filters, groupBy: string, splitBy: string, top = 12) =>
     call<Pivot>(`/api/analytics?${toParams(f)}&group_by=${groupBy}${splitBy ? `&split_by=${splitBy}` : ''}&top=${top}`),
   facets: () => call<Facets>('/api/facets'),
@@ -69,7 +78,8 @@ export const api = {
   document: (key: string, text: string, pdf_base64: string) => job<{ doc: DocFacts }>('/api/tenders/document', { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
   ask: (question: string) => call<AskResult>('/api/ask', { method: 'POST', body: JSON.stringify({ question }) }),
   aiStatus: () => call<AiStatus>('/api/ai/status'),
-  backupStatus: () => call<{ enabled: boolean; keep_days: number; latest_day: string | null; days: string[]; storage_warning: string }>('/api/backup/status'),
+  backupStatus: () => call<BackupStatus>('/api/backup/status'),
+  offsiteNow: () => job<{ ok: boolean }>('/api/backup/offsite-now', { method: 'POST' }),
   aiTest: () => call<{ ok: boolean; model: string; fast_model: string }>('/api/ai/test', { method: 'POST' }),
   aiScore: () => job<{ scored: number; labelled: number; unlabelled: number }>('/api/ai/score', { method: 'POST' }),
   views: () => call<{ views: SavedView[] }>('/api/views'),
