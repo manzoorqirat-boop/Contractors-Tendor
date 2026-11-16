@@ -173,7 +173,7 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
 DEFAULTS = {
     "send_time": "08:00", "schedule_enabled": True, "send_empty": True, "min_value": 0.0,
     "reminders_on": True, "require_signoff": False, "webhook_url": "", "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "accent": "blue", "ai_digest_intro": True, "ai_hide_noncivil": False,
-    "audit_days": 365, "tender_days": 120,
+    "audit_days": 365, "tender_days": 45,
 }
 
 

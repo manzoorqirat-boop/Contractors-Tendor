@@ -68,6 +68,8 @@ async function scan(page, name) {
     }
     await visit('vault', '#/vault');
     if (!reduced) {
+      await visit('vault company', '#/vault', () => page.click('[role=tab]:has-text("Company")'));
+      await visit('tenders with a selection', '#/tenders', async () => { await page.locator('input.pick').nth(0).check(); await page.click('.bulkbar .pop-btn'); });
       await visit('vault letters', '#/vault', () => page.click('[role=tab]:has-text("Letters")'));
       await visit('bid letter filled in', '#/bids/1', async () => { await page.click('[role=tab]:has-text("Letters")'); await page.click('[aria-label=Template] button >> nth=0'); await page.waitForSelector('textarea[aria-label="The letter"]'); });
       await visit('record a corrigendum', '#/bids/1', () => page.click('text=Record a corrigendum'));

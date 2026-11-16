@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from './api';
 import { fmtDate } from './format';
+import { tr } from './i18n';
 import { useLoad } from './hooks';
 import { ScrollX } from './ScrollX';
 import { Skeleton, useToast } from './ui';
@@ -205,12 +206,51 @@ export function DataPrivacyCard({ encryption }: { encryption?: { enabled: boolea
       <h2>Keeping data, and encryption {encryption && <span className={`badge ${encryption.enabled ? (encryption.problem || encryption.plain_files || encryption.plain_secrets ? 'warn' : 'ok') : 'warn'}`} style={{ marginLeft: 6 }}>{encryption.enabled ? 'Encrypted' : 'Not encrypted'}</span>}</h2>
       <form onSubmit={save}>
         <label className="field">Keep the activity log for (days)<span className="hint">30 to 3650. Older entries are removed once a day.</span><input type="number" min={30} max={3650} value={a} onChange={(e) => setAudit(e.target.value)} style={{ maxWidth: 160 }} /></label>
-        <label className="field">Keep collected tenders for (days)<span className="hint">30 to 3650. Tenders you started a bid on are never removed: the bid keeps its own copy.</span><input type="number" min={30} max={3650} value={t} onChange={(e) => setTender(e.target.value)} style={{ maxWidth: 160 }} /></label>
+        <label className="field">Keep collected tenders for (days)<span className="hint">30 to 3650 (45 suggested). Counted from when a tender was found, and only once it has closed: an open or starred tender is never removed, and a bid keeps its own copy.</span><input type="number" min={30} max={3650} value={t} onChange={(e) => setTender(e.target.value)} style={{ maxWidth: 160 }} /></label>
         <button className="btn" disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save'}</button>
       </form>
       {encryption && (encryption.enabled
         ? <p className="sub" style={{ marginTop: 12 }}>Two-step secrets, webhook secrets and every uploaded file (the Vault and saved notices) are stored encrypted with <code>DATA_ENCRYPTION_KEY</code>. Keep that phrase safe somewhere other than the server: without it, the files and any restored backup cannot be read.{encryption.rotating ? ' A previous key is still set (DATA_ENCRYPTION_KEY_OLD): remove it after the next restart.' : ''}{encryption.plain_files || encryption.plain_secrets ? ` Still plain: ${encryption.plain_files} file(s), ${encryption.plain_secrets} secret(s).` : ''}{encryption.problem ? ` ${encryption.problem}` : ''}</p>
         : <p className="sub" style={{ marginTop: 12 }}>Uploaded papers and two-step secrets are stored as they are. To encrypt them, your administrator sets <code>DATA_ENCRYPTION_KEY</code> on the server (a long private phrase, at least 16 characters). Everything already stored is encrypted at the next start.</p>)}
+    </section>
+  );
+}
+
+/** Removes closed tenders nobody needs, after showing exactly how many. Starred tenders and tenders with a bid are never touched. */
+export function CleanupCard() {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [days, setDays] = useState('30');
+  const [busy, setBusy] = useState(false);
+  const n = Number(days);
+  const valid = Number.isInteger(n) && n >= 7 && n <= 3650;
+  const preview = useLoad(() => (valid ? api.cleanupPreview(n) : Promise.resolve(null)), [valid ? n : 0]);
+  const p = preview.data;
+  const total = p ? p.closed + p.placeholders : 0;
+  async function run() {
+    if (!p || !(await confirm({ title: `Delete ${total.toLocaleString('en-IN')} old tenders?`, body: `${p.closed} closed tenders (${p.ignored_among_them} of them ones you hid) and ${p.placeholders} placeholders for tenders judged not civil. Starred tenders and tenders with a bid are not touched. This cannot be undone.`, confirmLabel: 'Delete', danger: true }))) return;
+    setBusy(true);
+    try { const r = await api.cleanup(n); toast(`Removed ${r.closed} closed tenders and ${r.placeholders} placeholders`); preview.reload(); }
+    catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
+  }
+  return (
+    <section className="card stack-fields">
+      <h2>{tr('Clean up closed tenders')}</h2>
+      <p className="sub">{tr('Tenders that closed a while ago are deleted automatically on every run (see the keep time above). This removes them now, and shows what it would remove first.')}</p>
+      <label className="field">{tr('Closed more than (days) ago')}<input type="number" min={7} max={3650} value={days} onChange={(e) => setDays(e.target.value)} style={{ maxWidth: 160 }} aria-invalid={!valid || undefined} /></label>
+      {!valid && <p className="field-err">Use a whole number of days from 7 to 3650.</p>}
+      {valid && preview.loading && !p && <Skeleton h={50} />}
+      {valid && p && (
+        <>
+          <dl className="facts">
+            <dt>Closed tenders that would go</dt><dd><strong>{p.closed.toLocaleString('en-IN')}</strong> of {p.tenders_now.toLocaleString('en-IN')} kept{p.ignored_among_them > 0 && <span className="muted small"> ({p.ignored_among_them} of them hidden by you)</span>}</dd>
+            <dt>Placeholders for non-civil tenders</dt><dd>{p.placeholders.toLocaleString('en-IN')}</dd>
+            <dt>Kept because starred or bid on</dt><dd>{p.kept_because_starred_or_bid.toLocaleString('en-IN')}</dd>
+          </dl>
+          {p.oldest.length > 0 && <details><summary className="muted small">Oldest that would go</summary><ul className="small" style={{ margin: '6px 0 0 18px', padding: 0 }}>{p.oldest.map((o) => <li key={o.tender_id}>{o.tender_id}: {o.title.slice(0, 80)}</li>)}</ul></details>}
+          <div className="d-actions"><button type="button" className="btn danger" disabled={busy || total === 0} onClick={run}>{total === 0 ? 'Nothing to clean up' : busy ? 'Deleting…' : `Delete ${total.toLocaleString('en-IN')} old tenders`}</button></div>
+        </>
+      )}
     </section>
   );
 }

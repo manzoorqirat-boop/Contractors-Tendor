@@ -7,8 +7,8 @@ export const EMPTY: Filters = { q: '', status: 'open', portal: [], category: [],
 export const DISPLAY: Display = { sort: 'closing', page: 1, group_by: 'portal', split_by: 'category', measure: 'count', chart: 'stacked', layout: 'cards' };
 
 const LISTS = ['portal', 'category', 'department', 'location', 'work_type'] as const;
-const STRINGS = ['min_fit', 'min_value', 'max_value', 'value_lt', 'closing_from', 'closing_to', 'seen_from', 'seen_to', 'published_from', 'published_to', 'closing_within', 'since_days'] as const;
-const FLAGS = ['no_value', 'no_closing', 'no_published', 'starred'] as const;
+const STRINGS = ['hidden', 'min_fit', 'min_value', 'max_value', 'value_lt', 'closing_from', 'closing_to', 'seen_from', 'seen_to', 'published_from', 'published_to', 'closing_within', 'since_days'] as const;
+const FLAGS = ['no_value', 'no_closing', 'no_published', 'starred', 'fits_me'] as const;
 
 /** Filters -> URL parameters. Empty things are left out, so links stay short. */
 export function toParams(f: Filters, d?: Partial<Display>): URLSearchParams {
@@ -103,6 +103,8 @@ export function describe(f: Filters, config?: AppConfig): Chip[] {
   if (f.since_days) chips.push({ id: 'since', label: `Found in the last ${f.since_days} days`, remove: (x) => without(x, 'since_days') });
   if (f.min_fit) chips.push({ id: 'min_fit', label: `Fit ${f.min_fit}+ of 5`, remove: (x) => without(x, 'min_fit') });
   if (f.starred) chips.push({ id: 'starred', label: 'Starred only', remove: (x) => without(x, 'starred') });
+  if (f.fits_me) chips.push({ id: 'fits_me', label: 'Fits my size', remove: (x) => without(x, 'fits_me') });
+  if (f.hidden === 'only') chips.push({ id: 'hidden', label: 'Ignored tenders only', remove: (x) => without(x, 'hidden') });
   return chips;
 }
 

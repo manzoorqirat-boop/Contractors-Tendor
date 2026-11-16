@@ -61,7 +61,7 @@ export type ChartKind = 'bars' | 'stacked' | 'table';
 /** Everything that narrows which tenders are shown. The same object drives the dashboard, Explore and Tenders pages. */
 export interface Filters {
   q: string; status: Status; portal: string[]; category: string[]; department: string[]; location: string[]; work_type: string[];
-  min_fit?: string; min_value?: string; max_value?: string; value_lt?: string; no_value?: boolean; no_closing?: boolean; no_published?: boolean; starred?: boolean;
+  min_fit?: string; min_value?: string; max_value?: string; value_lt?: string; no_value?: boolean; no_closing?: boolean; no_published?: boolean; starred?: boolean; fits_me?: boolean; hidden?: string;
   closing_from?: string; closing_to?: string; seen_from?: string; seen_to?: string; published_from?: string; published_to?: string;
   closing_within?: string; since_days?: string;
 }
@@ -178,3 +178,5 @@ export interface EraseResult { handle: string; changed: Record<string, number>; 
 export interface SetupStep { key: string; title: string; why: string; done: boolean; href: string; where: string; optional?: boolean; admin?: boolean }
 export interface SetupStatus { steps: SetupStep[]; done: number; total: number; sample: { loaded: boolean; tenders: number } }
 export interface SsoInfo { enabled: boolean; problem: string; issuer: string; client_id: string; redirect_uri: string; allowed_domains: string[]; default_role: string }
+export interface MutedDepartment { dept: string; at: string; by: string | null; tenders: number }
+export interface CleanupPreview { days: number; closed: number; ignored_among_them: number; placeholders: number; kept_because_starred_or_bid: number; oldest: { tender_id: string; title: string; closing: string | null }[]; tenders_now: number }

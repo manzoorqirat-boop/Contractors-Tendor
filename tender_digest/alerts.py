@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 LIST_KEYS = ("portal", "category", "department", "location", "work_type")
-FLAG_KEYS = ("no_value", "no_closing", "no_published", "starred")
+FLAG_KEYS = ("no_value", "no_closing", "no_published", "starred", "fits_me")
 FLOAT_KEYS = ("min_value", "max_value", "value_lt")
 INT_KEYS = ("min_fit", "closing_within", "since_days")
 DATE_KEYS = ("closing_from", "closing_to", "seen_from", "seen_to", "published_from", "published_to")
@@ -58,13 +58,15 @@ def view_filters(raw: dict[str, Any], soon_days: int = 3) -> dict[str, Any]:
     return f
 
 
-def matches(store: Any, now: datetime, views: list[dict[str, Any]], new_keys: list[str], soon_days: int = 3, per_view: int = 8) -> list[dict[str, Any]]:
+def matches(store: Any, now: datetime, views: list[dict[str, Any]], new_keys: list[str], soon_days: int = 3, per_view: int = 8, size: dict[str, float] | None = None) -> list[dict[str, Any]]:
     """For each alert view, the new tenders (`new_keys`) that match it. Views with nothing new are left out."""
     if not new_keys:
         return []
     out = []
     for v in [v for v in views if isinstance(v, dict) and v.get("alert")][:MAX_ALERT_VIEWS]:
         f = {**view_filters(v.get("filters") or {}, soon_days), "keys": list(new_keys)}
+        if f.pop("fits_me", False) and size:
+            f.update(size)
         rows, total = store.search(now, f, "value", per_view, 0)
         if total:
             out.append({"name": str(v.get("name") or "Saved search")[:60], "count": total,
