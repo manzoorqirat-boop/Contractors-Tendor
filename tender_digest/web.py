@@ -28,7 +28,7 @@ from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, alerts, appsettings, events, learn, letters, mailer, pack, privacy, reminders, sample, sealing, smartsearch, sso, tokens
+from . import access, accounts, ai, alerts, appsettings, catalogue, events, money as money_module, learn, letters, mailer, pack, privacy, reminders, sample, sealing, smartsearch, sso, tokens
 from .accounts import AccountError, Accounts, Principal
 from . import offsite
 from .backup import Backups, BackupError
@@ -655,6 +655,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     sealer = sealing.Sealer.from_env()  # raises with a clear message when the key is too short: better than quietly storing things unencrypted
     bids = BidBook(store, vault_dir, sealer)
     letter_book = letters.Letters(store)
+    money = money_module.MoneyBook(bids)
     boq = BoqService.open(env.state_path, lambda: ClaudeVerifier() if ai.configured() else None)
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     remote_cfg, remote_problem = None, ""
@@ -2137,6 +2138,52 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             raise bid_error(e) from None
         return {"bidders": bids.bidders(bid_id), "updated": patch}
 
+    # ---- money: fees, earnest money (EMD), performance security and bank guarantees ----------------------------------
+
+    @app.get("/api/bids/{bid_id}/money", dependencies=auth)
+    def get_bid_money(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        return money.bid_view(bid_id, now())
+
+    @app.post("/api/bids/{bid_id}/money", dependencies=auth)
+    def add_bid_money(bid_id: int, body: dict[str, Any]) -> dict:
+        bid_or_404(bid_id)
+        try:
+            money.add(bid_id, body, now())
+        except BidError as e:
+            raise bid_error(e) from None
+        return money.bid_view(bid_id, now())
+
+    @app.patch("/api/bids/{bid_id}/money/{money_id}", dependencies=auth)
+    def patch_bid_money(bid_id: int, money_id: int, body: dict[str, Any]) -> dict:
+        bid_or_404(bid_id)
+        try:
+            money.update(bid_id, money_id, body, now())
+        except BidError as e:
+            raise bid_error(e) from None
+        return money.bid_view(bid_id, now())
+
+    @app.delete("/api/bids/{bid_id}/money/{money_id}", dependencies=auth)
+    def delete_bid_money(bid_id: int, money_id: int) -> dict:
+        bid_or_404(bid_id)
+        if not money.delete(bid_id, money_id):
+            raise HTTPException(404, "No such payment")
+        return money.bid_view(bid_id, now())
+
+    @app.get("/api/money", dependencies=auth)
+    def money_summary() -> dict:
+        """Cash locked in bids, guarantee limit in use, refunds coming or overdue, and what needs doing."""
+        return money.summary(now())
+
+    @app.get("/api/money/export", dependencies=auth)
+    def money_export() -> Response:
+        out = io.StringIO()
+        writer = csv.writer(out)
+        for row in money.export_rows():
+            writer.writerow([safe_cell(c) if isinstance(c, str) else c for c in row])
+        return Response(out.getvalue().encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="bid-money-{now().strftime("%Y-%m-%d")}.csv"'})
+
     @app.get("/api/competitors", dependencies=auth)
     def competitors() -> dict:
         return {"competitors": bids.competitors()}
@@ -2580,6 +2627,44 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         refresh_portals()
         return portal_entry(Portal(**new), store.get_settings(), store.portal_statuses())
 
+    @app.get("/api/portals/catalogue", dependencies=auth)
+    def portal_catalogue() -> dict:
+        """Known government portals, each marked as already added or not, for the tick-list in Settings > Portals."""
+        return {"entries": catalogue.listing({p.base_url for p in portals_now()})}
+
+    @app.post("/api/portals/bulk", dependencies=auth)
+    def add_portals_bulk(body: dict[str, Any]) -> dict:
+        """Adds several catalogue portals at once. They are saved but not yet switched on: each one is then checked (POST .../check?enable=true),
+        so a portal that cannot be read never makes a daily run slower or fail."""
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 40 or not all(isinstance(i, str) for i in ids):
+            raise HTTPException(422, "Choose between 1 and 40 portals")
+        saved = store.get_settings()
+        existing = appsettings.all_portals(env, saved)
+        taken, urls = {p.key for p in existing}, {p.base_url.rstrip("/").lower() for p in existing}
+        customs, added, skipped = list(saved.get("custom_portals", [])), [], []
+        for entry_id in dict.fromkeys(ids):
+            entry = catalogue.find(entry_id)
+            if not entry:
+                skipped.append({"id": entry_id, "reason": "Not in the list of known portals"})
+                continue
+            if entry["base_url"].rstrip("/").lower() in urls:
+                skipped.append({"id": entry_id, "reason": "Already added"})
+                continue
+            try:
+                new = appsettings.clean_portal(entry, taken)
+            except appsettings.SettingsError as e:
+                skipped.append({"id": entry_id, "reason": str(e)})
+                continue
+            customs.append(new)
+            taken.add(new["key"])
+            urls.add(new["base_url"].lower())
+            added.append(new["key"])
+        if added:
+            store.put_settings({"custom_portals": customs})
+            refresh_portals()
+        return {"added": added, "skipped": skipped}
+
     @app.get("/api/portals/{key}/sample", dependencies=auth)
     def portal_sample(key: str):
         """What the portal actually returns to this server, saved as a file. For fixing or writing a reader for a portal the app cannot read yet."""
@@ -2598,12 +2683,17 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return Response(body, media_type="application/octet-stream", headers={"Content-Disposition": f'attachment; filename="sample-{re.sub(r"[^a-z0-9-]", "", key)}.{ext}"'})
 
     @app.post("/api/portals/{key}/check", dependencies=auth)
-    def check_portal(key: str) -> dict:
+    def check_portal(key: str, enable: bool = False) -> dict:
+        """Checks one portal. With enable=true, a portal that turns out to be readable is also switched on for the daily run."""
         portal = next((p for p in portals_now() if p.key == key), None)
         if not portal:
             raise HTTPException(404, "No such portal")
         result = probe(portal.base_url)
         store.put_portal_status(key, result["kind"], result["detail"], now(), result["departments"], result["tenders"])
+        if enable and result["kind"] == "ok":
+            on = appsettings.current(env, store.get_settings())["portals"]
+            if key not in on:
+                store.put_settings({"portals": [*on, key]})
         return portal_entry(portal, store.get_settings(), store.portal_statuses())
 
     @app.delete("/api/portals/{key}", dependencies=auth)

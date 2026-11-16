@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from . import ai, alerts, appsettings, collector, digest, mailer, reminders
 from .bids import BidBook
 from .config import Settings
+from .money import MoneyBook
 from .store import SeenStore
 
 log = logging.getLogger("tender_digest.runner")
@@ -156,7 +157,13 @@ class RunManager:
                 except Exception:  # noqa: BLE001 - the email goes out without the bid section
                     log.exception("bid section of the digest failed")
                     bid_block = {"alerts": [], "changes": []}
-                quiet = not pending and not soon and not any(r.errors for r in reports) and not bid_block["alerts"] and not bid_block["changes"]
+                try:
+                    bid_block["money"] = MoneyBook(self.bids).digest_lines(now)
+                except Exception:  # noqa: BLE001 - the email goes out without the money items
+                    log.exception("money section of the digest failed")
+                    bid_block["money"] = []
+                quiet = (not pending and not soon and not any(r.errors for r in reports) and not bid_block["alerts"] and not bid_block["changes"]
+                         and not bid_block["money"])
                 if quiet and not saved.get("send_empty", True):
                     say("Nothing new, and 'send on empty days' is off: no email sent")
                 else:

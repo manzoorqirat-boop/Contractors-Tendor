@@ -206,10 +206,10 @@ def build(
             f"<ul style='margin:6px 0 0 18px'>{items}</ul></div>"
         )
 
-    bids = bids or {"alerts": [], "changes": []}
+    bids = {"alerts": [], "changes": [], "money": [], **(bids or {})}
     change_text = {"closing": "closing date moved", "opening": "bid opening date moved", "corrigendum": "corrigendum", "prebid": "pre-bid meeting date"}
     bid_html = ""
-    if bids["alerts"] or bids["changes"]:
+    if bids["alerts"] or bids["changes"] or bids["money"]:
         a_rows = "".join(
             f"<tr><td><b>{escape(a['label'])}</b>" + (f"<div class=o>{escape(a['title'])} · ID {escape(a['tender_id'])}</div>" if a["title"] else (f"<div class=o>{escape(a['extra'])}</div>" if a.get("extra") else ""))
             + f"</td><td class=n>{escape(a['date'][:10])}</td><td class=n>{'OVERDUE' if a['urgency'] == 'overdue' else 'today' if a['days_left'] == 0 else 'in ' + str(a['days_left']) + ' day' + ('s' if a['days_left'] != 1 else '')}</td></tr>"
@@ -218,9 +218,13 @@ def build(
             f"<li><b>{escape(change_text.get(c['what'], c['what']))}</b> · ID {escape(c['tender_id'])}: {escape(c['title'])}"
             + (f"<div class=o>{escape((c['old'] or '')[:10])} → {escape((c['new'] or '')[:16])}</div>" if c["what"] in ("closing", "opening") else f"<div class=o>{escape(c['new'] or '')}</div>")
             + "</li>" for c in bids["changes"])
+        m_rows = "".join(
+            f"<li><b>{escape(m['text'])}</b> · {escape(format_inr(m['amount']))}"
+            f"<div class=o>ID {escape(m['tender_id'] or '')}: {escape(m['title'])}</div></li>" for m in bids["money"])
         bid_html = (
             "<h2>Your bids</h2>"
             + (f"<table><tr><th>What</th><th>Date</th><th>When</th></tr>{a_rows}</table>" if a_rows else "")
+            + (f"<div class=w><b>Money to chase</b><ul style='margin:6px 0 0 18px'>{m_rows}</ul></div>" if m_rows else "")
             + (f"<div class=w><b>Changes on tenders you are bidding for</b><ul style='margin:6px 0 0 18px'>{c_rows}</ul>Check the portal and your bid before the closing date.</div>" if c_rows else "")
         )
 
@@ -252,10 +256,11 @@ def build(
     text_lines = ["TendAI by QMSofts", f"{prefix} - {now.strftime('%d %b %Y')}", ""]
     if intro:
         text_lines += ["TODAY'S HIGHLIGHTS", intro, ""]
-    if bids["alerts"] or bids["changes"]:
+    if bids["alerts"] or bids["changes"] or bids["money"]:
         text_lines.append("YOUR BIDS")
         text_lines += [f"- {a['label']}: {a['date'][:10]}" + (f" ({a['title'][:60]})" if a["title"] else "") for a in bids["alerts"]]
         text_lines += [f"- CHANGE ({change_text.get(c['what'], c['what'])}) ID {c['tender_id']}: {c['new'] or ''}" for c in bids["changes"]]
+        text_lines += [f"- MONEY: {m['text']} ({format_inr(m['amount'])}, ID {m['tender_id']})" for m in bids["money"]]
         text_lines.append("")
     for s in searches:
         text_lines.append(f"SAVED SEARCH: {s['name']} ({s['count']} new)")

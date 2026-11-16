@@ -181,5 +181,18 @@ export interface SetupStatus { steps: SetupStep[]; done: number; total: number; 
 export interface SsoInfo { enabled: boolean; problem: string; issuer: string; client_id: string; redirect_uri: string; allowed_domains: string[]; default_role: string }
 export interface LearnedItem { kind: string; value: string; strength: number; chosen: number; avoided: number }
 export interface Learning { enabled: boolean; ready: boolean; needed: number; positive: number; negative: number; liked: LearnedItem[]; avoided: LearnedItem[] }
+export interface MoneyFlag { severity: 'high' | 'medium' | 'low'; code: string; text: string }
+export interface MoneyItem {
+  id: number; bid_id: number; kind: string; kind_label: string; amount: number; instrument: string; status: string; reference: string; bank: string;
+  paid_on: string | null; valid_until: string | null; refund_due: string | null; settled_on: string | null; note: string; refundable: boolean; locked: boolean; flags: MoneyFlag[];
+}
+export interface MoneyTotals { cash_locked: number; guarantees: number; fees_paid: number; refunded: number; forfeited: number; planned: number }
+export interface BidMoney { items: MoneyItem[]; totals: MoneyTotals; suggestion: { kind: string; amount: number; text: string } | null }
+export interface MoneyAttention extends MoneyFlag { bid_id: number; money_id: number; tender_id: string; title: string; kind: string; amount: number; instrument: string }
+export interface MoneySummary {
+  totals: MoneyTotals; by_bid: { bid_id: number; tender_id: string; title: string; stage: string; cash: number; guarantee: number }[];
+  refunds_due_30_days: number; refunds_overdue: number; attention: MoneyAttention[]; count: number;
+}
+export interface PortalChoice { id: string; name: string; state: string; base_url: string; group: string; added: boolean; note: string }
 export interface MutedDepartment { dept: string; at: string; by: string | null; tenders: number }
 export interface CleanupPreview { days: number; closed: number; ignored_among_them: number; placeholders: number; kept_because_starred_or_bid: number; oldest: { tender_id: string; title: string; closing: string | null }[]; tenders_now: number }

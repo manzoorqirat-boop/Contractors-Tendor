@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -105,7 +105,9 @@ export const api = {
   branding: () => call<{ logo_text: string; accent: string }>('/api/branding'),
   portals: () => call<{ portals: PortalStatus[]; manual: PortalStatus[] }>('/api/portals'),
   addPortal: (p: NewPortal) => call<PortalStatus>('/api/portals', { method: 'POST', body: JSON.stringify(p) }),
-  checkPortal: (key: string) => call<PortalStatus>(`/api/portals/${encodeURIComponent(key)}/check`, { method: 'POST' }),
+  checkPortal: (key: string, enable = false) => call<PortalStatus>(`/api/portals/${encodeURIComponent(key)}/check${enable ? '?enable=true' : ''}`, { method: 'POST' }),
+  portalCatalogue: () => call<{ entries: PortalChoice[] }>('/api/portals/catalogue'),
+  addPortalsBulk: (ids: string[]) => call<{ added: string[]; skipped: { id: string; reason: string }[] }>('/api/portals/bulk', { method: 'POST', body: JSON.stringify({ ids }) }),
   removePortal: (key: string) => call<{ removed: string }>(`/api/portals/${encodeURIComponent(key)}`, { method: 'DELETE' }),
   bids: () => call<BidList>('/api/bids'),
   createBid: (key: string) => call<{ id: number; created: boolean }>('/api/bids', { method: 'POST', body: JSON.stringify({ key }) }),
@@ -168,6 +170,11 @@ export const api = {
   testHook: (id: number) => call<{ ok: boolean }>(`/api/webhooks/${id}/test`, { method: 'POST' }),
   deleteWebhook: (id: number) => call<{ removed: number }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
   hideTenders: (keys: string[], hidden: boolean, mute_department = false) => call<{ changed: number; hidden: boolean; muted: string[] }>('/api/tenders/hide', { method: 'POST', body: JSON.stringify({ keys, hidden, mute_department }) }),
+  bidMoney: (id: number) => call<BidMoney>(`/api/bids/${id}/money`),
+  addMoney: (id: number, body: Record<string, unknown>) => call<BidMoney>(`/api/bids/${id}/money`, { method: 'POST', body: JSON.stringify(body) }),
+  changeMoney: (id: number, moneyId: number, body: Record<string, unknown>) => call<BidMoney>(`/api/bids/${id}/money/${moneyId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteMoney: (id: number, moneyId: number) => call<BidMoney>(`/api/bids/${id}/money/${moneyId}`, { method: 'DELETE' }),
+  moneySummary: () => call<MoneySummary>('/api/money'),
   learning: () => call<Learning>('/api/learning'),
   mutes: () => call<{ departments: MutedDepartment[]; hidden_tenders: number }>('/api/mutes'),
   setMute: (department: string, muted: boolean) => call<{ changed: boolean; departments: MutedDepartment[] }>('/api/mutes', { method: 'POST', body: JSON.stringify({ department, muted }) }),

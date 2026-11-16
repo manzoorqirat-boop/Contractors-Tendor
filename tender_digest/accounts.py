@@ -73,7 +73,7 @@ class Principal:
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
 
 _ADMIN_AREAS = re.compile(r"^/api/((users|audit|backup|settings|calendar|tokens|webhooks|sample-data|cleanup)(/|$)|sso/info$|portals/[^/]+/sample$)")
-_VAULT_FILE = re.compile(r"^/api/(vault/\d+/file|bids/\d+/pack)$")
+_VAULT_FILE = re.compile(r"^/api/(vault/\d+/file|bids/\d+/pack|money(/export)?|bids/\d+/money)$")   # company papers and money figures are not for view-only accounts
 
 
 def required_role(method: str, path: str) -> str:
@@ -584,6 +584,10 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/backup/offsite-now"): "Sent a backup to the off-site bucket",
     ("GET", "/api/vault/{doc_id}/file"): "Downloaded a Vault file",
     ("GET", "/api/tenders/export"): "Downloaded the tender spreadsheet",
+    ("POST", "/api/bids/{bid_id}/money"): "Recorded a payment on a bid",
+    ("PATCH", "/api/bids/{bid_id}/money/{money_id}"): "Changed a payment on a bid",
+    ("DELETE", "/api/bids/{bid_id}/money/{money_id}"): "Deleted a payment on a bid",
+    ("GET", "/api/money/export"): "Downloaded the bid money spreadsheet",
 }
 
 

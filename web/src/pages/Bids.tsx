@@ -13,12 +13,13 @@ import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
 import { useKeepActiveVisible } from '../Tabs';
 import { Skeleton, useToast } from '../ui';
-import { Only, ReadOnly } from '../session';
+import { Only, ReadOnly, useSession } from '../session';
+import { MoneyTab } from '../Money';
 import { useConfirm } from '../confirm';
 import type { AppConfig, BidAlert, BidDetail, BidItem, BidStats, BidSummary, MatchStatus, Stage, StatGroup, VaultDoc } from '../types';
 import { tr } from '../i18n';
 
-type WsTab = 'decide' | 'checklist' | 'price' | 'letters' | 'result' | 'team';
+type WsTab = 'decide' | 'checklist' | 'price' | 'money' | 'letters' | 'result' | 'team';
 const defaultTab = (s: Stage): WsTab => (s === 'preparing' ? 'checklist' : ['submitted', 'opened', 'won', 'lost'].includes(s) ? 'result' : 'decide');
 
 const ACTIVE: Stage[] = ['interested', 'preparing', 'submitted', 'opened'];
@@ -200,6 +201,7 @@ const MATCH: Record<MatchStatus, [string, string]> = { ok: ['ok', tr('In vault')
 function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBack: () => void }) {
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useSession();
   const ai = useAiStatus();
   const nowIso = useServerNow(config.now);  // a hook: it must run on every render, before any early return
   const [bid, setBid] = useState<BidDetail | null>(null);
@@ -296,12 +298,12 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
 
       <div className="ws-tabs" role="tablist" aria-label="Bid sections" ref={tabsRef} onKeyDown={(e) => {
         if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-        const order: WsTab[] = ['decide', 'checklist', 'price', 'letters', 'result', 'team'];
+        const order: WsTab[] = can('bidder') ? ['decide', 'checklist', 'price', 'money', 'letters', 'result', 'team'] : ['decide', 'checklist', 'price', 'letters', 'result', 'team'];
         const next = order[(order.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length];
         setTabSel(next); e.preventDefault();
         setTimeout(() => (e.currentTarget.querySelector('[aria-selected="true"]') as HTMLElement | null)?.focus(), 0);
       }}>
-        {([['decide', tr('Decide')], ['checklist', tr('Checklist')], ['price', tr('Price')], ['letters', tr('Letters')], ['result', tr('Result & notes')], ['team', tr('Team')]] as [WsTab, string][]).map(([k, l]) => (
+        {([['decide', tr('Decide')], ['checklist', tr('Checklist')], ['price', tr('Price')], ...(can('bidder') ? [['money', tr('Money')]] : []), ['letters', tr('Letters')], ['result', tr('Result & notes')], ['team', tr('Team')]] as [WsTab, string][]).map(([k, l]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} tabIndex={tab === k ? 0 : -1} className={tab === k ? 'on' : ''} onClick={() => setTabSel(k)}>
             {l}{k === 'checklist' && docProblems > 0 && <span className="count-pill alert-pill" title={tr('Required papers not ready')}>{docProblems}</span>}{k === 'team' && (bid.comment_count ?? 0) > 0 && <span className="count-pill" title={tr('Comments')}>{bid.comment_count}</span>}{k === 'team' && bid.signoff?.state === 'requested' && <span className="count-pill alert-pill" title={tr('Waiting for approval')}>!</span>}
           </button>
@@ -310,6 +312,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
 
       {tab === 'checklist' && <Checklist bid={bid} vault={vault.data?.documents ?? []} aiOn={!!ai?.configured} onChange={load} />}
       {tab === 'price' && <><BoqCard bidId={bid.id} /><RiskCard bidId={bid.id} aiOn={!!ai?.configured} hasSource={!!bid.has_source} /><PriceAdvisor bidId={bid.id} onUse={(p) => save({ my_value: p })} /></>}
+      {tab === 'money' && can('bidder') && <MoneyTab bidId={bid.id} />}
       {tab === 'decide' && (
         <>
           <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />

@@ -284,6 +284,11 @@ class BidBook:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, at TEXT NOT NULL, what TEXT NOT NULL, old TEXT, new TEXT,
                   seen INTEGER NOT NULL DEFAULT 0, notified INTEGER NOT NULL DEFAULT 0);
                 CREATE INDEX IF NOT EXISTS bid_changes_bid ON bid_changes (bid_id);
+                CREATE TABLE IF NOT EXISTS bid_money (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, kind TEXT NOT NULL, amount REAL NOT NULL, instrument TEXT NOT NULL DEFAULT 'online',
+                  status TEXT NOT NULL DEFAULT 'planned', reference TEXT, bank TEXT, paid_on TEXT, valid_until TEXT, refund_due TEXT, settled_on TEXT, note TEXT,
+                  created TEXT NOT NULL, updated TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS bid_money_bid ON bid_money (bid_id);
                 CREATE TABLE IF NOT EXISTS vault (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'other', issued TEXT, expiry TEXT, notes TEXT,
                   filename TEXT, stored TEXT, size INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL);
@@ -460,6 +465,7 @@ class BidBook:
             self.db.execute("DELETE FROM bid_changes WHERE bid_id = ?", (bid_id,))
             self.db.execute("DELETE FROM bid_comments WHERE bid_id = ?", (bid_id,))
             self.db.execute("DELETE FROM bid_bidders WHERE bid_id = ?", (bid_id,))
+            self.db.execute("DELETE FROM bid_money WHERE bid_id = ?", (bid_id,))
             cur = self.db.execute("DELETE FROM bids WHERE id = ?", (bid_id,))
             self.db.commit()
             return cur.rowcount > 0
