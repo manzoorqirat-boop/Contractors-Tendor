@@ -1,23 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, setUnauthorisedHandler } from './api';
 import { DISPLAY, EMPTY, fromParams, toParams } from './filters';
 import { useLoad } from './hooks';
 import { AskBar } from './ai';
 import { Dashboard } from './pages/Dashboard';
 import { AddTenderHost } from './AddTender';
-import { BidsPage } from './pages/Bids';
-import { Explore } from './pages/Explore';
 import { Login } from './pages/Login';
-import { RunsPage } from './pages/Runs';
-import { SettingsPage } from './pages/Settings';
-import { TendersPage } from './pages/Tenders';
-import { VaultPage } from './pages/Vault';
 import { loadBranding, Logo } from './Brand';
 import { ToastProvider, Drawer } from './ui';
 import { ConfirmProvider } from './confirm';
 import { SessionProvider, useSession } from './session';
 import { ChangePassword } from './Account';
 import type { Display, Facets, Filters, Me } from './types';
+
+const BidsPage = lazy(() => import('./pages/Bids').then((m) => ({ default: m.BidsPage })));
+const Explore = lazy(() => import('./pages/Explore').then((m) => ({ default: m.Explore })));
+const RunsPage = lazy(() => import('./pages/Runs').then((m) => ({ default: m.RunsPage })));
+const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })));
+const TendersPage = lazy(() => import('./pages/Tenders').then((m) => ({ default: m.TendersPage })));
+const VaultPage = lazy(() => import('./pages/Vault').then((m) => ({ default: m.VaultPage })));
 
 export type Tab = 'dashboard' | 'explore' | 'tenders' | 'bids' | 'vault' | 'runs' | 'settings';
 const TABS: { id: Tab; label: string }[] = [
@@ -133,8 +134,31 @@ function Main({ onLogout }: { onLogout: () => void }) {
     return () => window.removeEventListener('open-bid', open);
   }, []);
   const alerts = useLoad(() => api.bidAlerts(), [tab, bidId]);
-  // The browser tab and history entries name the page.
-  useEffect(() => { document.title = `${TABS.find((t) => t.id === tab)?.label ?? 'TendAI'} · TendAI by QMSofts`; }, [tab]);
+  // Changes on the portal can arrive while the page stays open: look again every 5 minutes and when the tab is brought back.
+  useEffect(() => {
+    const again = () => { if (!document.hidden) alerts.reload(); };
+    const timer = setInterval(again, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', again);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', again); };
+  }, [alerts.reload]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The browser tab and history entries name the page, and show how many bids changed on the portal.
+  const unseen = alerts.data?.unseen ?? 0;
+  useEffect(() => { document.title = `${unseen > 0 ? `(${unseen}) ` : ''}${TABS.find((t) => t.id === tab)?.label ?? 'TendAI'} · TendAI by QMSofts`; }, [tab, unseen]);
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const away = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.side-foot')) setMoreOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreOpen(false); };
+    document.addEventListener('mousedown', away); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [moreOpen]);
+  /** Where a main-menu link points. A plain click changes the page in place; ctrl/cmd-click, middle-click and "open in new tab" use this address. */
+  const hrefFor = (t: Tab) => { const q = t === 'explore' || t === 'tenders' ? toParams(filters).toString() : ''; return `#/${t}${q ? `?${q}` : ''}`; };
+  const go1 = (e: React.MouseEvent, t: Tab, withFilters?: boolean) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    go(t, withFilters ? filters : undefined);
+  };
 
   const nav: Nav = { filters, display, facets: facets.data, setFilters, setDisplay, go };
   const cycleTheme = () => { const next = THEMES[(THEMES.indexOf(theme) + 1) % 3]; setTheme(next); applyTheme(next); try { localStorage.setItem('theme', next); } catch { /* ignore */ } };
@@ -150,10 +174,12 @@ function Main({ onLogout }: { onLogout: () => void }) {
           <span className="brand-name"><span className="brand-word">Tend<span className="brand-ai">AI</span></span><span className="brand-by">by QMSofts</span></span>
         </div>
         <nav className="nav" aria-label="Main">
-          {MAIN_TABS.map((t) => <button key={t.id} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id, t.id === 'explore' || t.id === 'tenders' ? filters : undefined)}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span>{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title="Changes on tenders you are bidding for">{alerts.data!.unseen}</span>}</button>)}
+          {MAIN_TABS.map((t) => <a key={t.id} className="nav-link" href={hrefFor(t.id)} aria-current={tab === t.id ? 'page' : undefined} onClick={(e) => go1(e, t.id, t.id === 'explore' || t.id === 'tenders')}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span>{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title="Changes on tenders you are bidding for">{alerts.data!.unseen}</span>}</a>)}
         </nav>
-        <div className="side-foot">
-          {UTILITY_TABS.filter((t) => t.id !== 'settings' || can('admin')).map((t) => <button key={t.id} className="link-btn" aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id)}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span></button>)}
+        <div className={`side-foot${moreOpen ? ' open' : ''}`}>
+          <button type="button" className="more-toggle" aria-expanded={moreOpen} aria-controls="side-more" onClick={() => setMoreOpen((o) => !o)}>{user?.name || 'Menu'} <span aria-hidden>▾</span></button>
+          <div id="side-more" className="side-more" onClick={() => setMoreOpen(false)}>
+          {UTILITY_TABS.filter((t) => t.id !== 'settings' || can('admin')).map((t) => <a key={t.id} className="link-btn nav-link" href={`#/${t.id}`} aria-current={tab === t.id ? 'page' : undefined} onClick={(e) => go1(e, t.id)}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span></a>)}
           <button className="link-btn" onClick={cycleTheme} title="Change colour theme" aria-label={`Theme: ${theme}. Click to change.`}><span className={`theme-dot ${theme}`} aria-hidden /><span className="nav-label">Theme: {theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'Auto'}</span></button>
           {user && (
             <div className="who" title={`${user.name} · ${user.role}`}>
@@ -162,6 +188,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
           )}
           {user && !user.owner && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">Change password</span></button>}
           <button className="link-btn" onClick={onLogout}><span className="nav-label">Log out</span></button>
+          </div>
         </div>
       </aside>
       <div className="content">
@@ -170,7 +197,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       {config.data?.ai_enabled && (tab === 'dashboard' || tab === 'explore' || tab === 'tenders') && <div className="askwrap"><AskBar nav={nav} /></div>}
       <main id="main" tabIndex={-1}>
         {config.data && (
-          <>
+          <Suspense fallback={<div className="empty"><span className="spinner" aria-hidden /> Loading…</div>}>
             {tab === 'dashboard' && <Dashboard config={config.data} nav={nav} />}
             {tab === 'explore' && <Explore config={config.data} nav={nav} />}
             {tab === 'tenders' && <TendersPage config={config.data} nav={nav} />}
@@ -178,7 +205,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
             {tab === 'vault' && <VaultPage config={config.data} />}
             {tab === 'runs' && <RunsPage config={config.data} />}
             {tab === 'settings' && (can('admin') ? <SettingsPage config={config.data} onSaved={config.reload} /> : <div className="alert warn">Settings are for administrators.</div>)}
-          </>
+          </Suspense>
         )}
       </main>
       </div>

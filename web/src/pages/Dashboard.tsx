@@ -8,7 +8,7 @@ import { useLoad } from '../hooks';
 import type { Nav } from '../App';
 import { ChartSkeleton, Skeleton } from '../ui';
 import { ManualBanner } from '../ManualPortals';
-import { Only } from '../session';
+import { Only, useSession } from '../session';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
 import { BarBlock, labelFor, metricOf, MEASURES } from './Charts';
 
@@ -125,6 +125,8 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
         </div>
       </div>
 
+      <SetupCard config={config} firstRunDone={!!stats.data && (stats.data.kpi.total_kept > 0 || stats.data.last_run?.status === 'ok')} go={(t) => go(t)} />
+
       <ManualBanner onOpen={() => go('settings')} />
 
       <FilterBar filters={filters} display={display} config={config} facets={nav.facets} onChange={nav.setFilters} onApplyView={(f, d) => go('dashboard', f, d)} hideStatus />
@@ -171,6 +173,36 @@ function Card({ title, sub, children, explore, loading }: { title: string; sub: 
 function withUnit(value?: string) {
   const m = value?.match(/^(.+?)\s+(crore|lakh)$/);
   return m ? <>{m[1]}<span className="unit">{m[2]}</span></> : value;
+}
+
+/** What an administrator still has to set up on a new install. Disappears when everything is done, or when dismissed. */
+function SetupCard({ config, firstRunDone, go }: { config: AppConfig; firstRunDone: boolean; go: (t: 'runs' | 'settings' | 'vault') => void }) {
+  const { can } = useSession();
+  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem('setup-dismissed') === '1'; } catch { return false; } });
+  const profile = useLoad(() => (can('bidder') && config.ai_enabled ? api.companyProfile() : Promise.resolve(null)), [config.ai_enabled]);
+  if (hidden || !can('admin')) return null;
+  const steps: { done: boolean; text: string; hint: string; to: 'runs' | 'settings' | 'vault'; label: string }[] = [
+    { done: config.mail_configured && config.recipient_count > 0, text: 'Set up the daily email', hint: config.mail_configured ? 'Add the people who should receive it.' : 'Add BREVO_API_KEY and MAIL_FROM on the server, then add recipients.', to: 'settings', label: 'Open Settings' },
+    { done: firstRunDone, text: 'Collect the first tenders', hint: 'The first run reads every recent tender and takes 20 to 40 minutes. Later runs are quick.', to: 'runs', label: 'Open Runs' },
+    ...(config.ai_enabled ? [{ done: !!profile.data?.company_profile?.trim(), text: 'Describe your company', hint: 'The AI uses it to score how well each tender fits you.', to: 'vault' as const, label: 'Open the Vault' }] : []),
+  ];
+  if (profile.loading || steps.every((s) => s.done)) return null;
+  const left = steps.filter((s) => !s.done).length;
+  return (
+    <section className="card setup-card" aria-label="Finish setting up">
+      <div className="setup-head"><h2>Finish setting up <span className="badge warn">{left} to do</span></h2>
+        <button type="button" className="link-btn" onClick={() => { try { localStorage.setItem('setup-dismissed', '1'); } catch { /* ignore */ } setHidden(true); }}>Hide</button></div>
+      <ul className="setup-list">
+        {steps.map((s) => (
+          <li key={s.text} className={s.done ? 'done' : ''}>
+            <span className="setup-mark" aria-hidden>{s.done ? '✓' : '○'}</span>
+            <div><strong>{s.text}</strong><span className="sr-only">{s.done ? ' (done)' : ' (to do)'}</span>{!s.done && <div className="muted small">{s.hint}</div>}</div>
+            {!s.done && <button type="button" className="btn small" onClick={() => go(s.to)}>{s.label}</button>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function Kpi({ label, value, note, onClick, tone, loading }: { label: string; value?: string; note?: string; onClick?: () => void; tone?: 'warn' | 'good'; loading?: boolean }) {

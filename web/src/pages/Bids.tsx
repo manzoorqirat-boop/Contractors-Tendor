@@ -7,6 +7,7 @@ import { chain, fmtDate, headline, inr, plural, relative } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
 import { Only, ReadOnly } from '../session';
+import { useConfirm } from '../confirm';
 import type { AppConfig, BidAlert, BidDetail, BidItem, BidStats, BidSummary, MatchStatus, Stage, StatGroup, VaultDoc } from '../types';
 
 type WsTab = 'decide' | 'checklist' | 'price' | 'letters' | 'result';
@@ -166,6 +167,7 @@ function DateField({ label, value, time, onSave }: { label: string; value: strin
   return (
     <label className="field-inline">{label}
       <input type={time ? 'datetime-local' : 'date'} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => commit(v)} onKeyDown={(e) => { if (e.key === 'Enter') commit(v); }} />
+      {v && <span className="date-say" aria-hidden>{fmtDate(v, !!time)}</span>}
     </label>
   );
 }
@@ -180,6 +182,7 @@ const MATCH: Record<MatchStatus, [string, string]> = { ok: ['ok', 'In vault'], e
 
 function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBack: () => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const ai = useAiStatus();
   const [bid, setBid] = useState<BidDetail | null>(null);
   const [error, setError] = useState('');
@@ -193,7 +196,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
     try { setBid(await api.patchBid(id, patch)); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch (e) { toast((e as Error).message, 'bad'); }
   }
   async function remove() {
-    if (!window.confirm('Remove this bid and its checklist? The tender itself stays in the list.')) return;
+    if (!(await confirm({ title: 'Remove this bid?', body: 'Its checklist, notes, drafts and results are deleted and this cannot be undone. The tender itself stays in the list.', confirmLabel: 'Remove bid', danger: true }))) return;
     try { await api.deleteBid(id); onBack(); } catch (e) { toast((e as Error).message, 'bad'); }
   }
   async function seen() { await api.changesSeen(id).catch(() => undefined); load(); }
@@ -208,8 +211,8 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const tab = tabSel ?? defaultTab(bid.stage);
   const docsOpen = bid.items.filter((i) => i.kind === 'document' && !i.done).length;
   const docProblems = bid.items.filter((i) => i.kind === 'document' && !i.done && i.match && ['expired', 'expires_before_close', 'missing'].includes(i.match.status)).length;
-  const changeStage = (s: string) => {
-    if (s === 'submitted' && bid.stage !== 'submitted' && docsOpen > 0 && !window.confirm(`${plural(docsOpen, 'document')} on the checklist ${docsOpen === 1 ? 'is' : 'are'} not ticked yet. Mark this bid as submitted anyway?`)) return;
+  const changeStage = async (s: string) => {
+    if (s === 'submitted' && bid.stage !== 'submitted' && docsOpen > 0 && !(await confirm({ title: 'Mark as submitted anyway?', body: `${plural(docsOpen, 'document')} on the checklist ${docsOpen === 1 ? 'is' : 'are'} not ticked yet.`, confirmLabel: 'Mark as submitted' }))) return;
     save({ stage: s });
   };
   const stages: { key: Stage; label: string }[] = [['interested', 'Interested'], ['preparing', 'Preparing'], ['submitted', 'Submitted'], ['opened', 'Bid opened'], ['won', 'Won'], ['lost', 'Lost'], ['dropped', 'Dropped']].map(([key, label]) => ({ key: key as Stage, label }));

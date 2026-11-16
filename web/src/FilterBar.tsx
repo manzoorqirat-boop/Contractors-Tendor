@@ -72,7 +72,7 @@ export function FilterBar({ filters, display, config, facets, onChange, onApplyV
         <MultiSelect title="Category" options={facets?.category ?? []} selected={filters.category} onChange={(v) => set({ category: v })} />
         <MultiSelect title="Department" options={facets?.department ?? []} selected={filters.department} onChange={(v) => set({ department: v })} />
         <MultiSelect title="Location" options={facets?.location ?? []} selected={filters.location} onChange={(v) => set({ location: v })} />
-        <Popover label="Value" active={chips.some((c) => c.id === 'value' || c.id === 'no_value')}>
+        <Popover name="Value" label="Value" active={chips.some((c) => c.id === 'value' || c.id === 'no_value')}>
           <div className="opt-list" role="radiogroup" aria-label="Estimated value">
             {VALUE_PRESETS.map((p, i) => (
               <label key={p.label} className="check"><input type="radio" name="vp" checked={preset === i} onChange={() => set({ min_value: p.min, max_value: p.max, value_lt: undefined, no_value: false })} />{p.label}</label>
@@ -136,7 +136,7 @@ function ViewsMenu({ filters, display, onApply }: { filters: Filters; display: D
   }
 
   return (
-    <Popover label={<>Views{views && views.length > 0 && <span className="count-pill">{views.length}</span>}</>} align="right">
+    <Popover name="Views" label={<>Views{views && views.length > 0 && <span className="count-pill">{views.length}</span>}</>} align="right">
       <div className="opt-list">
         {views === null && <div className="muted" style={{ padding: 8 }}>Loading…</div>}
         {views?.length === 0 && <div className="muted" style={{ padding: 8 }}>No saved views yet. Set some filters, name them below and save.</div>}

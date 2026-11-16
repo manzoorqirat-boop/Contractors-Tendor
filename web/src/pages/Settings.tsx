@@ -8,7 +8,6 @@ import { setLogoText } from '../Brand';
 import { Tabs } from '../Tabs';
 import { ActivityPanel, UsersPanel } from '../Account';
 import type { AiStatus, AppConfig, Settings } from '../types';
-import '../compact.css';
 
 type Tab = 'email' | 'portals' | 'filters' | 'ai' | 'people' | 'activity' | 'backup';
 let lastTab: Tab = 'email';
@@ -52,6 +51,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
 
+  const badEmails = lines(recipients).filter((x) => !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(x));
   if (error) return <div className="alert bad">{error}</div>;
   if (!form) return <div className="empty"><span className="spinner" /> Loading…</div>;
 
@@ -144,7 +144,8 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
               <label className="field">
                 Recipients
                 <span className="hint">One email address per line.</span>
-                <textarea value={recipients} onChange={(e) => setRecipients(e.target.value)} spellCheck={false} />
+                <textarea value={recipients} onChange={(e) => setRecipients(e.target.value)} spellCheck={false} aria-invalid={badEmails.length > 0 || undefined} aria-describedby={badEmails.length ? 'recipients-err' : undefined} />
+                {badEmails.length > 0 && <span className="field-err" id="recipients-err">{badEmails.length === 1 ? 'This does not look like an email address' : 'These do not look like email addresses'}: {badEmails.slice(0, 3).join(', ')}{badEmails.length > 3 ? ` and ${badEmails.length - 3} more` : ''}</span>}
               </label>
               <div>
                 <label className="check"><input type="checkbox" checked={form.schedule_enabled} onChange={(e) => patch({ schedule_enabled: e.target.checked })} />Send the digest every day</label>

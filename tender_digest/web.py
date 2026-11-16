@@ -596,6 +596,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         if config.cookie_secure:  # served over https (Railway): tell browsers never to use plain http for this site
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        path = request.url.path
+        if path.startswith("/assets/"):
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")  # file names carry a hash of their contents
+        elif not path.startswith("/api/") and response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache"  # the page itself is always checked, so a new release shows at once
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
             record_activity(request, response.status_code)

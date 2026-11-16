@@ -6,9 +6,9 @@ import { fmtDate } from '../format';
 import { useLoad } from '../hooks';
 import { Skeleton, useToast } from '../ui';
 import { ReadOnly, useSession } from '../session';
+import { useConfirm } from '../confirm';
 import { Tabs } from '../Tabs';
 import type { AppConfig, CompanyFact, VaultDoc } from '../types';
-import '../compact.css';
 
 type Tab = 'documents' | 'company' | 'catalogue';
 let lastTab: Tab = 'documents';
@@ -115,6 +115,7 @@ function CatalogueCard({ count, reload }: { count: number; reload: () => void })
 
 function DocRow({ d, kinds, now, onChange }: { d: VaultDoc; kinds: { key: string; label: string }[]; now: string; onChange: () => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const { can } = useSession();
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({ name: d.name, kind: d.kind, expiry: d.expiry ?? '', notes: d.notes });
@@ -126,7 +127,7 @@ function DocRow({ d, kinds, now, onChange }: { d: VaultDoc; kinds: { key: string
     try { await api.patchVault(d.id, { name: form.name, kind: form.kind, expiry: form.expiry, notes: form.notes }); setEdit(false); onChange(); } catch (e) { toast((e as Error).message, 'bad'); }
   }
   async function remove() {
-    if (!window.confirm(`Remove "${d.name}" from the vault?${d.filename ? ' The stored file is deleted too.' : ''}`)) return;
+    if (!(await confirm({ title: `Remove "${d.name}"?`, body: `It is removed from the vault${d.filename ? ' and the stored file is deleted' : ''}. This cannot be undone.`, confirmLabel: 'Remove', danger: true }))) return;
     try { await api.deleteVault(d.id); onChange(); } catch (e) { toast((e as Error).message, 'bad'); }
   }
 
@@ -157,14 +158,23 @@ function DocRow({ d, kinds, now, onChange }: { d: VaultDoc; kinds: { key: string
   );
 }
 
+const ALLOWED_EXT = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.zip'];
+
 function QuickAdd({ kinds, onAdded }: { kinds: { key: string; label: string }[]; onAdded: () => void }) {
   const toast = useToast();
   const [form, setForm] = useState({ name: '', kind: 'registration', expiry: '' });
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fileErr, setFileErr] = useState('');
+  const pick = (f: File | null) => {
+    const ext = f ? f.name.slice(f.name.lastIndexOf('.')).toLowerCase() : '';
+    setFileErr(!f ? '' : f.size > 10 * 1024 * 1024 ? `${f.name} is over 10 MB. Use a smaller file.` : !ALLOWED_EXT.includes(ext) ? `${ext || 'That'} files are not accepted. Use PDF, image, Word, Excel, text or zip.` : '');
+    setFile(f);
+  };
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
+    if (fileErr) return;
     setBusy(true);
     try {
       await api.addVault({ ...form, issued: '', notes: '', filename: file?.name ?? '', file_base64: file ? await readBase64(file) : '' });
@@ -176,8 +186,9 @@ function QuickAdd({ kinds, onAdded }: { kinds: { key: string; label: string }[];
       <input type="text" value={form.name} maxLength={120} required placeholder="Add a document, e.g. GST certificate" aria-label="Document name" onChange={(e) => setForm({ ...form, name: e.target.value })} />
       <select value={form.kind} aria-label="Kind" onChange={(e) => setForm({ ...form, kind: e.target.value })}>{kinds.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select>
       <input type="date" value={form.expiry} aria-label="Expiry date (optional)" title="Expiry date (optional)" onChange={(e) => setForm({ ...form, expiry: e.target.value })} />
-      <label className="btn small file-btn" title="Optional file, up to 10 MB: PDF, image, Word, Excel, zip">{file ? file.name : 'Attach file'}<input type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.txt,.zip" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
-      <button className="btn primary" disabled={busy || !form.name.trim()}>{busy ? 'Adding…' : 'Add'}</button>
+      <label className="btn small file-btn" title="Optional file, up to 10 MB: PDF, image, Word, Excel, zip">{file ? file.name : 'Attach file'}<input type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.txt,.zip" onChange={(e) => pick(e.target.files?.[0] ?? null)} /></label>
+      <button className="btn primary" disabled={busy || !form.name.trim() || !!fileErr}>{busy ? 'Adding…' : 'Add'}</button>
+      {fileErr && <span className="field-err" role="alert" style={{ flexBasis: '100%' }}>{fileErr}</span>}
     </form>
   );
 }

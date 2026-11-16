@@ -3,6 +3,7 @@ import { api } from './api';
 import { fmtDate } from './format';
 import { useLoad } from './hooks';
 import { Only } from './session';
+import { useConfirm } from './confirm';
 import type { PortalStatus } from './types';
 
 const tone = (k: PortalStatus['kind']) => (k === 'ok' ? 'ok' : k === 'unknown' ? 'plain' : 'warn');
@@ -29,6 +30,7 @@ export function ManualBanner({ onOpen }: { onOpen: () => void }) {
 
 /** Add portals, see which ones the app can read, and keep the list of those that need a person. */
 export function PortalsManager({ onChange }: { onChange: () => void }) {
+  const confirm = useConfirm();
   const list = useLoad(() => api.portals(), []);
   const [form, setForm] = useState({ name: '', state: '', base_url: '' });
   const [busy, setBusy] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
   }
 
   async function remove(p: PortalStatus) {
-    if (!window.confirm(`Remove ${p.name}? Tenders already collected from it stay in the app.`)) return;
+    if (!(await confirm({ title: `Remove ${p.name}?`, body: 'The portal is no longer read. Tenders already collected from it stay in the app.', confirmLabel: 'Remove portal', danger: true }))) return;
     setBusy(p.key);
     setMsg(null);
     try {

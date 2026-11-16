@@ -392,3 +392,14 @@ def test_two_people_adding_the_same_tender_id_at_once_get_one_tender(app_ctx):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert sorted(results) == [200, 409, 409, 409, 409, 409]
+
+
+def test_hashed_assets_are_cached_for_a_year_and_the_page_is_always_rechecked(tmp_path, ctx):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-abc123.js").write_text("console.log(1)")
+    (tmp_path / "index.html").write_text("<!doctype html><title>x</title>")
+    app = web.create_app(web.AppConfig(PASSWORD, "k", cookie_secure=False, static_dir=tmp_path, run_scheduler=False), ctx.env, SeenStore(":memory:"))
+    c = TestClient(app)
+    assert "immutable" in c.get("/assets/index-abc123.js").headers["cache-control"]
+    assert c.get("/").headers["cache-control"] == "no-cache" and c.get("/some/page").headers["cache-control"] == "no-cache"
+    assert c.get("/api/health").headers["cache-control"] == "no-store"
