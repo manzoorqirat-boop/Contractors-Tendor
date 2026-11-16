@@ -5,8 +5,9 @@ import { useLoad } from './hooks';
 import { Popover, Skeleton, useToast } from './ui';
 import { useConfirm } from './confirm';
 import { tr } from './i18n';
-import type { CompanyFact, Tender } from './types';
+import type { CompanyFact, Learning, Tender } from './types';
 
+const KIND: Record<string, string> = { department: tr('department'), category: tr('category'), 'type of work': tr('type of work'), wording: tr('wording'), place: tr('place'), portal: tr('portal') };
 const deptOf = (org: string) => (org || '').split('||')[0].trim();
 
 /** "Not interested" for the tenders ticked in the list: hide just those, or those and everything from their departments. */
@@ -94,6 +95,32 @@ export function HiddenDepartments() {
               <button type="button" className="btn small" onClick={() => show(m.dept)}>{tr('Show again')}</button>
             </div>
           ))}
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Vault > Company: what the Recommended order has learned from stars, bids, hides and dropped bids, in plain words. */
+export function LearningCard() {
+  const learned = useLoad(() => api.learning(), []);
+  const d = learned.data;
+  const list = (items: Learning['liked'], empty: string) => items.length === 0
+    ? <p className="muted small">{empty}</p>
+    : <ul style={{ margin: 0, paddingLeft: 18 }}>{items.map((x) => <li key={x.kind + x.value}><strong>{x.value}</strong> <span className="muted small">({KIND[x.kind] ?? x.kind}, {Math.max(x.chosen, x.avoided)}×)</span></li>)}</ul>;
+  return (
+    <section className="card">
+      <h2>{tr('What the Recommended order has learned')}</h2>
+      {learned.loading && !d && <Skeleton h={50} />}
+      {d && !d.enabled && <p className="sub">{tr('Learning is switched off (Settings, Civil filter tab). The Recommended order uses only closing time, fit and size.')}</p>}
+      {d && d.enabled && !d.ready && <p className="sub">{`${plural(d.positive + d.negative, 'choice')} so far. Star or start a bid on tenders you want, and hide those you do not. After ${d.needed} choices the list starts to learn your taste.`}</p>}
+      {d && d.enabled && d.ready && (
+        <>
+          <p className="sub">{`Learned from ${plural(d.positive, 'tender')} you starred or bid on and ${plural(d.negative, 'tender')} you hid or dropped. Each tender in the list says why it is placed where it is.`}</p>
+          <div className="set-grid">
+            <div><h3>{tr('You tend to choose')}</h3>{list(d.liked, 'Nothing stands out yet.')}</div>
+            <div><h3>{tr('You tend to hide')}</h3>{list(d.avoided, 'Nothing stands out yet.')}</div>
+          </div>
         </>
       )}
     </section>

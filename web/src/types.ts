@@ -15,6 +15,7 @@ export interface Tender {
   closing: string | null; published: string | null; opening?: string | null; value: number | null; value_text: string; emd: number | null;
   category: string; location: string; organisation: string; title: string; description: string; starred: boolean;
   work_type?: string | null; fit?: number | null; fit_reason?: string | null; ai_civil?: number | null;
+  priority?: number | null; priority_note?: string | null;
 }
 export interface Brief { recommendation: 'Bid' | 'Maybe' | 'No bid'; headline: string; reasons: string[]; risks: string[]; checks: string[] }
 export interface DocFacts { summary: string; requirements: string[]; financial: { label: string; value: string }[]; dates: { label: string; value: string }[]; documents: string[]; penalties: string[]; red_flags: string[] }
@@ -51,7 +52,7 @@ export interface NewPortal { name: string; state: string; base_url: string }
 
 export interface Settings {
   recipients: string[]; send_time: string; schedule_enabled: boolean; send_empty: boolean; portals: string[]; min_value: number;
-  extra_keywords: string[]; exclude_words: string[]; company_profile: string; require_signoff?: boolean; reminders_on?: boolean; webhook_url?: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; audit_days?: number; tender_days?: number; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string; accent?: string;
+  extra_keywords: string[]; exclude_words: string[]; company_profile: string; require_signoff?: boolean; reminders_on?: boolean; webhook_url?: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; audit_days?: number; tender_days?: number; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string; accent?: string; learning?: boolean;
 }
 
 export type Status = 'open' | 'closing_soon' | 'closed' | 'all';
@@ -178,5 +179,7 @@ export interface EraseResult { handle: string; changed: Record<string, number>; 
 export interface SetupStep { key: string; title: string; why: string; done: boolean; href: string; where: string; optional?: boolean; admin?: boolean }
 export interface SetupStatus { steps: SetupStep[]; done: number; total: number; sample: { loaded: boolean; tenders: number } }
 export interface SsoInfo { enabled: boolean; problem: string; issuer: string; client_id: string; redirect_uri: string; allowed_domains: string[]; default_role: string }
+export interface LearnedItem { kind: string; value: string; strength: number; chosen: number; avoided: number }
+export interface Learning { enabled: boolean; ready: boolean; needed: number; positive: number; negative: number; liked: LearnedItem[]; avoided: LearnedItem[] }
 export interface MutedDepartment { dept: string; at: string; by: string | null; tenders: number }
 export interface CleanupPreview { days: number; closed: number; ignored_among_them: number; placeholders: number; kept_because_starred_or_bid: number; oldest: { tender_id: string; title: string; closing: string | null }[]; tenders_now: number }

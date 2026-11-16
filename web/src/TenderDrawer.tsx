@@ -76,6 +76,7 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
               {t.fit_reason && <span className="muted small">{t.fit_reason}</span>}
             </div>
           )}
+          {t.priority_note && <p className="muted small" style={{ margin: '0 0 12px' }}><strong>{tr('Why it is ranked here')}:</strong> {t.priority_note}{t.priority != null && <> ({tr('priority')} {Math.round(t.priority)}/100)</>}</p>}
           <RelatedNote t={t} />
           <dl className="facts">
             <dt>{tr('Estimated value')}</dt><dd><strong>{t.value === null ? tr('Not stated') : inr(t.value, false)}</strong>{t.value !== null && t.value >= 1e5 && <span className="muted"> ({inr(t.value)})</span>}</dd>

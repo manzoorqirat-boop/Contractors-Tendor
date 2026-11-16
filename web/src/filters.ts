@@ -4,7 +4,7 @@ import type { AppConfig, Display, Drill, Filters } from './types';
 export const NONE = '__none__'; // the server's word for "not stated"
 
 export const EMPTY: Filters = { q: '', status: 'open', portal: [], category: [], department: [], location: [], work_type: [] };
-export const DISPLAY: Display = { sort: 'closing', page: 1, group_by: 'portal', split_by: 'category', measure: 'count', chart: 'stacked', layout: 'cards' };
+export const DISPLAY: Display = { sort: 'smart', page: 1, group_by: 'portal', split_by: 'category', measure: 'count', chart: 'stacked', layout: 'cards' };
 
 const LISTS = ['portal', 'category', 'department', 'location', 'work_type'] as const;
 const STRINGS = ['hidden', 'min_fit', 'min_value', 'max_value', 'value_lt', 'closing_from', 'closing_to', 'seen_from', 'seen_to', 'published_from', 'published_to', 'closing_within', 'since_days'] as const;

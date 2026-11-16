@@ -28,7 +28,7 @@ from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, alerts, appsettings, events, letters, mailer, pack, privacy, reminders, sample, sealing, smartsearch, sso, tokens
+from . import access, accounts, ai, alerts, appsettings, events, learn, letters, mailer, pack, privacy, reminders, sample, sealing, smartsearch, sso, tokens
 from .accounts import AccountError, Accounts, Principal
 from . import offsite
 from .backup import Backups, BackupError
@@ -665,6 +665,14 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         log.warning("off-site backup is not active: %s", e)
     backups = Backups(store, boq.store, env.state_path, vault_dir, keep_days=max(1, _int_env("BACKUP_KEEP_DAYS", 7)), remote=remote_cfg, remote_problem=remote_problem)
     audit_pruned = {"day": ""}
+    priorities_at = {"when": None}
+
+    def refresh_priorities_hourly(at: datetime) -> None:
+        """The urgency part of the recommended order changes as the hours pass, so it is worked out again every hour."""
+        last = priorities_at["when"]
+        if last is None or (at - last).total_seconds() >= 3600:
+            priorities_at["when"] = at
+            refresh_priorities()
 
     def prune_audit_daily(now: datetime) -> None:
         """Once a day, drops activity-log entries older than the retention period set in Settings."""
@@ -676,7 +684,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def housekeeping(now: datetime) -> None:
         """Run by the scheduler every half minute: the daily backup, then any deadline reminders that are due. One failing never stops the other."""
-        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hooks.deliver(now), lambda: prune_audit_daily(now)):
+        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hooks.deliver(now), lambda: prune_audit_daily(now), lambda: refresh_priorities_hourly(now)):
             try:
                 job()
             except Exception:  # noqa: BLE001
@@ -1017,6 +1025,15 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     # ---- data ------------------------------------------------------------------------------------------------
 
+    def refresh_priorities() -> None:
+        """Re-scores the recommended order. Run after anything that changes what the company likes (a star, a hidden tender, a bid), and every hour."""
+        try:
+            saved = store.get_settings()
+            lim = size_limits()
+            store.recompute_priorities(now(), lim.get("size_min"), lim.get("size_max"), appsettings.current(env, saved)["learning"])
+        except Exception:  # noqa: BLE001 - the order is a convenience: a failure here must never undo the action that caused it
+            log.exception("recomputing the recommended order failed")
+
     def size_limits() -> dict:
         """The size of work this company takes, as filter values: nothing when no range has been set."""
         saved = store.get_settings()
@@ -1107,8 +1124,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return row
 
     @app.get("/api/tenders", dependencies=auth)
-    def tenders(f: dict = fparams, sort: str = "closing", page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)) -> dict:
-        if sort not in SORTS:
+    def tenders(f: dict = fparams, sort: str = "smart", page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)) -> dict:
+        if sort not in SORTS and sort != "relevance":
             raise HTTPException(422, "Unknown sort")
         rows, total = store.search(now(), f, sort, page_size, (page - 1) * page_size)
         out = {"items": [shape(r) for r in rows], "total": total, "page": page, "page_size": page_size, "categories": store.categories()}
@@ -1120,7 +1137,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return out
 
     @app.get("/api/tenders/export", dependencies=auth)
-    def export(f: dict = fparams, sort: str = "closing", format: str = Query("csv", pattern="^(csv|xlsx)$"), keys: list[str] | None = Query(None, max_length=300)) -> Response:
+    def export(f: dict = fparams, sort: str = "smart", format: str = Query("csv", pattern="^(csv|xlsx)$"), keys: list[str] | None = Query(None, max_length=300)) -> Response:
         """The tenders the filters select (or only the `keys` a person ticked) as a CSV or an Excel workbook."""
         if sort not in SORTS:
             raise HTTPException(422, "Unknown sort")
@@ -1149,6 +1166,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     def star_bulk(body: BulkStar) -> dict:
         """Stars or unstars every ticked tender at once."""
         done = sum(1 for k in dict.fromkeys(body.keys) if store.set_starred(k, body.starred, now()))
+        refresh_priorities()
         return {"changed": done, "starred": body.starred}
 
     # ---- tenders you are not interested in, the size of work you take, and clean-up ---------------------------------------------
@@ -1158,13 +1176,17 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         """Marks tenders as not interesting (or brings them back). With mute_department, everything from their departments is hidden too."""
         user: Principal = request.state.user
         if not body.hidden:
-            return {"changed": store.unhide(body.keys), "hidden": False, "muted": []}
+            changed = store.unhide(body.keys)
+            refresh_priorities()
+            return {"changed": changed, "hidden": False, "muted": []}
         muted = []
         if body.mute_department:
             for d in dict.fromkeys(store.department_of(k) for k in body.keys):
                 if d and store.mute_department(d, now(), user.username):
                     muted.append(d)
-        return {"changed": store.hide(body.keys, now(), user.username), "hidden": True, "muted": muted}
+        changed = store.hide(body.keys, now(), user.username)
+        refresh_priorities()
+        return {"changed": changed, "hidden": True, "muted": muted}
 
     @app.get("/api/mutes", dependencies=auth)
     def list_mutes() -> dict:
@@ -1173,6 +1195,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.post("/api/mutes", dependencies=auth)
     def set_mute(body: MuteBody, request: Request) -> dict:
         ok = store.mute_department(body.department, now(), request.state.user.username) if body.muted else store.unmute_department(body.department)
+        refresh_priorities()
         return {"changed": ok, "departments": store.muted_departments()}
 
     @app.get("/api/company-size", dependencies=auth)
@@ -1186,7 +1209,16 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if lo and hi and lo > hi:
             raise HTTPException(422, "The smallest size cannot be bigger than the largest")
         store.put_settings({"size_min": lo, "size_max": hi})
+        refresh_priorities()
         return {"min": lo, "max": hi}
+
+    @app.get("/api/learning", dependencies=auth)
+    def learning_status() -> dict:
+        """What the recommended order has learned from the company's own choices, so it can be checked and trusted (or switched off in Settings)."""
+        model = store.learning_model()
+        top = model.top()
+        return {"enabled": appsettings.current(env, store.get_settings())["learning"], "ready": model.ready, "needed": learn.MIN_SIGNALS,
+                "positive": model.signals["positive"], "negative": model.signals["negative"], **top}
 
     @app.get("/api/cleanup/preview", dependencies=auth)
     def cleanup_preview(days: int = Query(30, ge=7, le=3650)) -> dict:
@@ -1457,6 +1489,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     def star(body: StarBody) -> dict:
         if not store.set_starred(body.key, body.starred, now()):
             raise HTTPException(404, "No such tender")
+        refresh_priorities()
         return {"key": body.key, "starred": body.starred}
 
     @app.get("/api/views", dependencies=auth)
@@ -1537,6 +1570,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 created.append(bid["id"])
             else:
                 existing.append(bid["id"])
+        if created:
+            refresh_priorities()
         return {"created": created, "existing": existing, "missing": missing}
 
     @app.post("/api/bids", dependencies=auth)
@@ -1547,6 +1582,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             raise HTTPException(404, str(e)) from None
         if created:
             bids.generate_items(bid["id"], now())
+            refresh_priorities()
         return {"id": bid["id"], "created": created}
 
     @app.get("/api/bids/alerts", dependencies=auth)
@@ -1573,6 +1609,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             bids.update(bid_id, clean_patch(body), now())
         except BidError as e:
             raise bid_error(e) from None
+        if "stage" in body:
+            refresh_priorities()
         return bid_full(bid_or_404(bid_id))
 
     @app.delete("/api/bids/{bid_id}", dependencies=auth)
@@ -2511,6 +2549,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             store.put_settings(appsettings.clean(body, list(portal_names)))
         except appsettings.SettingsError as e:
             raise HTTPException(422, str(e)) from None
+        refresh_priorities()   # a setting such as "learn from my choices" changes the order
         return get_settings()
 
     # ---- portals: add your own, and see which ones the app cannot read ---------------------------------------
@@ -2641,6 +2680,9 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             raise HTTPException(502, f"Brevo refused the email: {str(e)[:300]}") from None
 
     # ---- the React page --------------------------------------------------------------------------------------
+
+    if store.priorities_missing(now()):  # tenders collected before the recommended order existed
+        refresh_priorities()
 
     static = config.static_dir
     if static and (static / "index.html").exists():

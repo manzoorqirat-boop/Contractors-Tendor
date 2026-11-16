@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import smartsearch
+from . import learn, smartsearch
 from .gepnic import Tender
 
 _DATES = ("published", "closing", "opening")
@@ -24,11 +24,28 @@ _TENDER_COLUMNS = {
     # Claude's labels and saved answers (empty until the AI features are used)
     "work_type": "TEXT", "fit": "INTEGER", "fit_reason": "TEXT", "ai_civil": "INTEGER", "ai_profile": "TEXT",
     "summary": "TEXT", "brief": "TEXT", "doc": "TEXT",
+    # how worth a look the tender is for this company, worked out by learn.py (and a short reason a person can read)
+    "priority": "REAL", "priority_note": "TEXT",
 }
+
+def _has_fts5() -> bool:
+    """True when this SQLite was built with the full-text engine (the Python images used here have it). Without it the search still works, row by row."""
+    try:
+        c = sqlite3.connect(":memory:")
+        c.execute("CREATE VIRTUAL TABLE t USING fts5(a)")
+        c.close()
+        return True
+    except sqlite3.Error:
+        return False
+
+
+FTS_OK = _has_fts5()
+FTS_COLUMNS = ("title", "description", "organisation", "tender_id", "location", "category")
 
 SORTS = {
     "closing": "closing ASC", "closing_desc": "closing DESC", "published": "published DESC",
     "value": "value DESC", "value_asc": "value ASC", "first_seen": "first_seen DESC", "fit": "fit DESC",
+    "smart": "priority DESC",   # "Recommended": see learn.py
 }
 
 
@@ -207,12 +224,47 @@ class SeenStore:
             self.db.execute("CREATE INDEX IF NOT EXISTS seen_portal ON seen (portal)")
             self.db.execute("CREATE INDEX IF NOT EXISTS seen_first_seen ON seen (first_seen)")
             self.db.execute("CREATE INDEX IF NOT EXISTS seen_value ON seen (value)")
+            self.db.execute("CREATE INDEX IF NOT EXISTS seen_priority ON seen (priority)")
             self.db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS hidden (key TEXT PRIMARY KEY, at TEXT NOT NULL, by TEXT);
                 CREATE TABLE IF NOT EXISTS muted_departments (dept TEXT PRIMARY KEY, at TEXT NOT NULL, by TEXT);
                 """)
+            self._setup_fts()
             self.db.commit()
+
+    def _setup_fts(self) -> None:
+        """The full-text index over the words of every tender, kept up to date by triggers, so the search finds matches without reading every row."""
+        if not FTS_OK:
+            return
+        cols = ", ".join(FTS_COLUMNS)
+        new_cols = ", ".join(f"new.{c}" for c in FTS_COLUMNS)
+        old_cols = ", ".join(f"old.{c}" for c in FTS_COLUMNS)
+        existed = self.db.execute("SELECT 1 FROM sqlite_master WHERE name = 'seen_fts'").fetchone() is not None
+        self.db.executescript(
+            f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS seen_fts USING fts5({cols}, content='seen', content_rowid='rowid', tokenize='unicode61 remove_diacritics 2');
+            CREATE TRIGGER IF NOT EXISTS seen_fts_ai AFTER INSERT ON seen BEGIN
+              INSERT INTO seen_fts(rowid, {cols}) VALUES (new.rowid, {new_cols});
+            END;
+            CREATE TRIGGER IF NOT EXISTS seen_fts_ad AFTER DELETE ON seen BEGIN
+              INSERT INTO seen_fts(seen_fts, rowid, {cols}) VALUES ('delete', old.rowid, {old_cols});
+            END;
+            CREATE TRIGGER IF NOT EXISTS seen_fts_au AFTER UPDATE OF {cols} ON seen BEGIN
+              INSERT INTO seen_fts(seen_fts, rowid, {cols}) VALUES ('delete', old.rowid, {old_cols});
+              INSERT INTO seen_fts(rowid, {cols}) VALUES (new.rowid, {new_cols});
+            END;
+            """)
+        rows = self.db.execute("SELECT COUNT(*) FROM seen").fetchone()[0]
+        indexed = self.db.execute("SELECT COUNT(*) FROM seen_fts_docsize").fetchone()[0]
+        if not existed or rows != indexed:  # a new index, or one that has drifted from the table (a restore, a manual edit): build it again
+            self.db.execute("INSERT INTO seen_fts(seen_fts) VALUES ('rebuild')")
+
+    def _fts_expr(self, q: Any) -> str | None:
+        """The MATCH expression for a search text, or None when the index cannot answer it (no index, or only "leave this out" words)."""
+        if not FTS_OK or not q:
+            return None
+        return smartsearch.fts_query(smartsearch.parse(str(q)))
 
     def _backfill(self) -> None:
         for row in self.db.execute("SELECT key, payload FROM seen WHERE payload IS NOT NULL").fetchall():
@@ -350,6 +402,49 @@ class SeenStore:
             return [dict(r) | {"tenders": self.db.execute(f"SELECT COUNT(*) FROM seen WHERE civil = 1 AND COALESCE({DEPT_SQL}, '') = ?", (r["dept"],)).fetchone()[0]}
                     for r in self.db.execute("SELECT dept, at, by FROM muted_departments ORDER BY dept COLLATE NOCASE").fetchall()]
 
+    # ---- the recommended order ----------------------------------------------------------------------------------------
+
+    def learning_model(self) -> learn.Model:
+        """What the company's own choices say: tenders starred or bid on count for, tenders hidden or dropped count against, a hidden department counts strongly against."""
+        m = learn.Model()
+        cols = "portal, organisation, category, location, work_type, title, description"
+        with self.lock:
+            for r in self.db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND key IN (SELECT key FROM starred)"):
+                m.add(dict(r), +1)
+            for r in self.db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND key IN (SELECT key FROM hidden)"):
+                m.add(dict(r), -1)
+            for r in self.db.execute("SELECT dept FROM muted_departments"):
+                m.add_department(r["dept"], -1)
+            if self._has_bids():
+                for r in self.db.execute("SELECT portal, organisation, category, location, work_type, title, description, stage FROM bids"):
+                    d = dict(r)
+                    stage = d.pop("stage")
+                    if stage == "dropped":
+                        m.add(d, -1)
+                    else:
+                        m.add(d, +1, {"interested": 1.0, "preparing": 1.5, "submitted": 2.0, "opened": 2.0, "lost": 1.5, "won": 3.0}.get(stage, 1.0))
+        return m
+
+    def recompute_priorities(self, now: datetime, size_min: float | None = None, size_max: float | None = None, learning: bool = True) -> int:
+        """Works out the recommended-order priority (and its note) of every open tender. Cheap enough to run after every choice and once an hour,
+        because the urgency part changes as time passes. Returns how many tenders were scored."""
+        model = self.learning_model() if learning else None
+        cols = "key, closing, value, fit, portal, organisation, category, location, work_type, title, description"
+        with self.lock:
+            starred = {r[0] for r in self.db.execute("SELECT key FROM starred")}
+            rows = [dict(r) for r in self.db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND (closing IS NULL OR closing >= ?)", (now.isoformat(),))]
+            updates = []
+            for r in rows:
+                score, note = learn.priority(r, now, model, size_min, size_max, r["key"] in starred)
+                updates.append((score, note, r["key"]))
+            self.db.executemany("UPDATE seen SET priority = ?, priority_note = ? WHERE key = ?", updates)
+            self.db.commit()
+        return len(updates)
+
+    def priorities_missing(self, now: datetime) -> bool:
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM seen WHERE civil = 1 AND priority IS NULL AND (closing IS NULL OR closing >= ?) LIMIT 1", (now.isoformat(),)).fetchone() is not None
+
     # ---- clean-up: what could go, shown before anything does -----------------------------------------------------
 
     def _has_bids(self) -> bool:
@@ -456,8 +551,12 @@ class SeenStore:
             if parsed.max_value is not None:
                 where.append("value <= ?")
                 args.append(parsed.max_value)
-            if parsed.has_text:
-                where.append("tsmatch(" + " || ' ' || ".join(f"COALESCE({c}, '')" for c in ("title", "description", "organisation", "tender_id", "location", "category")) + ", ?) = 1")
+            fts = smartsearch.fts_query(parsed) if FTS_OK else None
+            if parsed.has_text and fts:
+                where.append("rowid IN (SELECT rowid FROM seen_fts WHERE seen_fts MATCH ?)")
+                args.append(fts)
+            elif parsed.has_text:  # nothing but "leave this out" words, or no full-text index: match row by row
+                where.append("tsmatch(" + " || ' ' || ".join(f"COALESCE({c}, '')" for c in FTS_COLUMNS) + ", ?) = 1")
                 args.append(parsed.spec())
             elif parsed.min_value is None and parsed.max_value is None:  # only filler words (or symbols): fall back to the plain text match
                 like = cls._like(str(f["q"]))
@@ -510,15 +609,23 @@ class SeenStore:
 
     def search(self, now: datetime, filters: dict[str, Any], sort: str = "closing", limit: int = 25, offset: int = 0) -> tuple[list[dict], int]:
         where, args = self._where(now, filters)
-        order = SORTS.get(sort, SORTS["closing"])
-        # Unknown values and dates sort last whichever way round.
-        order = f"({order.split()[0]} IS NULL), {order}"
+        join, join_args = "", []
+        fts = self._fts_expr(filters.get("q")) if sort == "relevance" else None
+        if sort == "relevance" and fts:
+            # best text match first: title matters most, then the Tender ID, then department and description (lower bm25 is better)
+            join = " LEFT JOIN (SELECT rowid AS rid, bm25(seen_fts, 8.0, 2.0, 3.0, 6.0, 1.0, 1.5) AS rk FROM seen_fts WHERE seen_fts MATCH ?) r ON r.rid = seen.rowid"
+            join_args = [fts]
+            order = "(r.rk IS NULL), r.rk ASC, closing ASC"
+        else:
+            order = SORTS.get("smart" if sort == "relevance" else sort, SORTS["closing"])
+            # Unknown values and dates sort last whichever way round.
+            order = f"({order.split()[0]} IS NULL), {order}"
         with self.lock:
             total = self.db.execute(f"SELECT COUNT(*) FROM seen WHERE {where}", args).fetchone()[0]
             rows = self.db.execute(
                 f"SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, work_type, fit, fit_reason, ai_civil, "
-                f"(key IN (SELECT key FROM starred)) AS starred FROM seen WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
-                [*args, limit, offset],
+                f"priority, priority_note, (key IN (SELECT key FROM starred)) AS starred FROM seen{join} WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
+                [*join_args, *args, limit, offset],
             ).fetchall()
         out = [dict(r) for r in rows]
         for r in out:
@@ -528,7 +635,7 @@ class SeenStore:
     def get_tender(self, key: str) -> dict | None:
         with self.lock:
             r = self.db.execute(
-                "SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, payload, work_type, fit, fit_reason, ai_civil, summary, brief, doc, "
+                "SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, payload, work_type, fit, fit_reason, ai_civil, summary, brief, doc, priority, priority_note, "
                 "(key IN (SELECT key FROM starred)) AS starred FROM seen WHERE key = ? AND civil = 1", (key,)).fetchone()
         if not r:
             return None

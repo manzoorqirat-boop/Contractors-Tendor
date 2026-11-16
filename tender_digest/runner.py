@@ -187,6 +187,12 @@ class RunManager:
                     say(f"Email accepted for {emailed} of {len(settings.recipients)} recipient(s)")
             failed = reports and all(r.failed for r in reports)
             self.store.prune(now, appsettings.current(self.env, self.store.get_settings())["tender_days"])
+            try:  # new tenders, new AI labels and the passing hours all change the recommended order
+                lim = {k: self.store.get_settings().get(k) for k in ("size_min", "size_max")}
+                self.store.recompute_priorities(now, *(v if isinstance(v, (int, float)) and v > 0 else None for v in lim.values()),
+                                                appsettings.current(self.env, self.store.get_settings())["learning"])
+            except Exception:  # noqa: BLE001 - the run itself must not fail over its ordering
+                log.exception("recomputing the recommended order failed")
             self.store.update_run(
                 run_id, status="failed" if failed else "ok", finished=local_now(self.tz_name).isoformat(timespec="seconds"),
                 reports=summary, new_civil=sum(r.new_civil for r in reports), emailed_count=emailed,

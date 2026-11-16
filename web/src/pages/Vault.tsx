@@ -10,7 +10,7 @@ import { ReadOnly, useSession } from '../session';
 import { useConfirm } from '../confirm';
 import { Tabs } from '../Tabs';
 import { TemplateManager } from '../LetterTemplates';
-import { CompanySize, HiddenDepartments } from '../Ignore';
+import { CompanySize, HiddenDepartments, LearningCard } from '../Ignore';
 import type { AppConfig, CompanyFact, VaultDoc } from '../types';
 import { tr } from '../i18n';
 
@@ -76,6 +76,7 @@ export function VaultPage({ config }: { config: AppConfig }) {
           <Facts facts={data.facts} />
           <CompanySize facts={data.facts} />
           <HiddenDepartments />
+          <LearningCard />
         </div>
       )}
 
