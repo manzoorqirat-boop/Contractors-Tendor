@@ -24,6 +24,8 @@ tenders, and gives you:
 - **Filters** (portal, category, department, location, value, closing window, search, starred) are shared by the Dashboard,
   Explore and Tenders pages. The address bar always holds the current view, so **Share**, bookmarks and the Back button work.
   **Views** saves a named set of filters and chart choices.
+- **Keyboard**: `/` searches the tender list, `?` lists the shortcuts, and `g` then `d` / `e` / `t` / `b` / `v` / `r` / `s` jumps to Dashboard, Explore, Tenders, Bids, Vault, Runs or Settings. Shortcuts pause while you type in a box.
+- **Amounts** can be typed the way people say them: `5,00,000`, `50 lakh`, `1.5 cr`, `75k`. The app shows back what it understood.
 - **Dashboard**: summary numbers and charts for whatever the filters select. The Tenders/Value switch changes every chart.
   Click a number or bar to open the tenders behind it.
 - **Explore**: pick a combination (one click) or build your own: *group by* one thing and *split by* another (portal, category,

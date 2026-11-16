@@ -11,6 +11,7 @@ import { ToastProvider, Drawer } from './ui';
 import { ConfirmProvider } from './confirm';
 import { SessionProvider, useSession } from './session';
 import { AccountPanel, ChangePassword } from './Account';
+import { ShortcutsHelp, useShortcuts } from './Shortcuts';
 import type { Display, Facets, Filters, Me } from './types';
 
 const BidsPage = lazy(() => import('./pages/Bids').then((m) => ({ default: m.BidsPage })));
@@ -161,11 +162,14 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
   };
 
   const nav: Nav = { filters, display, facets: facets.data, setFilters, setDisplay, go };
+  const tabAllowed = useCallback((t: Tab) => t !== 'settings' || can('admin'), [can]);
+  const [help, setHelp] = useShortcuts(useCallback((t: Tab) => go(t), [go]), tabAllowed);
   const cycleTheme = () => { const next = THEMES[(THEMES.indexOf(theme) + 1) % 3]; setTheme(next); applyTheme(next); try { localStorage.setItem('theme', next); } catch { /* ignore */ } };
 
   return (
     <div className="app">
       <AddTenderHost />
+      {help && <ShortcutsHelp onClose={() => setHelp(false)} allowed={tabAllowed} />}
       {changingPassword && user && <Drawer title="Account & security" onClose={() => setChangingPassword(false)}><AccountPanel user={user} onClose={() => setChangingPassword(false)} onChanged={refreshMe} /></Drawer>}
       <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
       <aside className="sidebar">
@@ -187,6 +191,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
             </div>
           )}
           {user && <button className="link-btn" onClick={() => setChangingPassword(true)}><span className="nav-label">Account &amp; security</span></button>}
+          <button className="link-btn" onClick={() => setHelp(true)}><span className="nav-label">Keyboard shortcuts</span></button>
           <button className="link-btn" onClick={onLogout}><span className="nav-label">Log out</span></button>
           </div>
         </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { readBase64, useAiStatus } from './ai';
-import { fmtDate, inr } from './format';
+import { fmtDate, inr, parseMoney } from './format';
 import { Drawer, Skeleton, useToast } from './ui';
 import { useConfirm } from './confirm';
 
@@ -19,8 +19,8 @@ function validate(f: Form, editing: boolean): Record<string, string> {
   else if (/[<>\u0000-\u001f]/.test(id)) e.tender_id = 'The Tender ID cannot contain < or >. Copy it exactly as the portal shows it.';
   if (!f.description.trim() && !f.title.trim()) e.description = 'Say what the work is: a description, or at least a short name.';
   const value = money(f.value), emd = money(f.emd);
-  if (f.value.trim() && (value === null || value <= 0)) e.value = 'Enter the amount in rupees, like 12500000.';
-  if (f.emd.trim() && (emd === null || emd <= 0)) e.emd = 'Enter the amount in rupees, like 250000.';
+  if (f.value.trim() && (value === null || value <= 0)) e.value = 'Enter an amount like 12500000, 125 lakh or 1.25 crore.';
+  if (f.emd.trim() && (emd === null || emd <= 0)) e.emd = 'Enter an amount like 250000 or 2.5 lakh.';
   if (!e.value && !e.emd && value !== null && emd !== null && emd > value) e.emd = 'The EMD is larger than the tender value. Check both amounts.';
   if (!f.closing) e.closing = 'The closing date is needed, so deadlines and reminders work.';
   else if (!editing && f.closing.slice(0, 10) < new Date().toISOString().slice(0, 10)) e.closing = 'This date has already passed, so bids can no longer be filed. Check the date.';
@@ -29,7 +29,7 @@ function validate(f: Form, editing: boolean): Record<string, string> {
   return e;
 }
 
-const money = (v: string): number | null => { const n = Number(v.replace(/[,\s₹]/g, '')); return v.trim() === '' || Number.isNaN(n) ? null : n; };
+const money = parseMoney;
 
 /** Opens on the 'add-tender' event: detail {} adds a tender; detail {editKey} corrects one that was added by hand. */
 export function AddTenderHost() {

@@ -44,6 +44,15 @@ export function relative(iso: string | null, now: string): { text: string; tone:
   return { text: `Closes in ${d} day${d === 1 ? '' : 's'}`, tone: d <= 3 ? 'soon' : 'ok' };
 }
 
+/** What a person types for an amount, as rupees: "5,00,000", "50 lakh", "1.5 cr", "₹12L", "75k". Null when it is not an amount. */
+export function parseMoney(text: string): number | null {
+  const m = /^(\d*\.?\d+)(crores?|cr|lakhs?|lacs?|l|thousand|k)?$/.exec(text.toLowerCase().replace(/[₹,\s]/g, ''));
+  if (!m) return null;
+  const unit = m[2] ?? '';
+  const mult = unit.startsWith('c') ? 1e7 : unit.startsWith('l') ? 1e5 : unit === 'k' || unit === 'thousand' ? 1e3 : 1;
+  return Math.round(Number(m[1]) * mult * 100) / 100;
+}
+
 /** 851184 -> "₹8.51 lakh", 20991250 -> "₹2.10 crore". Indian units, because that is how these are quoted. */
 export function inr(v: number | null | undefined, compact = true): string {
   if (v === null || v === undefined) return 'Not stated';

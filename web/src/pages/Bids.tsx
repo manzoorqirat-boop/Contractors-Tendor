@@ -3,7 +3,7 @@ import { api } from '../api';
 import { BriefView, readBase64, useAiStatus } from '../ai';
 import { BoqCard, RiskCard } from '../Boq';
 import { PriceAdvisor } from '../PriceAdvisor';
-import { chain, fmtDate, headline, inr, plural, relative } from '../format';
+import { chain, fmtDate, headline, inr, parseMoney, plural, relative } from '../format';
 import { useLoad, useServerNow } from '../hooks';
 import { BidProgress } from '../BidProgress';
 import { Skeleton, useToast } from '../ui';
@@ -18,7 +18,7 @@ const ACTIVE: Stage[] = ['interested', 'preparing', 'submitted', 'opened'];
 const CHANGE_TEXT: Record<string, string> = { closing: 'Closing date moved', opening: 'Bid opening date moved', corrigendum: 'Corrigendum', prebid: 'Pre-bid meeting date' };
 
 const whenText = (a: BidAlert) => (a.urgency === 'overdue' ? 'overdue' : a.days_left === 0 ? 'today' : a.days_left === 1 ? 'tomorrow' : `in ${a.days_left} days`);
-const num = (v: string): number | null => { const n = Number(v.replace(/[,\s₹]/g, '')); return v.trim() === '' || Number.isNaN(n) ? null : n; };
+const num = parseMoney;
 
 // Remembered while the app is open, so coming back from a bid returns to the same list.
 let lastMode: 'pipeline' | 'results' = 'pipeline';
@@ -176,7 +176,14 @@ function DateField({ label, value, time, onSave }: { label: string; value: strin
 function MoneyField({ label, value, onSave }: { label: string; value: number | null; onSave: (v: number | null) => void }) {
   const [v, setV] = useState(value === null ? '' : String(value));
   useEffect(() => setV(value === null ? '' : String(value)), [value]);
-  return <label className="field-inline">{label}<input inputMode="decimal" value={v} placeholder="₹" onChange={(e) => setV(e.target.value)} onBlur={() => { const n = num(v); if (n !== value) onSave(n); }} /></label>;
+  const parsed = num(v);
+  const bad = v.trim() !== '' && parsed === null;  // never save (or clear) a price the app could not understand
+  return (
+    <label className="field-inline">{label}
+      <input inputMode="decimal" value={v} placeholder="₹" aria-invalid={bad || undefined} aria-describedby={bad ? `money-err-${label}` : undefined} onChange={(e) => setV(e.target.value)} onBlur={() => { if (!bad && parsed !== value) onSave(parsed); }} />
+      {bad ? <span className="field-err" id={`money-err-${label}`}>Not an amount. Try 12500000, 125 lakh or 1.25 crore.</span> : parsed ? <span className="date-say">{inr(parsed)}</span> : null}
+    </label>
+  );
 }
 
 const MATCH: Record<MatchStatus, [string, string]> = { ok: ['ok', 'In vault'], expired: ['bad', 'Expired'], expires_before_close: ['warn', 'Expires before closing'], missing: ['warn', 'Not in vault'], unknown: ['plain', ''] };

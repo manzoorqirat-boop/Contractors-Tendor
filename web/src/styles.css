@@ -683,3 +683,9 @@ input.pick { width: 18px; height: 18px; margin: 0 6px 0 0; accent-color: var(--a
 .ready-todo { margin: var(--sp-2) 0 0 18px; padding: 0; color: var(--muted); font-size: var(--fs-sm); }
 .ai-check { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-sm); }
 .ai-check.warn { background: var(--warn-soft); color: var(--warn); } .ai-check.ok { background: var(--ok-soft); color: var(--ok); }
+
+/* ---- keyboard shortcuts ---- */
+.shortcuts { margin: var(--sp-3) 0; display: grid; gap: var(--sp-1); }
+.shortcuts > div { display: flex; justify-content: space-between; gap: var(--sp-4); padding: 5px 0; border-bottom: 1px solid var(--border); }
+.shortcuts dt { white-space: nowrap; color: var(--muted); } .shortcuts dd { margin: 0; text-align: right; }
+kbd { display: inline-block; min-width: 22px; padding: 1px 6px; text-align: center; font: 600 var(--fs-xs) ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; }
