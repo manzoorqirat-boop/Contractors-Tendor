@@ -43,7 +43,7 @@ function stepDone(bid: BidDetail, tab: WsTab): boolean {
 }
 
 /** The five steps of a bid with how far each has got, how ready the whole bid is, and the one check only a person can do. */
-export function BidProgress({ bid, aiOn, tab, onGo, onChange }: { bid: BidDetail; aiOn: boolean; tab: WsTab; onGo: (t: WsTab) => void; onChange: (patch: Partial<BidDetail>) => void }) {
+export function BidProgress({ bid, aiOn, tab, onGo, onChange }: { bid: BidDetail; aiOn: boolean; tab: WsTab | 'team'; onGo: (t: WsTab) => void; onChange: (patch: Partial<BidDetail>) => void }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const active = bid.stage === 'interested' || bid.stage === 'preparing';

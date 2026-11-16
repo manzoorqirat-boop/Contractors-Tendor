@@ -33,6 +33,15 @@ ROLE_TEXT = {
 }
 OWNER_ID = 0
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,39}$")
+EMAIL_RE = re.compile(r"^[^\s@<>\",;]+@[^\s@<>\",;]+\.[^\s@<>\",;]{2,}$")
+
+
+def clean_email(value: str | None) -> str:
+    """An email address, lower-cased, or empty. Raises AccountError for something that is not one."""
+    v = (value or "").strip().lower()
+    if v and (len(v) > 120 or not EMAIL_RE.match(v)):
+        raise AccountError("That does not look like an email address")
+    return v
 MIN_PASSWORD = 12
 _COMMON = {"password1234", "123456789012", "qwertyuiop12", "administrator", "letmein12345", "welcome12345", "iloveyou1234", "passw0rd1234", "tendai123456"}
 MAX_AUDIT_ROWS = 20_000
@@ -46,6 +55,7 @@ class Principal:
     role: str
     must_change: bool = False
     two_step: bool = False
+    email: str = ""
 
     @property
     def owner(self) -> bool:
@@ -55,7 +65,7 @@ class Principal:
         return RANK[self.role] >= RANK[role]
 
     def public(self) -> dict[str, Any]:
-        return {"id": self.id, "username": self.username, "name": self.name, "role": self.role, "owner": self.owner, "must_change": self.must_change, "two_step": self.two_step}
+        return {"id": self.id, "username": self.username, "name": self.name, "role": self.role, "owner": self.owner, "must_change": self.must_change, "two_step": self.two_step, "email": self.email}
 
 
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
@@ -172,7 +182,7 @@ class Accounts:
                 CREATE INDEX IF NOT EXISTS audit_at ON audit (id DESC);
                 """)
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(users)")}
-            for col, kind in (("totp_secret", "TEXT"), ("totp_on", "INTEGER NOT NULL DEFAULT 0"), ("totp_last", "INTEGER NOT NULL DEFAULT 0")):
+            for col, kind in (("totp_secret", "TEXT"), ("totp_on", "INTEGER NOT NULL DEFAULT 0"), ("totp_last", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT NOT NULL DEFAULT ''")):
                 if col not in have:
                     self.db.execute(f"ALTER TABLE users ADD COLUMN {col} {kind}")
             self.db.commit()
@@ -183,7 +193,7 @@ class Accounts:
     # -- people --
 
     def _principal(self, r: Any) -> Principal:
-        return Principal(int(r["id"]), r["username"], r["name"] or r["username"], r["role"], bool(r["must_change"]), bool(r["totp_on"]))
+        return Principal(int(r["id"]), r["username"], r["name"] or r["username"], r["role"], bool(r["must_change"]), bool(r["totp_on"]), r["email"] or "")
 
     def get(self, user_id: int) -> Principal | None:
         with self.lock:
@@ -195,6 +205,32 @@ class Accounts:
             r = self.db.execute("SELECT * FROM users WHERE username = ? AND active = 1", (username.strip().lower(),)).fetchone()
         ok = verify_password(password, r["pw_hash"] if r else _DUMMY_HASH)
         return self._principal(r) if (r and ok) else None
+
+    # -- who can be told things --
+
+    def directory(self) -> list[dict[str, str]]:
+        """Names for pickers (who is a task assigned to): everyone active, with no contact details."""
+        with self.lock:
+            return [{"username": r["username"], "name": r["name"] or r["username"]} for r in self.db.execute("SELECT username, name FROM users WHERE active = 1 ORDER BY name, username")]
+
+    def emails_for(self, usernames: list[str]) -> list[str]:
+        names = [u.strip().lower() for u in usernames if u and u.strip()]
+        if not names:
+            return []
+        with self.lock:
+            rows = self.db.execute(f"SELECT email FROM users WHERE active = 1 AND email != '' AND username IN ({','.join('?' * len(names))})", names).fetchall()
+        return sorted({r["email"] for r in rows})
+
+    def admin_emails(self) -> list[str]:
+        with self.lock:
+            return sorted({r["email"] for r in self.db.execute("SELECT email FROM users WHERE active = 1 AND role = 'admin' AND email != ''")})
+
+    def set_own_email(self, user_id: int, email: str) -> str:
+        email = clean_email(email)
+        with self.lock:
+            self.db.execute("UPDATE users SET email = ? WHERE id = ?", (email, user_id))
+            self.db.commit()
+        return email
 
     # -- two-step sign-in --
 
@@ -247,14 +283,14 @@ class Accounts:
 
     def list(self) -> list[dict[str, Any]]:
         with self.lock:
-            rows = self.db.execute("SELECT id, username, name, role, active, must_change, created, last_login, totp_on FROM users ORDER BY active DESC, username").fetchall()
+            rows = self.db.execute("SELECT id, username, name, role, active, must_change, created, last_login, totp_on, email FROM users ORDER BY active DESC, username").fetchall()
         return [{**{k: v for k, v in dict(r).items() if k != "totp_on"}, "active": bool(r["active"]), "must_change": bool(r["must_change"]), "two_step": bool(r["totp_on"])} for r in rows]
 
     def exists(self, username: str) -> bool:
         with self.lock:
             return self.db.execute("SELECT 1 FROM users WHERE username = ?", (username.strip().lower(),)).fetchone() is not None
 
-    def create(self, username: str, name: str, role: str, password: str, now: datetime, reserved: str = "") -> dict[str, Any]:
+    def create(self, username: str, name: str, role: str, password: str, now: datetime, reserved: str = "", email: str = "") -> dict[str, Any]:
         username = username.strip().lower()
         if not USERNAME_RE.match(username):
             raise AccountError("The username must be 3 to 40 characters: letters, numbers, dot, dash or underscore, starting with a letter or number")
@@ -265,16 +301,17 @@ class Accounts:
         problem = password_problem(password, username)
         if problem:
             raise AccountError(problem)
+        email = clean_email(email)
         if self.exists(username):
             raise AccountError("That username is already taken")
         with self.lock:
-            cur = self.db.execute("INSERT INTO users (username, name, role, pw_hash, active, must_change, created) VALUES (?,?,?,?,1,1,?)",
-                                  (username, name.strip()[:80], role, hash_password(password), now.isoformat(timespec="seconds")))
+            cur = self.db.execute("INSERT INTO users (username, name, role, pw_hash, active, must_change, created, email) VALUES (?,?,?,?,1,1,?,?)",
+                                  (username, name.strip()[:80], role, hash_password(password), now.isoformat(timespec="seconds"), email))
             self.db.commit()
         return next(u for u in self.list() if u["id"] == cur.lastrowid)
 
     def update(self, user_id: int, *, name: str | None = None, role: str | None = None, active: bool | None = None, password: str | None = None,
-               reset_two_step: bool = False) -> dict[str, Any]:
+               reset_two_step: bool = False, email: str | None = None) -> dict[str, Any]:
         with self.lock:
             r = self.db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not r:
@@ -293,6 +330,8 @@ class Accounts:
             if problem:
                 raise AccountError(problem)
             sets.update(pw_hash=hash_password(password), must_change=1)  # a password set by someone else must be replaced by its owner
+        if email is not None:
+            sets["email"] = clean_email(email)
         if reset_two_step:
             sets.update(totp_secret=None, totp_on=0, totp_last=0)  # a lost phone: they set it up again after signing in
         if not sets:
@@ -364,6 +403,10 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("DELETE", "/api/bids/{bid_id}/items/{item_id}"): "Removed a checklist item",
     ("POST", "/api/bids/{bid_id}/document"): "Read a bid's tender document with AI",
     ("POST", "/api/bids/{bid_id}/doc-checked"): "Marked the AI-read details as checked (or unchecked)",
+    ("POST", "/api/bids/{bid_id}/comments"): "Commented on a bid",
+    ("DELETE", "/api/bids/{bid_id}/comments/{comment_id}"): "Removed a comment",
+    ("POST", "/api/bids/{bid_id}/signoff"): "Asked for or gave approval to bid",
+    ("POST", "/api/account/email"): "Changed own email address",
     ("POST", "/api/bids/{bid_id}/fetch"): "Fetched a bid's details from the portal",
     ("POST", "/api/bids/{bid_id}/eligibility"): "Ran the eligibility check",
     ("POST", "/api/bids/{bid_id}/draft"): "Drafted a letter with AI",

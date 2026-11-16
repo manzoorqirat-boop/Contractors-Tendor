@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -51,8 +51,8 @@ async function job<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   me: () => call<{ authenticated: boolean; user: Me | null }>('/api/me'),
   users: () => call<UsersData>('/api/users'),
-  createUser: (b: { username: string; name: string; role: string; password: string }) => call<UserRow>('/api/users', { method: 'POST', body: JSON.stringify(b) }),
-  editUser: (id: number, b: { name?: string; role?: string; active?: boolean; password?: string; reset_2fa?: boolean }) => call<UserRow>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  createUser: (b: { username: string; name: string; role: string; password: string; email?: string }) => call<UserRow>('/api/users', { method: 'POST', body: JSON.stringify(b) }),
+  editUser: (id: number, b: { name?: string; role?: string; active?: boolean; password?: string; reset_2fa?: boolean; email?: string }) => call<UserRow>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   audit: (user: string, before?: number) => call<{ entries: AuditEntry[]; next: number | null }>(`/api/audit?limit=50${user ? `&user=${encodeURIComponent(user)}` : ''}${before ? `&before=${before}` : ''}`),
   changePassword: (current: string, next: string) => call<{ ok: boolean }>('/api/account/password', { method: 'POST', body: JSON.stringify({ current, new: next }) }),
   login: (username: string, password: string, code = '') => call<{ ok: boolean }>('/api/login', { method: 'POST', body: JSON.stringify({ username, password, code }) }),
@@ -67,6 +67,13 @@ export const api = {
   exportUrl: (f: Filters, sort = 'closing', format: 'csv' | 'xlsx' = 'csv', keys: string[] = []) => `/api/tenders/export?${toParams(f)}&sort=${sort}&format=${format}${keys.map((k) => `&keys=${encodeURIComponent(k)}`).join('')}`,
   starBulk: (keys: string[], starred: boolean) => call<{ changed: number; starred: boolean }>('/api/tenders/star-bulk', { method: 'POST', body: JSON.stringify({ keys, starred }) }),
   docChecked: (id: number, checked: boolean) => call<{ doc_checked: { by: string; at: string } | null }>(`/api/bids/${id}/doc-checked`, { method: 'POST', body: JSON.stringify({ checked }) }),
+  people: () => call<{ people: Person[] }>('/api/people'),
+  myWork: () => call<{ items: { item_id: number; text: string; bid_id: number; title: string; description: string; tender_id: string; closing: string | null }[] }>('/api/my-work'),
+  comments: (id: number) => call<{ comments: BidComment[] }>(`/api/bids/${id}/comments`),
+  addComment: (id: number, text: string) => call<BidComment>(`/api/bids/${id}/comments`, { method: 'POST', body: JSON.stringify({ text }) }),
+  deleteComment: (id: number, cid: number) => call<{ removed: number }>(`/api/bids/${id}/comments/${cid}`, { method: 'DELETE' }),
+  signoff: (id: number, action: string, note: string) => call<{ signoff: Signoff | null }>(`/api/bids/${id}/signoff`, { method: 'POST', body: JSON.stringify({ action, note }) }),
+  setOwnEmail: (email: string) => call<{ email: string }>('/api/account/email', { method: 'POST', body: JSON.stringify({ email }) }),
   createBidsBulk: (keys: string[]) => call<{ created: number[]; existing: number[]; missing: string[] }>('/api/bids/bulk', { method: 'POST', body: JSON.stringify({ keys }) }),
   pivot: (f: Filters, groupBy: string, splitBy: string, top = 12) =>
     call<Pivot>(`/api/analytics?${toParams(f)}&group_by=${groupBy}${splitBy ? `&split_by=${splitBy}` : ''}&top=${top}`),

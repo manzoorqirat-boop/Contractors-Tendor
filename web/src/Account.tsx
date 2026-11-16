@@ -5,6 +5,7 @@ import { Logo } from './Brand';
 import { useConfirm } from './confirm';
 import { useLoad } from './hooks';
 import { useToast } from './ui';
+import { resetPeople } from './Team';
 import type { AuditEntry, Me, Role, UserRow } from './types';
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Never');
@@ -73,6 +74,7 @@ export function AccountPanel({ user, onClose, onChanged }: { user: Me; onClose: 
         <h3>Password</h3>
         {user.owner ? <p className="sub">The owner login's password is set on the server (APP_PASSWORD).</p> : <ChangePassword onDone={onClose} onCancel={onClose} />}
       </section>
+      {!user.owner && <EmailField current={user.email ?? ''} onSaved={onChanged} />}
       <section>
         <h3>Two-step sign-in {user.two_step && <span className="badge ok">On</span>}</h3>
         {user.owner && <p className="sub">The owner login uses the server variable OWNER_TOTP_SECRET to require a code. Ask whoever manages the server to set it.</p>}
@@ -113,6 +115,30 @@ export function AccountPanel({ user, onClose, onChanged }: { user: Me; onClose: 
   );
 }
 
+function EmailField({ current, onSaved }: { current: string; onSaved: () => void }) {
+  const toast = useToast();
+  const [v, setV] = useState(current);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    try { await api.setOwnEmail(v.trim()); toast(v.trim() ? 'Email saved' : 'Email removed'); onSaved(); } catch (er) { setErr((er as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <section>
+      <h3>Email</h3>
+      <p className="sub">Used to tell you when a task is given to you, when someone mentions you, and when a bid you asked about is approved. It is not shown to other people.</p>
+      <form onSubmit={save} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <label className="lf" style={{ margin: 0, flex: '1 1 220px' }}><span>Your email address</span>
+          <input type="email" value={v} onChange={(e) => setV(e.target.value)} autoComplete="email" aria-invalid={!!err || undefined} aria-describedby={err ? 'email-err' : undefined} />
+          {err && <em className="lf-warn" id="email-err" style={{ fontStyle: 'normal' }}>{err}</em>}</label>
+        <button className="btn" style={{ marginTop: 22 }} disabled={busy || v.trim() === current}>{busy ? 'Saving…' : 'Save'}</button>
+      </form>
+    </section>
+  );
+}
+
 const ROLE_BADGE: Record<Role, string> = { viewer: 'plain', bidder: 'accent', admin: 'ok' };
 
 /** Settings > People: add accounts, set roles, switch people off, reset passwords. */
@@ -120,7 +146,7 @@ export function UsersPanel() {
   const toast = useToast();
   const confirm = useConfirm();
   const { data, error, reload } = useLoad(() => api.users(), []);
-  const [form, setForm] = useState({ username: '', name: '', role: 'bidder', password: '' });
+  const [form, setForm] = useState({ username: '', name: '', role: 'bidder', password: '', email: '' });
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState<number | null>(null);
@@ -132,7 +158,7 @@ export function UsersPanel() {
     try {
       await api.createUser(form);
       toast(`Account created for ${form.username}. Give them the temporary password; they will choose their own at first sign-in.`);
-      setForm({ username: '', name: '', role: 'bidder', password: '' }); reload();
+      setForm({ username: '', name: '', role: 'bidder', password: '', email: '' }); resetPeople(); reload();
     } catch (err) { setFormError((err as Error).message); } finally { setBusy(false); }
   }
   async function change(u: UserRow, patch: { role?: string; active?: boolean; password?: string; reset_2fa?: boolean }) {
@@ -163,7 +189,7 @@ export function UsersPanel() {
             <tbody>
               {data.users.map((u) => (
                 <tr key={u.id}>
-                  <td><strong>{u.name || u.username}</strong><div className="muted small">{u.username}</div></td>
+                  <td><strong>{u.name || u.username}</strong><div className="muted small">{u.username}{u.email ? ` · ${u.email}` : ''}</div></td>
                   <td>{u.owner ? <span className="badge ok">Admin (owner)</span>
                     : <select aria-label={`Role of ${u.username}`} value={u.role} onChange={(e) => change(u, { role: e.target.value })} style={{ width: 'auto' }}>
                         {data.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
@@ -195,12 +221,14 @@ export function UsersPanel() {
           {formError && <div className="alert bad" role="alert">{formError}</div>}
           <label className="field">Name<input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="off" /></label>
           <label className="field">Username<span className="hint">Letters, numbers, dot, dash or underscore. They type this to sign in.</span><input type="text" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase() })} autoComplete="off" autoCapitalize="none" spellCheck={false} /></label>
+          <label className="field">Email (optional)<span className="hint">For task, mention and approval notices.</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} autoComplete="off" /></label>
           <label className="field">Role<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{data.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select>
             <span className="hint">{data.roles.find((r) => r.key === form.role)?.text}</span></label>
           <label className="field">Temporary password<span className="hint">At least {data.min_password} characters. Tell them in person or by phone, not by email. They must replace it at first sign-in.</span><input type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="off" spellCheck={false} /></label>
           <button className="btn primary" disabled={busy || !form.username || form.password.length < data.min_password}>{busy ? 'Adding…' : 'Add person'}</button>
         </form>
       </section>
+      <ApprovalSetting />
       <section className="card">
         <h2>What each role can do</h2>
         <dl className="roles">
@@ -209,6 +237,24 @@ export function UsersPanel() {
         <p className="muted small">Role changes apply at the next click. Switching someone off signs them out at once.</p>
       </section>
     </div>
+  );
+}
+
+/** One switch: must an administrator approve a bid before it moves from Interested to Preparing? Saves at once. */
+function ApprovalSetting() {
+  const toast = useToast();
+  const cur = useLoad(() => api.settings(), []);
+  const [busy, setBusy] = useState(false);
+  async function toggle(on: boolean) {
+    setBusy(true);
+    try { await api.saveSettings({ require_signoff: on }); cur.reload(); toast(on ? 'Bids now need an administrator\'s approval before Preparing.' : 'Approval is optional again.'); } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
+  }
+  return (
+    <section className="card">
+      <h2>Approval before bidding</h2>
+      <p className="sub">When on, a bidder asks for approval on the bid's Team tab, and an administrator approves or declines it. Administrators are not held up by this.</p>
+      <label className="check"><input type="checkbox" checked={!!cur.data?.require_signoff} disabled={busy || !cur.data} onChange={(e) => toggle(e.target.checked)} />Require approval before a bid moves from Interested to Preparing</label>
+    </section>
   );
 }
 

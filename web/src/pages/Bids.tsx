@@ -7,12 +7,13 @@ import { PriceAdvisor } from '../PriceAdvisor';
 import { chain, fmtDate, headline, inr, parseMoney, plural, relative } from '../format';
 import { useLoad, useServerNow } from '../hooks';
 import { BidProgress } from '../BidProgress';
+import { AssigneeSelect, MyWork, TeamTab } from '../Team';
 import { Skeleton, useToast } from '../ui';
 import { Only, ReadOnly } from '../session';
 import { useConfirm } from '../confirm';
 import type { AppConfig, BidAlert, BidDetail, BidItem, BidStats, BidSummary, MatchStatus, Stage, StatGroup, VaultDoc } from '../types';
 
-type WsTab = 'decide' | 'checklist' | 'price' | 'letters' | 'result';
+type WsTab = 'decide' | 'checklist' | 'price' | 'letters' | 'result' | 'team';
 const defaultTab = (s: Stage): WsTab => (s === 'preparing' ? 'checklist' : ['submitted', 'opened', 'won', 'lost'].includes(s) ? 'result' : 'decide');
 
 const ACTIVE: Stage[] = ['interested', 'preparing', 'submitted', 'opened'];
@@ -63,6 +64,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
 
       {mode === 'results' ? <Results /> : (
         <>
+          <MyWork onOpen={onOpen} />
           {(alerts.data?.alerts.length ?? 0) > 0 && (
             <section className="card" style={{ marginBottom: 14 }}>
               <h2>Coming up</h2>
@@ -287,14 +289,14 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
 
       <div className="ws-tabs" role="tablist" aria-label="Bid sections" onKeyDown={(e) => {
         if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-        const order: WsTab[] = ['decide', 'checklist', 'price', 'letters', 'result'];
+        const order: WsTab[] = ['decide', 'checklist', 'price', 'letters', 'result', 'team'];
         const next = order[(order.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length];
         setTabSel(next); e.preventDefault();
         setTimeout(() => (e.currentTarget.querySelector('[aria-selected="true"]') as HTMLElement | null)?.focus(), 0);
       }}>
-        {([['decide', 'Decide'], ['checklist', 'Checklist'], ['price', 'Price'], ['letters', 'Letters'], ['result', 'Result & notes']] as [WsTab, string][]).map(([k, l]) => (
+        {([['decide', 'Decide'], ['checklist', 'Checklist'], ['price', 'Price'], ['letters', 'Letters'], ['result', 'Result & notes'], ['team', 'Team']] as [WsTab, string][]).map(([k, l]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} tabIndex={tab === k ? 0 : -1} className={tab === k ? 'on' : ''} onClick={() => setTabSel(k)}>
-            {l}{k === 'checklist' && docProblems > 0 && <span className="count-pill alert-pill" title="Required papers not ready">{docProblems}</span>}
+            {l}{k === 'checklist' && docProblems > 0 && <span className="count-pill alert-pill" title="Required papers not ready">{docProblems}</span>}{k === 'team' && (bid.comment_count ?? 0) > 0 && <span className="count-pill" title="Comments">{bid.comment_count}</span>}{k === 'team' && bid.signoff?.state === 'requested' && <span className="count-pill alert-pill" title="Waiting for approval">!</span>}
           </button>
         ))}
       </div>
@@ -308,6 +310,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           {!ai?.configured && !bid.eligibility && !bid.brief && <div className="card empty">Eligibility checks and bid / no-bid briefs need the AI assistant. Until it is on, use the checklist to record the conditions yourself.</div>}
         </>
       )}
+      {tab === 'team' && <TeamTab bid={bid} config={config} onChange={(patch) => setBid({ ...bid, ...patch })} />}
       {tab === 'letters' && <>
         <Drafts bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
         {!ai?.configured && !bid.drafts && <div className="card empty">Draft letters need the AI assistant.</div>}
@@ -359,7 +362,7 @@ function NextStep({ bid }: { bid: BidDetail }) {
 }
 
 function OwnerField({ value, onSave }: { value: string; onSave: (v: string) => void }) {
-  return <TextField label="Owner" value={value} max={60} placeholder="Who is preparing it" onSave={onSave} />;
+  return <label className="field-inline">Owner<AssigneeSelect value={value || null} label="Owner of this bid" className="" onChange={onSave} /></label>;
 }
 
 function TextField({ label, value, max, placeholder, onSave }: { label: string; value: string; max: number; placeholder?: string; onSave: (v: string) => void }) {
@@ -393,6 +396,10 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
   }
   async function link(i: BidItem, v: string) {
     try { await api.patchItem(bid.id, i.id, { vault_id: v ? Number(v) : null }); onChange(); } catch (e) { toast((e as Error).message, 'bad'); }
+  }
+  async function assign(i: BidItem, owner: string) {
+    setItems((xs) => xs.map((x) => (x.id === i.id ? { ...x, owner: owner || null } : x)));
+    try { await api.patchItem(bid.id, i.id, { owner }); } catch (e) { toast((e as Error).message, 'bad'); onChange(); }
   }
   async function remove(i: BidItem) {
     setItems((xs) => xs.filter((x) => x.id !== i.id));
@@ -470,6 +477,7 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
                           {docs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                         </select>
                       )}
+                      <AssigneeSelect value={i.owner} label={`Who is responsible for: ${i.text.slice(0, 60)}`} onChange={(v) => assign(i, v)} />
                       <button type="button" className="link-btn" aria-label="Remove item" onClick={() => remove(i)}>✕</button>
                     </div>
                   </li>

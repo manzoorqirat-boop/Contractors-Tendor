@@ -268,6 +268,9 @@ class BidBook:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'task', text TEXT NOT NULL,
                   done INTEGER NOT NULL DEFAULT 0, owner TEXT, vault_id INTEGER, note TEXT, position INTEGER NOT NULL DEFAULT 0, source TEXT, created TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS bid_items_bid ON bid_items (bid_id);
+                CREATE TABLE IF NOT EXISTS bid_comments (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, at TEXT NOT NULL, username TEXT NOT NULL, text TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS bid_comments_bid ON bid_comments (bid_id);
                 CREATE TABLE IF NOT EXISTS bid_changes (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, at TEXT NOT NULL, what TEXT NOT NULL, old TEXT, new TEXT,
                   seen INTEGER NOT NULL DEFAULT 0, notified INTEGER NOT NULL DEFAULT 0);
@@ -278,7 +281,7 @@ class BidBook:
                 """
             )
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(bids)")}
-            for col in ("portal_facts", "portal_checked", "doc_checked"):
+            for col in ("portal_facts", "portal_checked", "doc_checked", "signoff"):
                 if col not in have:
                     self.db.execute(f"ALTER TABLE bids ADD COLUMN {col} TEXT")  # added after the first release
             self.db.commit()
@@ -290,7 +293,7 @@ class BidBook:
         if r is None:
             return None
         d = dict(r)
-        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked"):
+        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked", "signoff"):
             if f in d:
                 try:
                     d[f] = json.loads(d[f]) if d[f] else None
@@ -366,7 +369,7 @@ class BidBook:
         return self.get(bid_id) or bid
 
     def set_json(self, bid_id: int, field: str, value: Any, now: datetime) -> None:
-        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked"):
+        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked", "signoff"):
             raise ValueError(field)
         with self.lock:
             self.db.execute(f"UPDATE bids SET {field} = ?, updated = ? WHERE id = ?", (json.dumps(value) if value is not None else None, _iso(now), bid_id))
@@ -424,6 +427,7 @@ class BidBook:
         with self.lock:
             self.db.execute("DELETE FROM bid_items WHERE bid_id = ?", (bid_id,))
             self.db.execute("DELETE FROM bid_changes WHERE bid_id = ?", (bid_id,))
+            self.db.execute("DELETE FROM bid_comments WHERE bid_id = ?", (bid_id,))
             cur = self.db.execute("DELETE FROM bids WHERE id = ?", (bid_id,))
             self.db.commit()
             return cur.rowcount > 0
@@ -479,6 +483,52 @@ class BidBook:
                 raise BidError("No such item")
             row = self.db.execute("SELECT * FROM bid_items WHERE id = ?", (item_id,)).fetchone()
         return {**dict(row), "done": bool(row["done"])}
+
+    def get_item(self, bid_id: int, item_id: int) -> dict | None:
+        with self.lock:
+            r = self.db.execute("SELECT * FROM bid_items WHERE id = ? AND bid_id = ?", (item_id, bid_id)).fetchone()
+        return {**dict(r), "done": bool(r["done"])} if r else None
+
+    def items_for_owner(self, username: str) -> list[dict]:
+        """Open checklist items assigned to a person, on bids still in progress, soonest closing first."""
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT i.id AS item_id, i.text, i.kind, b.id AS bid_id, b.title, b.description, b.tender_id, b.closing, b.stage FROM bid_items i JOIN bids b ON b.id = i.bid_id "
+                "WHERE LOWER(i.owner) = ? AND i.done = 0 AND b.stage IN ('interested', 'preparing') ORDER BY (b.closing IS NULL), b.closing, i.id", (username.strip().lower(),)).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- comments ----------------------------------------------------------------------------------------------------
+
+    MAX_COMMENT = 2000
+
+    def add_comment(self, bid_id: int, username: str, text: str, now: datetime) -> dict:
+        text = (text or "").strip()
+        if not text:
+            raise BidError("Write something first")
+        if len(text) > self.MAX_COMMENT:
+            raise BidError(f"A comment can be up to {self.MAX_COMMENT} characters")
+        with self.lock:
+            cur = self.db.execute("INSERT INTO bid_comments (bid_id, at, username, text) VALUES (?,?,?,?)", (bid_id, _iso(now), username[:80], text))
+            self.db.commit()
+        return {"id": cur.lastrowid, "bid_id": bid_id, "at": _iso(now), "username": username, "text": text}
+
+    def comments(self, bid_id: int) -> list[dict]:
+        with self.lock:
+            return [dict(r) for r in self.db.execute("SELECT id, at, username, text FROM bid_comments WHERE bid_id = ? ORDER BY id", (bid_id,))]
+
+    def comment_count(self, bid_id: int) -> int:
+        with self.lock:
+            return self.db.execute("SELECT COUNT(*) FROM bid_comments WHERE bid_id = ?", (bid_id,)).fetchone()[0]
+
+    def delete_comment(self, bid_id: int, comment_id: int, username: str, is_admin: bool) -> bool:
+        """A person removes their own comment; an administrator can remove any. False when there is no such comment or it is not theirs."""
+        with self.lock:
+            r = self.db.execute("SELECT username FROM bid_comments WHERE id = ? AND bid_id = ?", (comment_id, bid_id)).fetchone()
+            if not r or not (is_admin or r["username"] == username):
+                return False
+            self.db.execute("DELETE FROM bid_comments WHERE id = ?", (comment_id,))
+            self.db.commit()
+        return True
 
     def delete_item(self, bid_id: int, item_id: int) -> bool:
         with self.lock:

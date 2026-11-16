@@ -1,7 +1,7 @@
 export interface PortalInfo { key: string; name: string; state: string; search_url: string }
 export interface Dimension { key: string; label: string; time: boolean }
 export interface AppConfig {
-  portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number; ai_enabled?: boolean; storage_warning?: string;
+  portals: PortalInfo[]; mail_configured: boolean; recipient_count: number; now: string; timezone: string; dimensions: Dimension[]; soon_days: number; ai_enabled?: boolean; storage_warning?: string; require_signoff?: boolean;
 }
 
 export interface PortalReport { portal: string; name: string; departments: number; listed: number; new_civil: number; errors: string[]; failed: boolean; access?: string }
@@ -51,7 +51,7 @@ export interface NewPortal { name: string; state: string; base_url: string }
 
 export interface Settings {
   recipients: string[]; send_time: string; schedule_enabled: boolean; send_empty: boolean; portals: string[]; min_value: number;
-  extra_keywords: string[]; exclude_words: string[]; company_profile: string; reminders_on?: boolean; webhook_url?: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string;
+  extra_keywords: string[]; exclude_words: string[]; company_profile: string; require_signoff?: boolean; reminders_on?: boolean; webhook_url?: string; ai_digest_intro: boolean; ai_hide_noncivil: boolean; mail_configured: boolean; mail_from: string; available_portals: { key: string; name: string }[]; custom_portals?: NewPortal[]; logo_text: string;
 }
 
 export type Status = 'open' | 'closing_soon' | 'closed' | 'all';
@@ -87,6 +87,7 @@ export interface EligibilityCheck { requirement: string; status: 'met' | 'gap' |
 export interface Eligibility { verdict: string; summary: string; checks: EligibilityCheck[]; checked?: string }
 export interface BidDetail extends Omit<BidSummary, 'has_doc'> {
   published: string | null; category: string; location: string; emd: number | null; notes: string | null; l1_bidder: string | null; result_note: string | null; search_url: string;
+  signoff?: Signoff | null; comment_count?: number;
   doc: DocFacts | null; doc_checked?: { by: string; at: string } | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null; manual?: boolean; has_source?: boolean; portal_checked?: string | null;
   items: BidItem[]; changes: BidChange[]; unseen: number; history: string[];
 }
@@ -143,9 +144,12 @@ export interface SimInput { l1_price: number | null; quoted_pct: number | null; 
 export interface ManualListing { tender_id: string; reference: string; title: string; description: string; organisation: string; location: string; value: number | null; emd: number | null; published: string; closing: string; opening: string; portal_name: string; form_of_contract: string }
 export interface ManualFields { tender_id?: string; title?: string; description?: string; reference?: string; organisation?: string; location?: string; value?: number | null; emd?: number | null; published?: string; closing?: string; opening?: string; portal_name?: string; clear_value?: boolean; clear_emd?: boolean }
 
+export interface Person { username: string; name: string }
+export interface BidComment { id: number; at: string; username: string; text: string }
+export interface Signoff { state: 'requested' | 'approved' | 'declined'; requested_by: string; by: string; at: string; note: string }
 export type Role = 'viewer' | 'bidder' | 'admin';
-export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean; two_step: boolean }
-export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; two_step?: boolean; created: string | null; last_login: string | null; owner: boolean }
+export interface Me { id: number; username: string; name: string; role: Role; owner: boolean; must_change: boolean; two_step: boolean; email?: string }
+export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; two_step?: boolean; email?: string; created: string | null; last_login: string | null; owner: boolean }
 export interface UsersData { users: UserRow[]; roles: { key: Role; label: string; text: string }[]; min_password: number }
 export interface AuditEntry { id: number; at: string; username: string; role: string | null; action: string; target: string; detail: string; client: string }
 

@@ -16,6 +16,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from html import escape as html_escape
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -380,6 +381,20 @@ class NewUser(BaseModel):
     name: str = ""
     role: str = "viewer"
     password: str
+    email: str = ""
+
+
+class OwnEmail(BaseModel):
+    email: str = ""
+
+
+class CommentBody(BaseModel):
+    text: str
+
+
+class SignoffBody(BaseModel):
+    action: str
+    note: str = ""
 
 
 class UserEdit(BaseModel):
@@ -388,6 +403,7 @@ class UserEdit(BaseModel):
     active: bool | None = None
     password: str | None = None
     reset_2fa: bool = False
+    email: str | None = None
 
 
 class PasswordChange(BaseModel):
@@ -839,7 +855,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             "mail_configured": manager.mail_configured, "recipient_count": len(cur["recipients"]),
             "now": now().isoformat(timespec="seconds"), "timezone": config.tz_name,
             "dimensions": [{"key": k, "label": d["label"], "time": isinstance(d["order"], str) and d["order"] in ("first", "last")} for k, d in DIMENSIONS.items()],
-            "soon_days": env.closing_soon_days, "ai_enabled": ai.configured(), "storage_warning": storage_note,
+            "soon_days": env.closing_soon_days, "ai_enabled": ai.configured(), "storage_warning": storage_note, "require_signoff": cur["require_signoff"],
         }
 
     @app.get("/api/stats", dependencies=auth)
@@ -1228,7 +1244,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             **bid, "portal_name": portal_names.get(bid["portal"] or "", bid["portal"]), "search_url": portal_search.get(bid["portal"] or "", ""),
             "value_text": format_inr(bid["value"]), "items": items, "changes": changes, "unseen": sum(1 for c in changes if not c["seen"]),
             "history": bids.history_notes(bid.get("work_type"), bid.get("organisation"), bid.get("value")),
-            "has_source": bids.has_source(bid["key"]), "manual": bid["portal"] == "manual",
+            "has_source": bids.has_source(bid["key"]), "manual": bid["portal"] == "manual", "comment_count": bids.comment_count(bid["id"]),
         }
 
     @app.get("/api/bids", dependencies=auth)
@@ -1284,8 +1300,13 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return bid_full(bid_or_404(bid_id))
 
     @app.patch("/api/bids/{bid_id}", dependencies=auth)
-    def patch_bid(bid_id: int, body: dict[str, Any]) -> dict:
-        bid_or_404(bid_id)
+    def patch_bid(bid_id: int, body: dict[str, Any], request: Request) -> dict:
+        current = bid_or_404(bid_id)
+        user: Principal = request.state.user
+        new_stage = body.get("stage")
+        if (appsettings.current(env, store.get_settings())["require_signoff"] and current["stage"] == "interested" and new_stage in ("preparing", "submitted")
+                and not user.can("admin") and (current.get("signoff") or {}).get("state") != "approved"):
+            raise HTTPException(422, "This bid needs an administrator's approval before it moves on. Use 'Ask for approval' on the Team tab.")
         try:
             bids.update(bid_id, clean_patch(body), now())
         except BidError as e:
@@ -1312,12 +1333,18 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return {"added": bids.generate_items(bid_id, now())}
 
     @app.patch("/api/bids/{bid_id}/items/{item_id}", dependencies=auth)
-    def patch_bid_item(bid_id: int, item_id: int, body: dict[str, Any]) -> dict:
-        bid_or_404(bid_id)
+    def patch_bid_item(bid_id: int, item_id: int, body: dict[str, Any], request: Request) -> dict:
+        bid = bid_or_404(bid_id)
+        before = bids.get_item(bid_id, item_id)
         try:
-            return bids.update_item(bid_id, item_id, body)
+            item = bids.update_item(bid_id, item_id, body)
         except BidError as e:
             raise bid_error(e) from None
+        who = (item.get("owner") or "").strip().lower()
+        if "owner" in body and who and before and (before.get("owner") or "").strip().lower() != who and who != request.state.user.username.lower():
+            notify(people.emails_for([who]), f"{request.state.user.name} gave you a task on a bid",
+                   f"{request.state.user.name} assigned you: {item['text']}\n\nBid: {(bid['description'] or bid['title'])[:120]} (ID {bid['tender_id']})\nCloses: {bid.get('closing') or 'not set'}{bid_link(bid_id)}")
+        return item
 
     @app.delete("/api/bids/{bid_id}/items/{item_id}", dependencies=auth)
     def delete_bid_item(bid_id: int, item_id: int) -> dict:
@@ -1624,6 +1651,107 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         store.put_settings({"company_facts": facts})
         return {"facts": facts}
 
+    # ---- teamwork: people, comments, approval -------------------------------------------------------------------
+
+    def bid_link(bid_id: int) -> str:
+        return f"\n\nOpen it: {config.app_url}/#/bids/{bid_id}" if config.app_url else ""
+
+    def notify(emails: list[str], subject: str, text: str) -> None:
+        """Tells people by email, without making the person who acted wait for it. Never raises: a mail problem must not undo their change."""
+        if not emails or not manager.mail_configured:
+            return
+
+        def send() -> None:
+            try:
+                body = "<p>" + html_escape(text).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+                manager.sender(env.brevo_api_key, env.mail_from, env.mail_from_name, emails, f"TendAI: {subject}", body, text)
+            except Exception:  # noqa: BLE001
+                log.exception("notification email failed")
+
+        if manager.background:
+            threading.Thread(target=send, daemon=True, name="notify").start()
+        else:
+            send()
+
+    @app.get("/api/people", dependencies=auth)
+    def people_directory() -> dict:
+        """Names to pick from when assigning a task. No contact details."""
+        found = people.directory()
+        if not any(p["username"] == owner.username for p in found):
+            found.append({"username": owner.username, "name": "Owner"})
+        return {"people": found}
+
+    @app.post("/api/account/email", dependencies=auth)
+    def set_own_email(body: OwnEmail, request: Request) -> dict:
+        user: Principal = request.state.user
+        if user.owner:
+            raise HTTPException(422, "The owner login has no stored email. Add yourself as a person in Settings > People to get notifications")
+        try:
+            return {"email": people.set_own_email(user.id, body.email)}
+        except AccountError as e:
+            raise HTTPException(422, str(e)) from None
+
+    @app.get("/api/my-work", dependencies=auth)
+    def my_work(request: Request) -> dict:
+        """Open checklist items assigned to the signed-in person, on bids still in progress."""
+        return {"items": bids.items_for_owner(request.state.user.username)}
+
+    @app.get("/api/bids/{bid_id}/comments", dependencies=auth)
+    def list_comments(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        return {"comments": bids.comments(bid_id)}
+
+    @app.post("/api/bids/{bid_id}/comments", dependencies=auth)
+    def add_comment(bid_id: int, body: CommentBody, request: Request) -> dict:
+        bid = bid_or_404(bid_id)
+        user: Principal = request.state.user
+        try:
+            c = bids.add_comment(bid_id, user.username, body.text, now())
+        except BidError as e:
+            raise bid_error(e) from None
+        mentioned = {m.lower() for m in re.findall(r"@([A-Za-z0-9._-]{3,40})", body.text)}
+        tell = (mentioned | {(bid.get("owner") or "").strip().lower()}) - {user.username.lower(), ""}
+        notify(people.emails_for(sorted(tell)), f"{user.name} commented on a bid",
+               f"{user.name} wrote on {(bid['description'] or bid['title'])[:100]} (ID {bid['tender_id']}):\n\n{body.text.strip()[:600]}{bid_link(bid_id)}")
+        return c
+
+    @app.delete("/api/bids/{bid_id}/comments/{comment_id}", dependencies=auth)
+    def delete_comment(bid_id: int, comment_id: int, request: Request) -> dict:
+        user: Principal = request.state.user
+        if not bids.delete_comment(bid_id, comment_id, user.username, user.can("admin")):
+            raise HTTPException(404, "No such comment, or it is not yours to remove")
+        return {"removed": comment_id}
+
+    @app.post("/api/bids/{bid_id}/signoff", dependencies=auth)
+    def bid_signoff(bid_id: int, body: SignoffBody, request: Request) -> dict:
+        """Asking for, giving, refusing or withdrawing approval to bid. Only administrators approve or decline."""
+        bid = bid_or_404(bid_id)
+        user: Principal = request.state.user
+        cur = bid.get("signoff") or {}
+        note = body.note.strip()[:500]
+        title = (bid["description"] or bid["title"])[:100]
+        stamp = now().isoformat(timespec="seconds")
+        if body.action == "request":
+            if bid["stage"] != "interested":
+                raise HTTPException(422, "Approval is asked for while a bid is still at Interested")
+            mark = {"state": "requested", "requested_by": user.username, "by": user.username, "at": stamp, "note": note}
+            notify(people.admin_emails(), f"{user.name} asks approval to bid", f"{user.name} asks for approval to bid on {title} (ID {bid['tender_id']}).\n\n{note}{bid_link(bid_id)}")
+        elif body.action == "withdraw":
+            if not cur or (cur.get("requested_by") != user.username and not user.can("admin")):
+                raise HTTPException(403, "Only the person who asked, or an administrator, can withdraw the request")
+            mark = None
+        elif body.action in ("approve", "decline"):
+            if not user.can("admin"):
+                raise HTTPException(403, "Only an administrator can approve or decline a bid")
+            mark = {"state": "approved" if body.action == "approve" else "declined", "requested_by": cur.get("requested_by") or user.username, "by": user.username, "at": stamp, "note": note}
+            if cur.get("requested_by") and cur["requested_by"] != user.username:
+                notify(people.emails_for([cur["requested_by"]]), f"Bid {'approved' if body.action == 'approve' else 'declined'}: {title[:60]}",
+                       f"{user.name} {'approved' if body.action == 'approve' else 'declined'} the bid on {title} (ID {bid['tender_id']}).\n\n{note}{bid_link(bid_id)}")
+        else:
+            raise HTTPException(422, "Unknown action")
+        bids.set_json(bid_id, "signoff", mark, now())
+        return {"signoff": mark}
+
     # ---- people: accounts, passwords, activity ------------------------------------------------------------------
 
     @app.post("/api/account/password", dependencies=auth)
@@ -1677,7 +1805,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.post("/api/users", dependencies=auth)
     def create_user(body: NewUser) -> dict:
         try:
-            return people.create(body.username, body.name, body.role, body.password, now(), reserved=config.username)
+            return people.create(body.username, body.name, body.role, body.password, now(), reserved=config.username, email=body.email)
         except AccountError as e:
             raise HTTPException(422, str(e)) from None
 
@@ -1689,7 +1817,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if user_id == me.id and (body.active is False or (body.role is not None and body.role != me.role)):
             raise HTTPException(422, "You cannot remove your own access or change your own role. Ask another administrator")
         try:
-            out = people.update(user_id, name=body.name, role=body.role, active=body.active, password=body.password, reset_two_step=body.reset_2fa)
+            out = people.update(user_id, name=body.name, role=body.role, active=body.active, password=body.password, reset_two_step=body.reset_2fa, email=body.email)
         except AccountError as e:
             raise HTTPException(404 if "No such" in str(e) else 422, str(e)) from None
         if body.active is False or body.password is not None:

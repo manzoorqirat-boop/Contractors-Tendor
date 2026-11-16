@@ -674,3 +674,10 @@ input.pick { width: 18px; height: 18px; margin: 0 6px 0 0; accent-color: var(--a
 .shortcuts dd { margin: 0; text-align: right; }
 kbd { display: inline-block; min-width: 22px; padding: 1px 6px; text-align: center; font: 600 var(--fs-xs) ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; }
 .h3-like { font-size: var(--fs-sm); color: var(--muted); font-weight: 600; line-height: 1.25; }
+
+/* ---- team: comments, approval ---- */
+.comments { list-style: none; margin: var(--sp-3) 0; padding: 0; display: grid; gap: var(--sp-3); }
+.comments li { padding: var(--sp-3); background: var(--surface-2); border-radius: var(--r-md); }
+.comments p { margin: var(--sp-1) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.comment-head .link-btn { margin-left: auto; }

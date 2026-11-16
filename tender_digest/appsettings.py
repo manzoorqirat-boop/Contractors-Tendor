@@ -112,6 +112,10 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
         if not isinstance(payload["reminders_on"], bool):
             raise SettingsError("reminders_on must be true or false")
         out["reminders_on"] = payload["reminders_on"]
+    if "require_signoff" in payload:
+        if not isinstance(payload["require_signoff"], bool):
+            raise SettingsError("require_signoff must be true or false")
+        out["require_signoff"] = payload["require_signoff"]
     if "webhook_url" in payload:
         from .reminders import check_webhook_url
         try:
@@ -157,7 +161,7 @@ def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
 
 DEFAULTS = {
     "send_time": "08:00", "schedule_enabled": True, "send_empty": True, "min_value": 0.0,
-    "reminders_on": True, "webhook_url": "", "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "ai_digest_intro": True, "ai_hide_noncivil": False,
+    "reminders_on": True, "require_signoff": False, "webhook_url": "", "extra_keywords": [], "exclude_words": [], "company_profile": "", "logo_text": "QM", "ai_digest_intro": True, "ai_hide_noncivil": False,
 }
 
 
@@ -178,6 +182,7 @@ def current(env: Settings, saved: dict[str, Any]) -> dict[str, Any]:
         "ai_digest_intro": saved.get("ai_digest_intro", DEFAULTS["ai_digest_intro"]),
         "ai_hide_noncivil": saved.get("ai_hide_noncivil", DEFAULTS["ai_hide_noncivil"]),
         "reminders_on": saved.get("reminders_on", DEFAULTS["reminders_on"]),
+        "require_signoff": saved.get("require_signoff", DEFAULTS["require_signoff"]),
         "webhook_url": saved.get("webhook_url", DEFAULTS["webhook_url"]),
     }
 
