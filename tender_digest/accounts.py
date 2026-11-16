@@ -348,6 +348,8 @@ class Accounts:
 ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/runs"): "Started a collection run",
     ("POST", "/api/tenders/star"): "Starred or unstarred a tender",
+    ("POST", "/api/tenders/star-bulk"): "Starred or unstarred several tenders",
+    ("POST", "/api/bids/bulk"): "Started bids on several tenders",
     ("POST", "/api/tenders/summary"): "Asked AI to summarise a tender",
     ("POST", "/api/tenders/brief"): "Asked AI for a bid / no-bid brief",
     ("POST", "/api/tenders/document"): "Read a tender document with AI",

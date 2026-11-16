@@ -24,9 +24,9 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, appsettings, mailer
+from . import access, accounts, ai, alerts, appsettings, mailer
 from .accounts import AccountError, Accounts, Principal
 from . import offsite
 from .backup import Backups, BackupError
@@ -37,7 +37,7 @@ from .boq.service import BoqError, BoqService
 from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
 from .gepnic import PortalError, Tender, parse_date, pick_nit
 from .config import Portal, Settings, load_settings
-from .digest import CSV_COLUMNS, format_inr, safe_cell
+from .digest import CSV_COLUMNS, format_inr, safe_cell, tenders_workbook
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
 from .store import DIMENSIONS, SORTS, SeenStore
 
@@ -431,6 +431,16 @@ class ViewItem(BaseModel):
     id: str
     name: str
     filters: dict[str, Any]
+    alert: bool = False  # email the new matches in the daily digest
+
+
+class BulkStar(BaseModel):
+    keys: list[str] = Field(max_length=200)
+    starred: bool
+
+
+class BulkBids(BaseModel):
+    keys: list[str] = Field(max_length=50)
 
 
 class ViewsBody(BaseModel):
@@ -860,21 +870,36 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         return {"items": [shape(r) for r in rows], "total": total, "page": page, "page_size": page_size, "categories": store.categories()}
 
     @app.get("/api/tenders/export", dependencies=auth)
-    def export(f: dict = fparams, sort: str = "closing") -> Response:
+    def export(f: dict = fparams, sort: str = "closing", format: str = Query("csv", pattern="^(csv|xlsx)$"), keys: list[str] | None = Query(None, max_length=300)) -> Response:
+        """The tenders the filters select (or only the `keys` a person ticked) as a CSV or an Excel workbook."""
         if sort not in SORTS:
             raise HTTPException(422, "Unknown sort")
+        if keys:
+            if len(keys) > 300 or any(len(k) > 300 for k in keys):
+                raise HTTPException(422, "Too many tenders selected")
+            f = {**f, "keys": keys, "status": "all"}
         rows, _ = store.search(now(), f, sort, MAX_EXPORT_ROWS, 0)
+        table = [[
+            "Open" if not r["closing"] or r["closing"] >= now().isoformat() else "Closed", portal_names.get(r["portal"], r["portal"]), r["tender_id"],
+            r["description"] or r["title"], (r["organisation"] or "").replace("||", " > "), r["category"], r["location"],
+            "" if r["value"] is None else int(r["value"]), "" if r["emd"] is None else int(r["emd"]), r["published"] or "", r["closing"] or "",
+        ] for r in rows]
+        stamp = now().strftime("%Y-%m-%d")
+        if format == "xlsx":
+            return Response(tenders_workbook(table), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            headers={"Content-Disposition": f'attachment; filename="tenders-{stamp}.xlsx"'})
         out = io.StringIO()
         writer = csv.writer(out)
         writer.writerow(CSV_COLUMNS)
-        for r in rows:
-            writer.writerow([safe_cell(c) for c in [
-                "Open" if not r["closing"] or r["closing"] >= now().isoformat() else "Closed", portal_names.get(r["portal"], r["portal"]), r["tender_id"],
-                r["description"] or r["title"], (r["organisation"] or "").replace("||", " > "), r["category"], r["location"],
-                "" if r["value"] is None else int(r["value"]), "" if r["emd"] is None else int(r["emd"]), r["published"] or "", r["closing"] or "",
-            ]])
-        return Response("﻿" + out.getvalue(), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": f'attachment; filename="tenders-{now().strftime("%Y-%m-%d")}.csv"'})
+        for r in table:
+            writer.writerow([safe_cell(c) for c in r])
+        return Response("\ufeff" + out.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="tenders-{stamp}.csv"'})
+
+    @app.post("/api/tenders/star-bulk", dependencies=auth)
+    def star_bulk(body: BulkStar) -> dict:
+        """Stars or unstars every ticked tender at once."""
+        done = sum(1 for k in dict.fromkeys(body.keys) if store.set_starred(k, body.starred, now()))
+        return {"changed": done, "starred": body.starred}
 
     @app.get("/api/tenders/detail", dependencies=auth)
     def tender_detail(key: str = Query(..., max_length=300)) -> dict:
@@ -1151,7 +1176,9 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 raise HTTPException(422, "A view needs a name of up to 40 characters")
             if any(k not in VIEW_KEYS for k in v.filters):
                 raise HTTPException(422, "A view contains a setting that is not known")
-            views.append({"id": v.id, "name": name, "filters": v.filters})
+            views.append({"id": v.id, "name": name, "filters": v.filters, "alert": v.alert})
+        if sum(1 for v in views if v["alert"]) > alerts.MAX_ALERT_VIEWS:
+            raise HTTPException(422, f"At most {alerts.MAX_ALERT_VIEWS} saved searches can email you. Turn one off first")
         if len(json.dumps(views)) > 30_000:
             raise HTTPException(422, "Saved views are too large")
         store.put_settings({"views": views})
@@ -1198,6 +1225,23 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         for r in bids.list():
             counts[r["stage"]] += 1
         return {"bids": rows, "counts": counts, "stages": [{"key": k, "label": STAGE_LABELS[k]} for k in STAGES], "unseen": bids.unseen_total()}
+
+    @app.post("/api/bids/bulk", dependencies=auth)
+    def create_bids_bulk(body: BulkBids) -> dict:
+        """Starts a bid on every ticked tender that has none yet."""
+        created, existing, missing = [], [], []
+        for key in dict.fromkeys(body.keys):
+            try:
+                bid, made = bids.create_from_tender(key, now())
+            except BidError:
+                missing.append(key)
+                continue
+            if made:
+                bids.generate_items(bid["id"], now())
+                created.append(bid["id"])
+            else:
+                existing.append(bid["id"])
+        return {"created": created, "existing": existing, "missing": missing}
 
     @app.post("/api/bids", dependencies=auth)
     def create_bid(body: BidCreate) -> dict:

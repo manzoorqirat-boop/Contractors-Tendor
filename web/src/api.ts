@@ -64,7 +64,9 @@ export const api = {
   config: () => call<AppConfig>('/api/config'),
   stats: (f: Filters) => call<Stats>(`/api/stats?${toParams(f)}`),
   tenders: (f: Filters, sort: string, page: number, pageSize = 25) => call<TenderPage>(`/api/tenders?${toParams(f)}&sort=${sort}&page=${page}&page_size=${pageSize}`),
-  exportUrl: (f: Filters, sort = 'closing') => `/api/tenders/export?${toParams(f)}&sort=${sort}`,
+  exportUrl: (f: Filters, sort = 'closing', format: 'csv' | 'xlsx' = 'csv', keys: string[] = []) => `/api/tenders/export?${toParams(f)}&sort=${sort}&format=${format}${keys.map((k) => `&keys=${encodeURIComponent(k)}`).join('')}`,
+  starBulk: (keys: string[], starred: boolean) => call<{ changed: number; starred: boolean }>('/api/tenders/star-bulk', { method: 'POST', body: JSON.stringify({ keys, starred }) }),
+  createBidsBulk: (keys: string[]) => call<{ created: number[]; existing: number[]; missing: string[] }>('/api/bids/bulk', { method: 'POST', body: JSON.stringify({ keys }) }),
   pivot: (f: Filters, groupBy: string, splitBy: string, top = 12) =>
     call<Pivot>(`/api/analytics?${toParams(f)}&group_by=${groupBy}${splitBy ? `&split_by=${splitBy}` : ''}&top=${top}`),
   facets: () => call<Facets>('/api/facets'),

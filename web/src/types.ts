@@ -68,7 +68,7 @@ export interface Filters {
 
 /** Display choices that are not filters. */
 export interface Display { sort: string; page: number; group_by: string; split_by: string; measure: Measure; chart: ChartKind; layout: 'cards' | 'table' }
-export interface SavedView { id: string; name: string; filters: Record<string, unknown> }
+export interface SavedView { id: string; name: string; filters: Record<string, unknown>; alert?: boolean }
 
 // ---- bid workspace -------------------------------------------------------------------------------------------------
 export type Stage = 'interested' | 'preparing' | 'submitted' | 'opened' | 'won' | 'lost' | 'dropped';

@@ -310,6 +310,10 @@ class SeenStore:
                 parts.append(none_sql)
             where.append("(" + " OR ".join(parts) + ")")
 
+        if f.get("keys"):  # an explicit list of tenders (the rows a person ticked, or the new ones an alert looks at)
+            keys = [str(k) for k in f["keys"]][:500]
+            where.append(f"key IN ({','.join('?' * len(keys))})")
+            args.extend(keys)
         any_of("portal", f.get("portal"), "portal IS NULL")
         any_of("category", f.get("category"), "(category IS NULL OR category = '')")
         any_of(DEPT_SQL, f.get("department"), f"({DEPT_SQL} IS NULL OR {DEPT_SQL} = '')")

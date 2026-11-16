@@ -30,7 +30,8 @@ tenders, and gives you:
   department, location, value band, how soon it closes, closing week or day, day found, day published), measured as number of
   tenders, total value or average value, shown as stacked bars, grouped bars or a shaded table. Every bar and cell opens exactly
   the tenders it counts. Tables can be downloaded.
-- **Tenders**: cards or a table, sortable, with a detail panel, stars for a watchlist, and a spreadsheet download.
+- **Tenders**: cards or a table, sortable, with a detail panel, stars for a watchlist, and a download as **Excel** or CSV. Tick tenders (up to 100) to **star, start bids on, or download just those**.
+- **Email alerts for saved searches**: when you save a view, tick *Email me new matches*. The daily digest then gains a section per alert view listing the tenders found since the last email that match it (up to 10 alert views).
 
 ## Bid workspace (tender filing support)
 

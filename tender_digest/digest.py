@@ -79,6 +79,38 @@ def safe_cell(value):
     return value
 
 
+def tenders_workbook(rows: list[list]) -> bytes:
+    """The tender list as an Excel workbook: a header row, frozen, with widths and number formats. Text is stored as text (never as a formula)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Tenders"
+    ws.append(CSV_COLUMNS)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="2F5BEA")
+        cell.alignment = Alignment(vertical="center")
+    for r in rows:
+        ws.append(r)
+        for cell in ws[ws.max_row]:
+            if isinstance(cell.value, str):
+                cell.data_type = "s"  # a tender title that starts with "=" must not run as a formula
+    for col, width in zip("ABCDEFGHIJK", (9, 18, 24, 60, 38, 22, 18, 20, 14, 18, 18)):
+        ws.column_dimensions[col].width = width
+    for row in ws.iter_rows(min_row=2):
+        row[3].alignment = Alignment(wrap_text=True, vertical="top")
+        for i in (7, 8):
+            row[i].number_format = "#,##0"
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(CSV_COLUMNS))}{max(ws.max_row, 1)}"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def build_csv(rows: list[tuple[str, Tender, str]]) -> str:
     """rows are (status, tender, portal name). utf-8 with a BOM so Excel opens the rupee sign and Hindi/Marathi text correctly."""
     out = io.StringIO()
@@ -109,6 +141,7 @@ def build(
     max_soon_per_portal: int = 10,
     intro: str = "",
     bids: dict | None = None,
+    searches: list[dict] | None = None,
 ) -> Digest:
     by_portal = {r.portal.key: r for r in reports}
     new_keys = {t.key for t in new}
@@ -191,6 +224,17 @@ def build(
             + (f"<div class=w><b>Changes on tenders you are bidding for</b><ul style='margin:6px 0 0 18px'>{c_rows}</ul>Check the portal and your bid before the closing date.</div>" if c_rows else "")
         )
 
+    searches = searches or []
+    search_html = ""
+    if searches:
+        blocks = "".join(
+            f"<h3>{escape(s['name'])} ({s['count']} new)</h3><table>"
+            + "".join(f"<tr><td><b>{escape((i['title'] or '')[:110])}</b><div class=o>{escape(i['organisation'])} · ID {escape(i['tender_id'])}</div></td>"
+                      f"<td class=n>{escape(format_inr(i['value']))}</td><td class=n>{escape((i['closing'] or '')[:10])}</td></tr>" for i in s["items"])
+            + (f"<tr><td colspan=3 class=o>and {s['count'] - len(s['items'])} more in the app</td></tr>" if s["count"] > len(s["items"]) else "") + "</table>"
+            for s in searches)
+        search_html = f"<h2>Your saved searches</h2>{blocks}"
+
     html = (
         f"<html><head><meta charset='utf-8'>{STYLE}</head><body><div class=c>"
         "<div class=o style='font-weight:600'>TendAI by QMSofts</div>"
@@ -198,7 +242,7 @@ def build(
         f"<div class=o>{now.strftime('%A, %d %B %Y')}</div>"
         f"{notes}"
         + (f"<div class=i><b>Today's highlights</b><br>{escape(intro)}</div>" if intro else "")
-        + f"{bid_html}{section('New since the last digest', new, 'No new civil tenders.', max_new_per_portal)}"
+        + f"{bid_html}{search_html}{section('New since the last digest', new, 'No new civil tenders.', max_new_per_portal)}"
         f"{section('Closing in the next few days', soon, 'Nothing else closes soon.', max_soon_per_portal)}"
         "<p class=o style='margin-top:28px'>Read from the public tender lists of the portals named above. "
         "Always confirm details, eligibility and dates on the portal itself before bidding. "
@@ -212,6 +256,10 @@ def build(
         text_lines.append("YOUR BIDS")
         text_lines += [f"- {a['label']}: {a['date'][:10]}" + (f" ({a['title'][:60]})" if a["title"] else "") for a in bids["alerts"]]
         text_lines += [f"- CHANGE ({change_text.get(c['what'], c['what'])}) ID {c['tender_id']}: {c['new'] or ''}" for c in bids["changes"]]
+        text_lines.append("")
+    for s in searches:
+        text_lines.append(f"SAVED SEARCH: {s['name']} ({s['count']} new)")
+        text_lines += [f"- {(i['title'] or '')[:80]} | ID {i['tender_id']} | {format_inr(i['value'])} | closes {(i['closing'] or '')[:10]}" for i in s["items"]]
         text_lines.append("")
     for title, tenders in (("NEW", new), ("CLOSING SOON", soon)):
         text_lines.append(f"{title} ({len(tenders)})")

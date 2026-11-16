@@ -106,6 +106,7 @@ function ViewsMenu({ filters, display, onApply }: { filters: Filters; display: D
   const toast = useToast();
   const [views, setViews] = useState<SavedView[] | null>(null);
   const [name, setName] = useState('');
+  const [alertOn, setAlertOn] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { api.views().then((r) => setViews(r.views), () => setViews([])); }, []);
@@ -124,8 +125,8 @@ function ViewsMenu({ filters, display, onApply }: { filters: Filters; display: D
     const obj: Record<string, unknown> = {};
     for (const k of new Set(params.keys())) obj[k] = params.getAll(k).length > 1 || ['portal', 'category', 'department', 'location', 'work_type'].includes(k) ? params.getAll(k) : params.get(k);
     for (const k of ['no_value', 'no_closing', 'no_published', 'starred']) if (obj[k] === 'true') obj[k] = true;
-    persist([...(views ?? []), { id: String(Date.now()), name: trimmed, filters: obj }], `Saved view "${trimmed}"`);
-    setName('');
+    persist([...(views ?? []), { id: String(Date.now()), name: trimmed, filters: obj, alert: alertOn }], alertOn ? `Saved "${trimmed}". New matches will be in your daily email.` : `Saved view "${trimmed}"`);
+    setName(''); setAlertOn(false);
   }
 
   function apply(v: SavedView) {
@@ -143,6 +144,7 @@ function ViewsMenu({ filters, display, onApply }: { filters: Filters; display: D
         {views?.map((v) => (
           <div key={v.id} className="view-row">
             <button type="button" className="link-btn view-name" onClick={() => apply(v)}>{v.name}</button>
+            <label className="view-alert" title="Add the new tenders that match this view to your daily email"><input type="checkbox" checked={!!v.alert} disabled={busy} onChange={(e) => persist((views ?? []).map((x) => (x.id === v.id ? { ...x, alert: e.target.checked } : x)), e.target.checked ? `New matches of "${v.name}" will be in your daily email.` : 'Email alert turned off')} /> Email</label>
             <button type="button" className="link-btn" disabled={busy} aria-label={`Delete view ${v.name}`} onClick={() => persist((views ?? []).filter((x) => x.id !== v.id), 'View deleted')}>✕</button>
           </div>
         ))}
@@ -150,6 +152,7 @@ function ViewsMenu({ filters, display, onApply }: { filters: Filters; display: D
       <form className="view-save" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <input type="text" placeholder="Name this view" aria-label="View name" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} />
         <button className="btn small primary" disabled={!name.trim() || busy}>Save</button>
+        <label className="check small" style={{ flexBasis: '100%', margin: '6px 0 0' }}><input type="checkbox" checked={alertOn} onChange={(e) => setAlertOn(e.target.checked)} />Email me new matches in the daily digest</label>
       </form>
     </Popover>
   );
