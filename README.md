@@ -65,7 +65,17 @@ Everything is in the `/data` volume: `tender_state.db` (tenders, bids, settings)
 - **Daily copy**: each day the service copies both databases into `/data/backups` (the last 7 days are kept; `BACKUP_KEEP_DAYS`). Each copy is checked with SQLite's integrity check. This protects against a bad edit or a damaged file, **not** against losing the volume.
 - **Download backup** (Settings > Backup): one zip with both databases and every vault file. **Save it somewhere other than Railway** (weekly is a good habit, and before any server change). It contains your company papers, so keep it private.
 - **Restore** (on the server, e.g. `railway ssh`, with the zip uploaded there): `python -m tender_digest.backup restore backup.zip --target-dir /data --force`, then restart the service. The zip's databases are checked first; existing data is moved aside (`name.before-restore-TIME`), never deleted. If you changed `VAULT_DIR` or `BOQ_DB_PATH`, copy those two items by hand.
-- Automatic copies to storage outside Railway (S3, R2) are not built in yet: they need a bucket and keys of your own.
+- **Off-site copy** (recommended): every night the two databases (compressed) and, once a week, the full zip with the Vault go to a bucket you own, so losing the Railway volume loses nothing. It works with Amazon S3, Cloudflare R2, Backblaze B2 and MinIO. Create a bucket and an access key limited to it (write, list, delete), then set:
+
+  | Variable | Purpose |
+  |---|---|
+  | `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY` | Required together. Secret. |
+  | `BACKUP_S3_ENDPOINT` | `https://<account>.r2.cloudflarestorage.com` for R2; blank for Amazon S3 |
+  | `BACKUP_S3_REGION` | `auto` for R2 (default); e.g. `ap-south-1` for Amazon S3 |
+  | `BACKUP_S3_PREFIX` | Folder in the bucket (default `tendai/`) |
+  | `BACKUP_S3_KEEP_DAILY`, `BACKUP_S3_KEEP_WEEKLY` | How many nightly and weekly copies to keep (14 and 8) |
+
+  Settings > Backup shows whether it is working, any error from the bucket, and a **Send a full backup now** button. A failed upload is retried within the hour. To restore, download the `.zip` from the bucket and use the restore command above. The bucket holds your company papers: keep it private, and turn on its own encryption if it offers it.
 
 Long actions (reading a notice, matching a BOQ, fetching from a portal, labelling tenders) run in the background and the page waits for the answer, so a slow one is not cut off by Railway's proxy. If the service restarts in the middle, the page says so and you press the button again.
 

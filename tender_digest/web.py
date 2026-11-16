@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from . import access, accounts, ai, appsettings, mailer
 from .accounts import AccountError, Accounts, Principal
+from . import offsite
 from .backup import Backups, BackupError
 from .boq import advisor
 from .boq.match import ClaudeVerifier
@@ -538,8 +539,14 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     bids = BidBook(store, vault_dir)
     boq = BoqService.open(env.state_path, lambda: ClaudeVerifier() if ai.configured() else None)
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
-    backups = Backups(store, boq.store, env.state_path, vault_dir, keep_days=max(1, _int_env("BACKUP_KEEP_DAYS", 7)))
-    scheduler = Scheduler(manager, housekeeping=backups.daily) if config.run_scheduler else None
+    remote_cfg, remote_problem = None, ""
+    try:
+        remote_cfg = offsite.config_from_env()
+    except offsite.OffsiteError as e:
+        remote_problem = str(e)
+        log.warning("off-site backup is not active: %s", e)
+    backups = Backups(store, boq.store, env.state_path, vault_dir, keep_days=max(1, _int_env("BACKUP_KEEP_DAYS", 7)), remote=remote_cfg, remote_problem=remote_problem)
+    scheduler = Scheduler(manager, housekeeping=backups.housekeeping) if config.run_scheduler else None
     limiter = LoginLimiter(store=store)
     jobs = Jobs()
     people = Accounts(store)
@@ -1626,6 +1633,18 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     @app.get("/api/backup/status", dependencies=auth)
     def backup_status() -> dict:
         return {**backups.status(), "storage_warning": storage_note}
+
+    @app.post("/api/backup/offsite-now", dependencies=auth)
+    def backup_offsite_now():
+        """Sends a full backup to the off-site bucket now, instead of waiting for tonight."""
+        if backups.remote is None:
+            raise HTTPException(422, backups.remote_problem or "Off-site backup is not set up. See the README (BACKUP_S3_BUCKET and the other BACKUP_S3_ variables)")
+        def work() -> dict:
+            state = backups.upload_offsite(now(), force=True)
+            if state.get("last_error"):
+                raise HTTPException(502, state["last_error"])
+            return {"ok": True, **backups.status()["offsite"]}
+        return run_job("offsite", "now", work)
 
     @app.get("/api/backup", dependencies=auth)
     def backup_download():

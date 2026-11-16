@@ -388,6 +388,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/account/2fa/disable"): "Turned off two-step sign-in",
     ("POST", "/api/account/sessions/end-others"): "Signed out other devices",
     ("GET", "/api/backup"): "Downloaded a backup",
+    ("POST", "/api/backup/offsite-now"): "Sent a backup to the off-site bucket",
     ("GET", "/api/vault/{doc_id}/file"): "Downloaded a Vault file",
     ("GET", "/api/tenders/export"): "Downloaded the tender spreadsheet",
 }

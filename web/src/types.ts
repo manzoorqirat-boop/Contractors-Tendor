@@ -148,3 +148,8 @@ export interface Me { id: number; username: string; name: string; role: Role; ow
 export interface UserRow { id: number; username: string; name: string; role: Role; active: boolean; must_change: boolean; two_step?: boolean; created: string | null; last_login: string | null; owner: boolean }
 export interface UsersData { users: UserRow[]; roles: { key: Role; label: string; text: string }[]; min_password: number }
 export interface AuditEntry { id: number; at: string; username: string; role: string | null; action: string; target: string; detail: string; client: string }
+
+export interface BackupStatus {
+  enabled: boolean; keep_days: number; latest_day: string | null; days: string[]; storage_warning: string;
+  offsite: { configured: boolean; bucket: string; endpoint: string; last_ok: string | null; last_error: string | null; last_daily: string | null; last_weekly: string | null; keep_daily: number; keep_weekly: number };
+}

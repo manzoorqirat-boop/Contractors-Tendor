@@ -6,6 +6,7 @@ import { resetAiStatus } from '../ai';
 import { PortalsManager } from '../ManualPortals';
 import { setLogoText } from '../Brand';
 import { Tabs } from '../Tabs';
+import { useToast } from '../ui';
 import { ActivityPanel, UsersPanel } from '../Account';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
@@ -240,7 +241,14 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
 
 /** Download everything the app keeps, and show whether the automatic daily copy is running. */
 function BackupPanel() {
-  const { data, error } = useLoad(() => api.backupStatus(), []);
+  const { data, error, reload } = useLoad(() => api.backupStatus(), []);
+  const toast = useToast();
+  const [sending, setSending] = useState(false);
+  const off = data?.offsite;
+  async function sendNow() {
+    setSending(true);
+    try { await api.offsiteNow(); toast('A full backup was sent to the off-site bucket.'); } catch (e) { toast((e as Error).message, 'bad'); } finally { setSending(false); reload(); }
+  }
   const when = data?.latest_day ? new Date(`${data.latest_day}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
   return (
     <div className="set-grid">
@@ -249,6 +257,17 @@ function BackupPanel() {
         <p className="sub">One zip with all tenders, bids, the BOQ catalogue and every file in the Vault. Save it somewhere other than this server (your computer, a cloud drive). It contains your company papers, so keep it private.</p>
         <a className="btn primary" href="/api/backup" download>Download backup (.zip)</a>
         <p className="muted small" style={{ marginTop: 8 }}>It can take a minute if the Vault holds many files. Make one before you change the server set-up, and regularly (weekly is a good habit).</p>
+      </section>
+      <section className="card">
+        <h2>Copy outside Railway {off && <span className={`badge ${!off.configured ? 'warn' : off.last_error ? 'bad' : off.last_ok ? 'ok' : 'plain'}`} style={{ marginLeft: 6 }}>{!off.configured ? 'Not set up' : off.last_error ? 'Failing' : off.last_ok ? 'Working' : 'Waiting for the first upload'}</span>}</h2>
+        {off && !off.configured && <p className="sub">Not set up. Every night the databases and every week the full backup can be copied to a bucket you own (Amazon S3, Cloudflare R2, Backblaze B2), so losing the volume loses nothing. Your administrator adds the BACKUP_S3_ variables listed in the README.{off.last_error ? <> <strong>{off.last_error}</strong></> : null}</p>}
+        {off?.configured && (
+          <>
+            <p className="sub">Sent to <strong>{off.bucket}</strong> at {off.endpoint}. {off.last_daily ? <>Last nightly copy: {new Date(`${off.last_daily}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}. </> : null}{off.last_weekly ? <>Last full backup: {new Date(`${off.last_weekly}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}. </> : null}Kept: the last {off.keep_daily} nights and {off.keep_weekly} weekly backups.</p>
+            {off.last_error && <div className="alert bad" role="alert"><strong>The last upload failed.</strong> {off.last_error} It is tried again within the hour.</div>}
+            <button type="button" className="btn" onClick={sendNow} disabled={sending}>{sending ? 'Sending…' : 'Send a full backup now'}</button>
+          </>
+        )}
       </section>
       <section className="card">
         <h2>Automatic daily copy {data && <span className={`badge ${data.enabled && data.latest_day ? 'ok' : 'warn'}`} style={{ marginLeft: 6 }}>{data.enabled ? (data.latest_day ? 'Running' : 'Waiting for the first copy') : 'Off'}</span>}</h2>

@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -75,7 +75,8 @@ export const api = {
   document: (key: string, text: string, pdf_base64: string) => job<{ doc: DocFacts }>('/api/tenders/document', { method: 'POST', body: JSON.stringify({ key, text, pdf_base64 }) }),
   ask: (question: string) => call<AskResult>('/api/ask', { method: 'POST', body: JSON.stringify({ question }) }),
   aiStatus: () => call<AiStatus>('/api/ai/status'),
-  backupStatus: () => call<{ enabled: boolean; keep_days: number; latest_day: string | null; days: string[]; storage_warning: string }>('/api/backup/status'),
+  backupStatus: () => call<BackupStatus>('/api/backup/status'),
+  offsiteNow: () => job<{ ok: boolean }>('/api/backup/offsite-now', { method: 'POST' }),
   aiTest: () => call<{ ok: boolean; model: string; fast_model: string }>('/api/ai/test', { method: 'POST' }),
   aiScore: () => job<{ scored: number; labelled: number; unlabelled: number }>('/api/ai/score', { method: 'POST' }),
   views: () => call<{ views: SavedView[] }>('/api/views'),
