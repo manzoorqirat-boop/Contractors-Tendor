@@ -144,6 +144,8 @@ export interface SimInput { l1_price: number | null; quoted_pct: number | null; 
 export interface ManualListing { tender_id: string; reference: string; title: string; description: string; organisation: string; location: string; value: number | null; emd: number | null; published: string; closing: string; opening: string; portal_name: string; form_of_contract: string }
 export interface ManualFields { tender_id?: string; title?: string; description?: string; reference?: string; organisation?: string; location?: string; value?: number | null; emd?: number | null; published?: string; closing?: string; opening?: string; portal_name?: string; clear_value?: boolean; clear_emd?: boolean }
 
+export interface Bidder { id?: number; name: string; price: number | null; rank: number | null; status: string; mine?: boolean }
+export interface Competitor { key: string; name: string; bids: number; wins: number; avg_vs_estimate: number | null; quotes: number; departments: string[]; last_seen: string }
 export interface Person { username: string; name: string }
 export interface BidComment { id: number; at: string; username: string; text: string }
 export interface Signoff { state: 'requested' | 'approved' | 'declined'; requested_by: string; by: string; at: string; note: string }

@@ -50,7 +50,7 @@ CSP = "default-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'n
 # Request size limits. Uploads travel as base64 inside JSON (a 10 MB file is about 13.4 MB), so those routes get more room; everything else is small.
 MAX_UPLOAD_BODY = 16 * 1024 * 1024
 MAX_JSON_BODY = 1024 * 1024
-UPLOAD_PATH_RE = re.compile(r"^/api/(vault|boq/catalogue|tenders/(document|manual(/read)?)|bids/\d+/(document|boq|risks))$")
+UPLOAD_PATH_RE = re.compile(r"^/api/(vault|boq/catalogue|tenders/(document|manual(/read)?)|bids/\d+/(document|boq|risks|award))$")
 MAX_VIEWS = 30
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?)?$")
 # The settings a saved view may hold: the page's filters and display choices, nothing else.
@@ -386,6 +386,15 @@ class NewUser(BaseModel):
 
 class OwnEmail(BaseModel):
     email: str = ""
+
+
+class AwardBody(BaseModel):
+    text: str = ""
+    pdf_base64: str = ""
+
+
+class BiddersBody(BaseModel):
+    bidders: list[dict[str, Any]] = Field(max_length=30)
 
 
 class CommentBody(BaseModel):
@@ -1695,6 +1704,35 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     def my_work(request: Request) -> dict:
         """Open checklist items assigned to the signed-in person, on bids still in progress."""
         return {"items": bids.items_for_owner(request.state.user.username)}
+
+    # ---- who bid, and who the competitors are ---------------------------------------------------------------------------
+
+    @app.post("/api/bids/{bid_id}/award", dependencies=auth)
+    def bid_award(bid_id: int, body: AwardBody):
+        return run_job("award", str(bid_id), lambda: do_bid_award(bid_id, body))
+
+    def do_bid_award(bid_id: int, body: AwardBody) -> dict:
+        """Reads an award notice or comparative statement into a list of bidders for the person to check. Saves nothing."""
+        bid = bid_or_404(bid_id)
+        return {"award": ai_call(ai.read_award, bid_as_tender(bid), body.text, body.pdf_base64)}
+
+    @app.get("/api/bids/{bid_id}/bidders", dependencies=auth)
+    def get_bidders(bid_id: int) -> dict:
+        bid_or_404(bid_id)
+        return {"bidders": bids.bidders(bid_id)}
+
+    @app.put("/api/bids/{bid_id}/bidders", dependencies=auth)
+    def put_bidders(bid_id: int, body: BiddersBody) -> dict:
+        bid_or_404(bid_id)
+        try:
+            patch = bids.set_bidders(bid_id, body.bidders, now())
+        except BidError as e:
+            raise bid_error(e) from None
+        return {"bidders": bids.bidders(bid_id), "updated": patch}
+
+    @app.get("/api/competitors", dependencies=auth)
+    def competitors() -> dict:
+        return {"competitors": bids.competitors()}
 
     @app.get("/api/bids/{bid_id}/comments", dependencies=auth)
     def list_comments(bid_id: int) -> dict:

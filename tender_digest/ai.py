@@ -311,6 +311,50 @@ def read_listing(text: str = "", pdf_base64: str = "") -> dict:
     return clean_listing(_json(_call(LISTING_SYSTEM, content, max_tokens=1500)))
 
 
+# ---- an award notice: who won, at what price, and who else bid ---------------------------------------------------------------
+
+AWARD_SYSTEM = (
+    "You read an Indian government tender award notice, bid opening summary or comparative statement and copy out who bid and who won. " + DATA_RULE + " "
+    "Use only what the document says; use null for anything it does not state. Never guess a price or a name. Convert lakh and crore to rupees. "
+    "Return ONLY a JSON object: winner (the company awarded the work, or the lowest qualified bidder, as written), winning_price (rupees, number), "
+    "awarded (date as 'YYYY-MM-DD'), estimate (the tender's estimated cost in rupees), "
+    "bidders (a list of every bidder named: name, price in rupees as a number, rank 1 for the lowest qualified bid / L1, 2 for L2 and so on, "
+    "status such as 'qualified', 'rejected' or 'withdrawn'), notes (one sentence, only if the document says something that changes the result)."
+)
+
+
+def clean_award(raw: Any) -> dict:
+    if not isinstance(raw, dict):
+        raise AIError("Claude's answer was not in the expected form. Try again.")
+
+    def money(v: Any) -> float | None:
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 1e13 else None
+
+    bidders = []
+    for b in (raw.get("bidders") if isinstance(raw.get("bidders"), list) else [])[:30]:
+        if not isinstance(b, dict) or not isinstance(b.get("name"), str) or not b["name"].strip():
+            continue
+        rank = b.get("rank")
+        bidders.append({"name": b["name"].strip()[:120], "price": money(b.get("price")), "rank": rank if isinstance(rank, int) and not isinstance(rank, bool) and 1 <= rank <= 99 else None,
+                        "status": str(b.get("status") or "").strip()[:40]})
+    winner = raw.get("winner") if isinstance(raw.get("winner"), str) and raw["winner"].strip() else ""
+    if not winner:
+        winner = next((b["name"] for b in bidders if b["rank"] == 1), "")
+    awarded = raw.get("awarded")
+    try:
+        from datetime import date
+        awarded = date.fromisoformat(awarded[:10]).isoformat() if isinstance(awarded, str) and awarded.strip() else ""
+    except ValueError:
+        awarded = ""
+    return {"winner": winner.strip()[:120], "winning_price": money(raw.get("winning_price")), "awarded": awarded, "estimate": money(raw.get("estimate")), "bidders": bidders,
+            "notes": str(raw.get("notes") or "").strip()[:300]}
+
+
+def read_award(tender: dict, text: str = "", pdf_base64: str = "") -> dict:
+    content = _source_content_plain(text, pdf_base64, f"Tender listing for context:\n{_facts(tender, 400)}\n\nCopy out who bid and who won.")
+    return clean_award(_json(_call(AWARD_SYSTEM, content, max_tokens=3000)))
+
+
 def _source_content_plain(text: str, pdf_base64: str, tail: str) -> Any:
     if pdf_base64:
         try:

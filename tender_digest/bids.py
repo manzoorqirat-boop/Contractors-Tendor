@@ -268,6 +268,9 @@ class BidBook:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'task', text TEXT NOT NULL,
                   done INTEGER NOT NULL DEFAULT 0, owner TEXT, vault_id INTEGER, note TEXT, position INTEGER NOT NULL DEFAULT 0, source TEXT, created TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS bid_items_bid ON bid_items (bid_id);
+                CREATE TABLE IF NOT EXISTS bid_bidders (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, name TEXT NOT NULL, price REAL, rank INTEGER, status TEXT, mine INTEGER NOT NULL DEFAULT 0);
+                CREATE INDEX IF NOT EXISTS bid_bidders_bid ON bid_bidders (bid_id);
                 CREATE TABLE IF NOT EXISTS bid_comments (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, bid_id INTEGER NOT NULL, at TEXT NOT NULL, username TEXT NOT NULL, text TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS bid_comments_bid ON bid_comments (bid_id);
@@ -428,6 +431,7 @@ class BidBook:
             self.db.execute("DELETE FROM bid_items WHERE bid_id = ?", (bid_id,))
             self.db.execute("DELETE FROM bid_changes WHERE bid_id = ?", (bid_id,))
             self.db.execute("DELETE FROM bid_comments WHERE bid_id = ?", (bid_id,))
+            self.db.execute("DELETE FROM bid_bidders WHERE bid_id = ?", (bid_id,))
             cur = self.db.execute("DELETE FROM bids WHERE id = ?", (bid_id,))
             self.db.commit()
             return cur.rowcount > 0
@@ -496,6 +500,96 @@ class BidBook:
                 "SELECT i.id AS item_id, i.text, i.kind, b.id AS bid_id, b.title, b.description, b.tender_id, b.closing, b.stage FROM bid_items i JOIN bids b ON b.id = i.bid_id "
                 "WHERE LOWER(i.owner) = ? AND i.done = 0 AND b.stage IN ('interested', 'preparing') ORDER BY (b.closing IS NULL), b.closing, i.id", (username.strip().lower(),)).fetchall()
         return [dict(r) for r in rows]
+
+    # ---- who bid: the bidders of a tender, and how competitors have behaved across tenders -------------------------------------
+
+    MAX_BIDDERS = 30
+
+    def bidders(self, bid_id: int) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT id, name, price, rank, status, mine FROM bid_bidders WHERE bid_id = ? ORDER BY (rank IS NULL), rank, (price IS NULL), price, id", (bid_id,)).fetchall()
+        return [{**dict(r), "mine": bool(r["mine"])} for r in rows]
+
+    def set_bidders(self, bid_id: int, raw: list[Any], now: datetime) -> dict:
+        """Replaces the bidders of a bid. When the lowest qualified quote is known and no L1 was recorded, it is recorded as L1; the row marked
+        as yours fills in your quoted price if that was empty. Returns the bid fields that changed."""
+        if not isinstance(raw, list) or len(raw) > self.MAX_BIDDERS:
+            raise BidError(f"A tender can list up to {self.MAX_BIDDERS} bidders")
+        rows = []
+        for b in raw:
+            if not isinstance(b, dict):
+                raise BidError("Each bidder needs a name")
+            name = str(b.get("name") or "").strip()[:120]
+            if not name:
+                continue
+            price = b.get("price")
+            if price in (None, ""):
+                price = None
+            else:
+                try:
+                    price = float(price)
+                except (TypeError, ValueError):
+                    raise BidError(f"The quote for {name} is not an amount") from None
+                if not 0 < price < 1e13:
+                    raise BidError(f"The quote for {name} is not an amount")
+            rank = b.get("rank")
+            if rank in (None, ""):
+                rank = None
+            elif not isinstance(rank, int) or isinstance(rank, bool) or not 1 <= rank <= 99:
+                raise BidError(f"The rank of {name} must be a whole number, 1 for the lowest bid")
+            rows.append((name, price, rank, str(b.get("status") or "").strip()[:40], 1 if b.get("mine") else 0))
+        if sum(1 for r in rows if r[4]) > 1:
+            raise BidError("Only one row can be marked as your company")
+        bid = self.get(bid_id) or {}
+        with self.lock:
+            self.db.execute("DELETE FROM bid_bidders WHERE bid_id = ?", (bid_id,))
+            self.db.executemany("INSERT INTO bid_bidders (bid_id, name, price, rank, status, mine) VALUES (?,?,?,?,?,?)", [(bid_id, *r) for r in rows])
+            self.db.commit()
+        patch: dict[str, Any] = {}
+        live = [r for r in rows if r[1] and not re.search(r"reject|disqual|withdr|non.?respons", r[3], re.I)]
+        if live and not bid.get("l1_value"):
+            low = min(live, key=lambda r: r[1])
+            patch["l1_value"] = low[1]
+            if not bid.get("l1_bidder"):
+                patch["l1_bidder"] = low[0]
+        mine = next((r for r in rows if r[4] and r[1]), None)
+        if mine and not bid.get("my_value"):
+            patch["my_value"] = mine[1]
+        if patch:
+            self.update(bid_id, patch, now)
+        return patch
+
+    @staticmethod
+    def company_key(name: str) -> str:
+        """A company's name reduced so spellings of it match: M/s Rao Infra Pvt. Ltd. and RAO INFRA PRIVATE LIMITED are the same."""
+        s = re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower().replace("&", " and "))
+        words = [w for w in s.split() if w not in {"m", "s", "ms", "pvt", "private", "ltd", "limited", "llp", "co", "company", "the", "and", "pl", "p"}]
+        return " ".join(words)
+
+    def competitors(self) -> list[dict]:
+        """Every company that bid against you: how often, how often it won, and how far from the estimate it quotes."""
+        with self.lock:
+            rows = [dict(r) for r in self.db.execute(
+                "SELECT p.name, p.price, p.rank, p.status, b.id AS bid_id, b.value, b.organisation, b.updated FROM bid_bidders p JOIN bids b ON b.id = p.bid_id WHERE p.mine = 0")]
+        groups: dict[str, list[dict]] = {}
+        for r in rows:
+            k = self.company_key(r["name"])
+            if k:
+                groups.setdefault(k, []).append(r)
+        out = []
+        for k, rs in groups.items():
+            names = [r["name"] for r in rs]
+            shown = max(set(names), key=lambda n: (names.count(n), len(n)))
+            disc = [(r["price"] / r["value"] - 1) * 100 for r in rs if r["price"] and r["value"] and r["value"] > 0 and -90 < (r["price"] / r["value"] - 1) * 100 < 200]
+            depts: dict[str, int] = {}
+            for r in rs:
+                d = _dept(r["organisation"])
+                if d:
+                    depts[d] = depts.get(d, 0) + 1
+            out.append({"key": k, "name": shown, "bids": len({r["bid_id"] for r in rs}), "wins": len({r["bid_id"] for r in rs if r["rank"] == 1}),
+                        "avg_vs_estimate": round(sum(disc) / len(disc), 1) if disc else None, "quotes": len(disc),
+                        "departments": [d for d, _ in sorted(depts.items(), key=lambda kv: -kv[1])[:3]], "last_seen": max(r["updated"] or "" for r in rs)[:10]})
+        return sorted(out, key=lambda c: (-c["bids"], -c["wins"], c["name"]))
 
     # ---- comments ----------------------------------------------------------------------------------------------------
 

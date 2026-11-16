@@ -403,6 +403,8 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("DELETE", "/api/bids/{bid_id}/items/{item_id}"): "Removed a checklist item",
     ("POST", "/api/bids/{bid_id}/document"): "Read a bid's tender document with AI",
     ("POST", "/api/bids/{bid_id}/doc-checked"): "Marked the AI-read details as checked (or unchecked)",
+    ("POST", "/api/bids/{bid_id}/award"): "Read an award notice",
+    ("PUT", "/api/bids/{bid_id}/bidders"): "Recorded who bid on a tender",
     ("POST", "/api/bids/{bid_id}/comments"): "Commented on a bid",
     ("DELETE", "/api/bids/{bid_id}/comments/{comment_id}"): "Removed a comment",
     ("POST", "/api/bids/{bid_id}/signoff"): "Asked for or gave approval to bid",

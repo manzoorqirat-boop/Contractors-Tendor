@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -74,6 +74,10 @@ export const api = {
   deleteComment: (id: number, cid: number) => call<{ removed: number }>(`/api/bids/${id}/comments/${cid}`, { method: 'DELETE' }),
   signoff: (id: number, action: string, note: string) => call<{ signoff: Signoff | null }>(`/api/bids/${id}/signoff`, { method: 'POST', body: JSON.stringify({ action, note }) }),
   setOwnEmail: (email: string) => call<{ email: string }>('/api/account/email', { method: 'POST', body: JSON.stringify({ email }) }),
+  readAward: (id: number, text: string, pdf_base64: string) => job<{ award: { winner: string; winning_price: number | null; awarded: string; estimate: number | null; notes: string; bidders: Bidder[] } }>(`/api/bids/${id}/award`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  bidders: (id: number) => call<{ bidders: Bidder[] }>(`/api/bids/${id}/bidders`),
+  saveBidders: (id: number, bidders: Bidder[]) => call<{ bidders: Bidder[]; updated: Record<string, unknown> }>(`/api/bids/${id}/bidders`, { method: 'PUT', body: JSON.stringify({ bidders }) }),
+  competitors: () => call<{ competitors: Competitor[] }>('/api/competitors'),
   createBidsBulk: (keys: string[]) => call<{ created: number[]; existing: number[]; missing: string[] }>('/api/bids/bulk', { method: 'POST', body: JSON.stringify({ keys }) }),
   pivot: (f: Filters, groupBy: string, splitBy: string, top = 12) =>
     call<Pivot>(`/api/analytics?${toParams(f)}&group_by=${groupBy}${splitBy ? `&split_by=${splitBy}` : ''}&top=${top}`),

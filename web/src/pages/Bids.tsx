@@ -8,6 +8,7 @@ import { chain, fmtDate, headline, inr, parseMoney, plural, relative } from '../
 import { useLoad, useServerNow } from '../hooks';
 import { BidProgress } from '../BidProgress';
 import { AssigneeSelect, MyWork, TeamTab } from '../Team';
+import { BiddersCard, CompetitorsCard } from '../Bidders';
 import { Skeleton, useToast } from '../ui';
 import { Only, ReadOnly } from '../session';
 import { useConfirm } from '../confirm';
@@ -154,6 +155,7 @@ function Results() {
         <div className="kpi"><div className="label">Your price vs the winner</div><div className="num">{data.avg_gap_to_l1 === null ? '-' : `${data.avg_gap_to_l1 > 0 ? '+' : ''}${data.avg_gap_to_l1}%`}</div><div className="note">{data.gap_samples ? `average over ${plural(data.gap_samples, 'lost bid')}` : 'Add the winning price on lost bids'}</div></div>
       </div>
       {decided === 0 && <div className="card empty">Mark a bid <strong>Won</strong> or <strong>Lost</strong> and add the prices on its page. Your record builds up here, and shows on similar tenders.</div>}
+      <CompetitorsCard />
       <GroupTable title="By work type" rows={data.by_work_type} />
       <GroupTable title="By department" rows={data.by_department} />
       <GroupTable title="By size" rows={data.by_size} />
@@ -334,6 +336,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         </section>
       )}
 
+      {tab === 'result' && (['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && <BiddersCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />}
       {tab === 'result' && <section id="sec-notes" className="card" style={{ marginBottom: 14 }}>
         <label className="field">Notes<textarea key={`n-${bid.notes ?? ''}`} defaultValue={bid.notes ?? ''} maxLength={4000} placeholder="Site visit, rates, who to call…" onBlur={(e) => e.target.value !== (bid.notes ?? '') && save({ notes: e.target.value })} /></label>
         {bid.changes.length > 0 && (
