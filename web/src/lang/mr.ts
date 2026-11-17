@@ -454,4 +454,5 @@ export const MR: Record<string, string> = {
   "Soon": "लवकरच",
   "more to look at in your bids": "तुमच्या बोलींमध्ये पाहण्यासाठी आणखी",
   "Money": "पैसे",
+  "password": "पासवर्ड",
 };

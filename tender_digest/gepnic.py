@@ -171,8 +171,9 @@ def parse_doc_links(html: str) -> list[dict[str, str]]:
     """The downloadable documents on a tender's detail page: [{name, href}]. The links are session-bound and expire within minutes."""
     out = []
     for a in BeautifulSoup(html, "lxml").find_all("a", href=True):
-        if re.search(r"docDownoad|docDownload", a["href"], re.I):
-            out.append({"name": _text(a), "href": a["href"]})
+        href = str(a["href"])  # newer versions of the parser type an attribute as "one text or a list of them"; an address is one text
+        if re.search(r"docDownoad|docDownload", href, re.I):
+            out.append({"name": _text(a), "href": href})
     return out
 
 
