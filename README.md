@@ -108,6 +108,46 @@ A Tender ID already in the app is refused, so a hand-added tender cannot duplica
 
 Limits: the app cannot see corrigenda or moved dates on a hand-added tender, because there is no portal session to re-read. The bid has a **Last checked on the portal** date and reminds you in the last five days before closing until you record a check.
 
+## Selling it: health, proof of coverage, one deployment per customer
+
+These three exist because a tender service is only worth paying for if it keeps working and says so when it does not.
+
+### Portal health: no silent breakage
+
+A portal can fail without any error: the site moves, refuses this server, or changes its layout so the reader finds nothing and reports "0 new tenders" every day, which looks exactly like a quiet week. Every read of a portal (a daily run, or a Check) is remembered (the last 60 per portal), and a portal is flagged when:
+
+| State | Meaning |
+|---|---|
+| **Stopped working** | It had worked, and the last 2 reads in a row failed. |
+| **Finding nothing** | It answers, but the last 2 daily reads listed nothing, or under a fifth of what it usually lists (it must usually list 10 or more, so a small portal is never flagged). |
+| **Not read lately** | The daily run has not read it for 3 days. |
+
+One failed read is only noted, since portals have bad days. A portal that never worked and needs a captcha, login or OTP is on the *check by hand* list, not here. Problems show as a red notice on the Dashboard, in the **Is it working?** column of Settings > Portals, in the daily email (and a day with a problem is never sent as "quiet"), and as the webhook events **`portal.unhealthy`** and **`portal.recovered`**, sent once per change (checked hourly), not every hour. `GET /api/portal-health` gives the same. The thresholds are constants at the top of `tender_digest/health.py`.
+
+### Coverage proof: which portals this installation can really read
+
+Whether a portal works depends on where the app runs, so the only proof is a test run on the customer's own server. **Settings > Portals > Coverage proof > Test all switched-on portals** reads each portal in depth: its department list, the tenders of its busiest department, and a few detail pages, then counts what came out. A portal is **Proven** only when nearly every tender listed had an ID and a closing date and a detail page was read; **Partly** means it answers but the reader is missing details; **Answers, no tenders**; or **Cannot be read** with the reason (captcha, login, OTP, refuses this server, not reachable). **Download the report (CSV)** gives the customer a record of what is and is not covered. The same test runs from a terminal on the server:
+
+```
+python -m tender_digest.coverage                      # every portal in the list; results are kept and shown in Settings
+python -m tender_digest.coverage --catalogue          # also the known portals you have not added (nothing is added or switched on)
+python -m tender_digest.coverage --only kerala-etenders,delhi --csv report.csv --no-save
+```
+
+It makes a handful of polite requests per portal, so a full catalogue run takes several minutes. **Do not tell a customer a portal is covered until it shows as Proven from their own server.**
+
+### One deployment per customer
+
+Each customer gets their own service, volume and database, so one customer can never see another's tenders or papers. (Many customers in one database is deliberately not built: it needs every query, file, setting, backup and search index separated by customer, and one missed filter would leak a customer's bids to another.) Setting each one up is two commands:
+
+```
+python -m tender_digest.provision new --name "Acme Infra" --url https://tend.acme.in \
+    --recipients a@acme.in,b@acme.in --mail-from tenders@acme.in [--brevo-key-env BREVO_KEY]
+TENDAI_PASSWORD=... python -m tender_digest.provision verify --url https://tend.acme.in
+```
+
+`new` writes `customers/acme-infra/`: a settings file to paste into the new service (a fresh password, signing key and encryption key, generated and never reused; readable by you only; the folder is kept out of git and nothing secret is printed), and a go-live checklist for that customer. `verify` checks the running site from outside and prints PASS, WARN or FAIL for: https, login, the data folder being on a volume, encryption, a daily backup, off-site backup, email being set up, portals proven readable, and no portal having stopped working. It exits 1 if anything must be fixed before handing over, and takes the password from the environment so it stays out of shell history. A new site will show WARN for backups until the first night has passed.
+
 ## Deploy on Railway (one service)
 
 1. New Railway service from this repo. Railway builds the `Dockerfile` (React page + Python service in one image).

@@ -13,3 +13,4 @@ web/tsconfig.tsbuildinfo
 .coverage
 .ruff_cache/
 .mypy_cache/
+customers/
