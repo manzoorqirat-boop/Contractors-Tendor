@@ -13,34 +13,35 @@ import re
 import secrets
 import threading
 import time
+from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from html import escape as html_escape
-from urllib.parse import urlencode
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-from pydantic import BaseModel, Field
 
-from . import access, accounts, ai, alerts, appsettings, catalogue, events, money as money_module, learn, letters, mailer, pack, privacy, reminders, sample, sealing, smartsearch, sso, tokens
+from . import access, accounts, ai, alerts, appsettings, catalogue, events, learn, letters, mailer, offsite, pack, privacy, reminders, sample, sealing, smartsearch, sso, tokens
+from . import money as money_module
 from .accounts import AccountError, Accounts, Principal
-from . import offsite
-from .backup import Backups, BackupError
+from .backup import BackupError, Backups
+from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
+from .bids import _when as stored_date
 from .boq import advisor
 from .boq.match import ClaudeVerifier
 from .boq.portal import fetch_boq, fetch_risks
 from .boq.service import BoqError, BoqService
-from .bids import STAGE_LABELS, STAGES, VAULT_KINDS, BidBook, BidError, clean_patch, default_vault_dir, locate_on_portal, portal_facts
-from .bids import _when as stored_date
-from .gepnic import PortalError, Tender, parse_date, pick_nit
 from .config import Portal, Settings, load_settings
 from .digest import CSV_COLUMNS, format_inr, safe_cell, tenders_workbook
+from .gepnic import PortalError, Tender, parse_date, pick_nit
 from .runner import Busy, NotConfigured, RunManager, Scheduler, local_now
 from .store import DIMENSIONS, SORTS, SeenStore
 
@@ -275,7 +276,7 @@ class Jobs:
             outcome = {"state": "done", "result": fn()}
         except HTTPException as e:
             outcome = {"state": "failed", "status": e.status_code, "detail": str(e.detail)}
-        except Exception:  # noqa: BLE001 - the person gets a plain message, the log gets the trace
+        except Exception:  # the person gets a plain message, the log gets the trace
             log.exception("background action failed")
             outcome = {"state": "failed", "status": 500, "detail": "Something went wrong on the server. Try again, and tell your administrator if it keeps happening."}
         with self.lock:
@@ -333,7 +334,7 @@ class BodyLimit:
 
         try:
             await self.app(scope, counted, watched)
-        except BaseException as e:  # noqa: BLE001 - also reached through an ExceptionGroup from the framework's task group
+        except BaseException as e:  # also reached through an ExceptionGroup from the framework's task group
             if not _holds(e, BodyLimit.TooLarge):
                 raise
             if not started:
@@ -352,7 +353,7 @@ def _holds(exc: BaseException, kind: type[BaseException]) -> bool:
     return any(_holds(e, kind) for e in getattr(exc, "exceptions", ()))
 
 
-def storage_warning(state_path: str, environ: dict[str, str] | None = None) -> str:
+def storage_warning(state_path: str, environ: Mapping[str, str] | None = None) -> str:
     """On Railway, says so when the database is not on a mounted volume: it would be wiped by every redeploy. Empty when all is well."""
     environ = os.environ if environ is None else environ
     if state_path == ":memory:" or environ.get("ALLOW_EPHEMERAL_STORAGE", "").lower() in ("1", "true", "yes"):
@@ -373,7 +374,7 @@ def storage_ok(store: SeenStore, state_path: str) -> bool:
     """Can the database be read, and is its folder writable?"""
     try:
         store.ping()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
     return state_path == ":memory:" or os.access(Path(state_path).expanduser().resolve().parent, os.W_OK)
 
@@ -666,7 +667,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         log.warning("off-site backup is not active: %s", e)
     backups = Backups(store, boq.store, env.state_path, vault_dir, keep_days=max(1, _int_env("BACKUP_KEEP_DAYS", 7)), remote=remote_cfg, remote_problem=remote_problem)
     audit_pruned = {"day": ""}
-    priorities_at = {"when": None}
+    priorities_at: dict[str, datetime | None] = {"when": None}
 
     def refresh_priorities_hourly(at: datetime) -> None:
         """The urgency part of the recommended order changes as the hours pass, so it is worked out again every hour."""
@@ -688,7 +689,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hooks.deliver(now), lambda: prune_audit_daily(now), lambda: refresh_priorities_hourly(now)):
             try:
                 job()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("housekeeping task failed")
 
     scheduler = Scheduler(manager, housekeeping=housekeeping) if config.run_scheduler else None
@@ -705,7 +706,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             log.info("encryption at rest: %s files sealed, %s re-keyed, %s secrets written, %s failed", files["sealed"], files["rotated"], secrets_done, files["failed"])
             if files["failed"]:
                 encryption_problem = f"{files['failed']} stored file(s) could not be encrypted. See the server log."
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("encrypting stored data failed")
             encryption_problem = "Encrypting the stored data failed. See the server log."
     bids.on_event = lambda event, data: hooks.emit(event, data, now())
@@ -862,7 +863,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 return
             target = ", ".join(f"{k}={v}" for k, v in {**request.path_params, **({"key": request.query_params["key"]} if "key" in request.query_params else {})}.items())
             people.log(now(), user.username, user.role, what, target, client=client_of(request))
-        except Exception:  # noqa: BLE001 - the log must never break a request
+        except Exception:  # the log must never break a request
             log.exception("activity log write failed")
 
     auth = [Depends(require_login)]
@@ -904,7 +905,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         if (who.owner and config.owner_totp) or (not who.owner and who.two_step):
             code = body.code.strip()
             if not code:  # the password was right: ask for the code. Nothing is signed in yet.
-                return JSONResponse({"detail": "Enter the 6-digit code from your authenticator app.", "need_code": True}, status_code=401)
+                return JSONResponse({"detail": "Enter the 6-digit code from your authenticator app.", "need_code": True}, status_code=401)  # type: ignore[return-value]  # FastAPI sends a Response object as it is
             if who.owner:
                 step = accounts.totp_match(config.owner_totp, code, time.time(), int(store.get_settings().get("owner_totp_last", 0)))
                 if step is not None:
@@ -1029,21 +1030,13 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     def refresh_priorities() -> None:
         """Re-scores the recommended order. Run after anything that changes what the company likes (a star, a hidden tender, a bid), and every hour."""
         try:
-            saved = store.get_settings()
-            lim = size_limits()
-            store.recompute_priorities(now(), lim.get("size_min"), lim.get("size_max"), appsettings.current(env, saved)["learning"])
-        except Exception:  # noqa: BLE001 - the order is a convenience: a failure here must never undo the action that caused it
+            appsettings.rescore(store, now())
+        except Exception:  # the order is a convenience: a failure here must never undo the action that caused it
             log.exception("recomputing the recommended order failed")
 
     def size_limits() -> dict:
         """The size of work this company takes, as filter values: nothing when no range has been set."""
-        saved = store.get_settings()
-        out = {}
-        for key, name in (("size_min", "size_min"), ("size_max", "size_max")):
-            v = saved.get(name)
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
-                out[key] = float(v)
-        return out
+        return appsettings.size_limits(store.get_settings())
 
     def filter_params(
         portal: list[str] | None = Query(None), category: list[str] | None = Query(None), department: list[str] | None = Query(None),
@@ -2082,7 +2075,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             try:
                 body = "<p>" + re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', html_escape(text)).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
                 manager.sender(env.brevo_api_key, env.mail_from, env.mail_from_name, emails, f"TendAI: {subject}", body, text)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("notification email failed")
 
         if manager.background:

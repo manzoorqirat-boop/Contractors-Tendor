@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from .bids import BidBook, BidError, _DATE, _when
+from .bids import _DATE, BidBook, BidError, _when
 
 # kind -> (label, comes back to you?)
 KINDS: dict[str, tuple[str, bool]] = {
@@ -30,7 +30,7 @@ OPEN_STAGES = ("interested", "preparing", "submitted", "opened")
 EXPIRY_WARNING_DAYS = 30
 MAX_AMOUNT = 1e13
 
-_FIELDS = {"kind": "kind", "amount": "amount", "instrument": "instrument", "status": "status", "reference": 60, "bank": 60, "paid_on": "date", "valid_until": "date",
+_FIELDS: dict[str, str | int] = {"kind": "kind", "amount": "amount", "instrument": "instrument", "status": "status", "reference": 60, "bank": 60, "paid_on": "date", "valid_until": "date",
            "refund_due": "date", "settled_on": "date", "note": 300}
 
 
@@ -136,7 +136,7 @@ class MoneyBook:
                 (bid_id, row["kind"], row["amount"], row["instrument"], row["status"], row.get("reference", ""), row.get("bank", ""), row.get("paid_on"), row.get("valid_until"),
                  row.get("refund_due"), row.get("settled_on"), row.get("note", ""), now.isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
             self.db.commit()
-            money_id = cur.lastrowid
+            money_id = int(cur.lastrowid or 0)
         return self.get(bid_id, money_id) or {}
 
     def update(self, bid_id: int, money_id: int, raw: Any, now: datetime) -> dict:

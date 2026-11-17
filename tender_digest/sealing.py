@@ -48,7 +48,7 @@ class Sealer:
         self._fer = MultiFernet([_fernet(k) for k in [key, *olds]]) if key else None
 
     @classmethod
-    def from_env(cls, environ: dict[str, str] | None = None) -> "Sealer":
+    def from_env(cls, environ: dict[str, str] | None = None) -> Sealer:
         env = os.environ if environ is None else environ
         olds = [x for x in env.get("DATA_ENCRYPTION_KEY_OLD", "").split(",") if x.strip()]
         return cls(env.get("DATA_ENCRYPTION_KEY", ""), olds)

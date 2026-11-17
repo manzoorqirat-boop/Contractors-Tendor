@@ -77,7 +77,8 @@ Everything is in the `/data` volume: `tender_state.db` (tenders, bids, settings)
 
 - **Daily copy**: each day the service copies both databases into `/data/backups` (the last 7 days are kept; `BACKUP_KEEP_DAYS`). Each copy is checked with SQLite's integrity check. This protects against a bad edit or a damaged file, **not** against losing the volume.
 - **Download backup** (Settings > Backup): one zip with both databases and every vault file. **Save it somewhere other than Railway** (weekly is a good habit, and before any server change). It contains your company papers, so keep it private.
-- **Restore** (on the server, e.g. `railway ssh`, with the zip uploaded there): `python -m tender_digest.backup restore backup.zip --target-dir /data --force`, then restart the service. The zip's databases are checked first; existing data is moved aside (`name.before-restore-TIME`), never deleted. If you changed `VAULT_DIR` or `BOQ_DB_PATH`, copy those two items by hand.
+- **Write-ahead mode and the data folder**: while the app runs, each database has two small side files next to it (`tender_state.db-wal`, `tender_state.db-shm`). They are part of the database, so **never copy or replace only the `.db` file**: use *Download backup* (it uses SQLite's own copy, which includes them). A power cut can lose the last few saves but never corrupts the database; an app crash loses nothing.
+- **Restore** (on the server, e.g. `railway ssh`, with the zip uploaded there): `python -m tender_digest.backup restore backup.zip --target-dir /data --force`, then restart the service. The zip's databases are checked first; existing data, including those two side files, is moved aside (`name.before-restore-TIME`), never deleted. If you changed `VAULT_DIR` or `BOQ_DB_PATH`, copy those two items by hand.
 - **Off-site copy** (recommended): every night the two databases (compressed) and, once a week, the full zip with the Vault go to a bucket you own, so losing the Railway volume loses nothing. It works with Amazon S3, Cloudflare R2, Backblaze B2 and MinIO. Create a bucket and an access key limited to it (write, list, delete), then set:
 
   | Variable | Purpose |
@@ -150,6 +151,7 @@ the scheduler and the "one run at a time" lock live inside the process.
 | `SSO_BUTTON_TEXT` | Optional | Default `Sign in with SSO`; e.g. `Sign in with Google`. |
 | `DATA_ENCRYPTION_KEY` | Optional | A long private phrase (16+ characters). When set, two-step and webhook secrets and every uploaded file (the Vault and saved tender notices) are stored encrypted, and anything stored earlier is encrypted at the next start. **Keep it somewhere other than the server: without it those files, and a restored backup, cannot be read.** Secret. |
 | `DATA_ENCRYPTION_KEY_OLD` | Optional | To change the key: set the new one in `DATA_ENCRYPTION_KEY` and the old one here, restart, then remove this. Commas separate several old keys. |
+| `DB_WAL` | Optional | `1` (default) runs both databases in SQLite's write-ahead mode, which saves much faster (about 8 times on 1,500 tenders). Set `0` only if your storage cannot do it (some network file systems); the app then logs nothing wrong and simply saves more slowly. See *Backups* for what WAL means for files. |
 | `ALLOW_EPHEMERAL_STORAGE` | Optional | Set `true` to silence the "no volume" warning on Railway (not recommended: a redeploy then loses all data). |
 | `PORTAL_HOST_SUFFIXES` | Optional | Which website endings can be added as portals in the page. Default `.gov.in,.nic.in`. Example: `.gov.in,.nic.in,.nprocure.com`. |
 | `MIN_VALUE`, `LOOKBACK_DAYS`, `CLOSING_SOON_DAYS`, `CIVIL_KEYWORDS`, `EXCLUDE_KEYWORDS`, `ORG_INCLUDE`, `PORTALS`, `MAX_DETAIL_FETCHES`, `REQUEST_DELAY` | Optional | Filter and politeness tuning; see `tender_digest/config.py`. Most can also be set in the page. |
@@ -298,6 +300,8 @@ APP_PASSWORD=choose-a-password COOKIE_SECURE=false STATE_PATH=./local.db python 
 cd web && npm ci && npm run dev         # page on :5173, forwards /api to :8000
 npm run build                           # then the Python service serves web/dist itself
 ```
+
+Code checks (the same ones CI runs, settings in `pyproject.toml`, tool versions pinned in `requirements-dev.txt`): `ruff check .` (mistakes, likely bugs, old syntax, import order) and `mypy` (types). Both must stay clean. A "noqa" or "type: ignore" comment is allowed only with its reason beside it. CI runs the tests on Python 3.12 (what the Docker image uses) and 3.13, which bundle different SQLite versions. Dependabot proposes weekly updates for the pinned Python and npm packages, and monthly for GitHub Actions and the Docker base images.
 
 Accessibility: `npm run a11y` (in `web/`) opens every screen and dialog in light and dark, on desktop and phone, and runs axe-core (WCAG 2.2 AA). It needs a running app with demo data (`A11Y_URL`, `A11Y_PASS`) and a browser (`npx playwright install chromium`); CI runs it on every change and fails on any violation.
 

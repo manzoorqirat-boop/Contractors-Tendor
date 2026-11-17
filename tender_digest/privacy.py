@@ -16,7 +16,7 @@ class PrivacyError(ValueError):
 
 
 def _row(r: Any, drop: tuple[str, ...] = ()) -> dict[str, Any]:
-    return {k: r[k] for k in r.keys() if k not in drop}
+    return {k: r[k] for k in r.keys() if k not in drop}  # noqa: SIM118 - a sqlite3.Row iterates its values, not its column names
 
 
 def export_person(people: Any, bids: Any, user_id: int) -> dict[str, Any]:

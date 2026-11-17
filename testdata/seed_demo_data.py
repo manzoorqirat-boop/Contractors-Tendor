@@ -22,13 +22,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))  # the repo root, for tender_digest
 
-from tender_digest import ai                                            # noqa: E402
-from tender_digest.bids import BidBook, clean_patch, default_vault_dir  # noqa: E402
-from tender_digest.money import MoneyBook  # noqa: E402
-from tender_digest.gepnic import Tender                                 # noqa: E402
-from tender_digest.letters import Letters                               # noqa: E402
-from tender_digest.store import SeenStore                               # noqa: E402
-from content import FACTS, PROFILE, TENDERS, VAULT_DOCS                 # noqa: E402
+from tender_digest import ai
+from tender_digest.bids import BidBook, clean_patch, default_vault_dir
+from tender_digest.money import MoneyBook
+from tender_digest.gepnic import Tender
+from tender_digest.letters import Letters
+from tender_digest.store import SeenStore
+from content import FACTS, PROFILE, TENDERS, VAULT_DOCS
 
 WORKS = [
     ("Construction of BT road from {a} to {b}", "Roads & highways", (4e6, 3e7)), ("Resurfacing of {a}-{b} road", "Roads & highways", (2e6, 2e7)),

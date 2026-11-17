@@ -86,8 +86,8 @@ def test_risks_need_the_ai_key_then_simulate(app_ctx, monkeypatch):
 
 # ---- Fetch from portal: notice, BOQ and risks in one go ------------------------------------------------------------
 
-from tender_digest.gepnic import Tender  # noqa: E402
-from tests.test_bids import DOC, PortalFake, fetch_ctx  # noqa: E402
+from tender_digest.gepnic import Tender
+from tests.test_bids import DOC, PortalFake, fetch_ctx
 
 CSV_BYTES = (FIX / "boq_sample.csv").read_bytes()
 

@@ -10,3 +10,6 @@ web/node_modules/
 web/dist/
 *.zip
 web/tsconfig.tsbuildinfo
+.coverage
+.ruff_cache/
+.mypy_cache/

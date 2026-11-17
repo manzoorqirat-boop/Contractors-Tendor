@@ -42,6 +42,6 @@ def probe(base_url: str, delay: float = 0.6, timeout: int = 20) -> dict[str, Any
         orgs = client.organisations(attempts=1)
     except PortalError as e:
         return {"kind": e.kind, "detail": str(e)[:300], "departments": 0, "tenders": 0}
-    except Exception as e:  # noqa: BLE001 - a check must always give an answer
+    except Exception as e:  # a check must always give an answer
         return {"kind": "unreachable", "detail": f"{type(e).__name__}: {str(e)[:200]}", "departments": 0, "tenders": 0}
     return {"kind": "ok", "detail": "", "departments": len(orgs), "tenders": sum(c for _, c, _ in orgs)}

@@ -6,6 +6,7 @@ facts. Every save keeps the earlier wording, so a change can be compared and put
 """
 from __future__ import annotations
 
+import builtins
 import re
 import sqlite3
 from datetime import datetime
@@ -136,7 +137,7 @@ class Letters:
             self.db.commit()
         return self.get(template_id) or {}
 
-    def versions(self, template_id: int) -> list[dict]:
+    def versions(self, template_id: int) -> builtins.list[dict]:
         with self.lock:
             return [dict(r) for r in self.db.execute(
                 "SELECT version, body, note, author, created FROM letter_versions WHERE template_id = ? ORDER BY version DESC", (template_id,))]

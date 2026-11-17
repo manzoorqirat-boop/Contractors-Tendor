@@ -1,7 +1,6 @@
 """PDF BOQs, and entering your own cost for lump-sum lines."""
 import base64
 import io
-import sqlite3
 
 import pytest
 from reportlab.lib import colors

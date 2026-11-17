@@ -10,10 +10,12 @@ import io
 import json
 import sqlite3
 import threading
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
+from .. import dbsetup
 from . import uom as U
 from .text import alias_key
 
@@ -91,6 +93,7 @@ class MasterStore:
             Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         self.company = company_id
         self.db = sqlite3.connect(path, check_same_thread=False)
+        dbsetup.tune(self.db, path)
         self.db.row_factory = sqlite3.Row
         self.lock = threading.RLock()
         with self.lock:

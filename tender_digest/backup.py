@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import offsite
+from . import dbsetup, offsite
 
 log = logging.getLogger("tender_digest.backup")
 
@@ -226,6 +226,11 @@ def restore(zip_path: Path, target_dir: Path, force: bool = False) -> list[str]:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         for t in existing:
             (target_dir / t).rename(target_dir / f"{t}.before-restore-{stamp}")
+        for t in (MAIN_NAME, BOQ_NAME):  # a database in write-ahead mode keeps -wal and -shm beside it: they belong to the OLD file and must not meet the restored one
+            for side in dbsetup.SIDE_FILES:
+                left = target_dir / (t + side)
+                if left.exists():
+                    left.rename(target_dir / f"{t}{side}.before-restore-{stamp}")
         for n in names:
             if n == "manifest.json" or n.endswith("/"):
                 continue

@@ -9,8 +9,9 @@ Lines that cannot be priced are carried at the buyer's estimate, and the result 
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .match import AUTO_MATCHED, NEEDS_REVIEW, MatchResult
 
@@ -60,7 +61,7 @@ def _est_amount(line: Any) -> float | None:
 def cost_line(line: Any, result: MatchResult, items_by_code: dict[str, dict], activity_for: Callable[[str], dict | None] | None = None,
               location: dict | None = None, include_review: bool = False) -> LineCost:
     est = _est_amount(line)
-    base = dict(index=result.index, item_code=result.item_code, est_rate=getattr(line, "rate", None), est_amount=est)
+    base: dict[str, Any] = dict(index=result.index, item_code=result.item_code, est_rate=getattr(line, "rate", None), est_amount=est)
 
     def out(basis: str, unit: float | None, complete: bool, note: str) -> LineCost:
         rate = base["est_rate"]
@@ -102,7 +103,7 @@ def price_boq(lines: list[Any], results: list[MatchResult], items: list[dict], a
     to just recover cost: negative means below the estimate (a 'less' quote), positive above it.
     """
     by_code = {i["erp_item_code"]: i for i in items}
-    costs = [cost_line(ln, r, by_code, activity_for, location, include_review) for ln, r in zip(lines, results)]
+    costs = [cost_line(ln, r, by_code, activity_for, location, include_review) for ln, r in zip(lines, results, strict=False)]
     for i, cost in (manual or {}).items():  # a cost the person entered for a line (a lump sum, or an item not in the catalogue) replaces whatever was worked out
         if 0 <= i < len(costs):
             c, qty = costs[i], getattr(lines[i], "qty", None)

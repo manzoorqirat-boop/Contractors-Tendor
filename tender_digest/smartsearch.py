@@ -100,7 +100,7 @@ def _fts_variant(word: str) -> str | None:
     return phrase + " *" if len(toks[-1]) >= 4 and len(word) > 3 else phrase
 
 
-def fts_query(parsed: "Parsed") -> str | None:
+def fts_query(parsed: Parsed) -> str | None:
     """The search as a SQLite FTS5 MATCH expression, or None when it cannot be expressed (nothing but "leave this out" words), in which case
     the row-by-row matcher is used. Every word is quoted, so nothing a person types can be read as search syntax."""
     parts: list[str] = []

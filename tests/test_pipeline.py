@@ -2,10 +2,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from conftest import fixture
 from tender_digest import collector, digest, filters, mailer
 from tender_digest.config import Portal, Settings, load_settings
-from tender_digest.gepnic import PortalError, Tender, apply_detail, parse_detail
+from tender_digest.gepnic import PortalError, Tender
 from tender_digest.store import SeenStore
 
 NOW = datetime(2026, 11, 14, 8, 0)

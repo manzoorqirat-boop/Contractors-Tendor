@@ -26,7 +26,7 @@ import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.parse import quote, urlparse
@@ -106,7 +106,7 @@ def sign(method: str, host: str, path: str, query: dict[str, str], headers: dict
 
 
 class Bucket:
-    def __init__(self, cfg: OffsiteConfig, session: requests.Session | None = None, clock=lambda: datetime.now(timezone.utc)):
+    def __init__(self, cfg: OffsiteConfig, session: requests.Session | None = None, clock=lambda: datetime.now(UTC)):
         self.cfg, self.http, self.clock = cfg, session or requests.Session(), clock
         u = urlparse(cfg.base)
         self.host, self.root = u.netloc, u.path.rstrip("/")
@@ -139,7 +139,9 @@ class Bucket:
             q = {"list-type": "2", "prefix": prefix, **({"continuation-token": token} if token else {})}
             root = ET.fromstring(self._request("GET", query=q).text)
             ns = {"s": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
-            find = (lambda el, tag: el.findall(f"s:{tag}", ns)) if ns else (lambda el, tag: el.findall(tag))
+            def find(el: Any, tag: str, ns: dict[str, str] = ns) -> list[Any]:  # ns is bound as a default so each page keeps its own
+                return el.findall(f"s:{tag}", ns) if ns else el.findall(tag)
+
             keys += [k.text or "" for c in find(root, "Contents") for k in find(c, "Key")]
             more = find(root, "IsTruncated")
             nxt = find(root, "NextContinuationToken")

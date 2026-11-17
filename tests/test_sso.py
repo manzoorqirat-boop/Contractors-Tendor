@@ -4,7 +4,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from fastapi.testclient import TestClient

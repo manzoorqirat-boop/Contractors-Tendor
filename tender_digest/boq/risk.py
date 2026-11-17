@@ -11,7 +11,6 @@ All percentages below are planning allowances taken from the blueprint, not rule
 from __future__ import annotations
 
 import base64
-import json
 import re
 from datetime import date
 from typing import Any
@@ -76,17 +75,18 @@ def clean_risks(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("The risk answer was not a JSON object.")
     seen: dict[str, dict] = {}
-    for r in raw.get("risks") if isinstance(raw.get("risks"), list) else []:
+    listed = raw.get("risks")
+    for r in listed if isinstance(listed, list) else []:
         if isinstance(r, dict) and r.get("tag") in _BY_TAG and r["tag"] not in seen:
             seen[r["tag"]] = {"present": r.get("present") if r.get("present") in PRESENT else "unclear",
                               "detail": str(r.get("detail") or "")[:240], "clause": str(r.get("clause") or "")[:60]}
     risks = {t: seen.get(t, {"present": "unclear", "detail": "", "clause": ""}) for t in TAGS}
-    f = raw.get("facts") if isinstance(raw.get("facts"), dict) else {}
+    given = raw.get("facts")
+    f: dict[str, Any] = given if isinstance(given, dict) else {}
     facts: dict[str, Any] = {}
     for k, (lo, hi) in FACT_NUMBERS.items():
         v = f.get(k)
-        ok = isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi
-        facts[k] = float(v) if ok else None
+        facts[k] = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi else None
     for k, allowed in FACT_CHOICES.items():
         facts[k] = f.get(k) if f.get(k) in allowed else "not stated"
     facts["state"] = str(f.get("state") or "")[:60]
@@ -266,7 +266,7 @@ def unbalanced_flags(lines: list[Any], quoted_rates: list[float | None], item_th
     `quoted_rates[i]` is your rate for lines[i] (None to skip). The 'early' group is the first third of priced lines by position.
     """
     rows = []
-    for i, (ln, q) in enumerate(zip(lines, quoted_rates)):
+    for i, (ln, q) in enumerate(zip(lines, quoted_rates, strict=False)):
         if q is None or not ln.rate or ln.qty is None:
             continue
         rows.append({"index": i, "description": ln.description, "premium_pct": round((q / ln.rate - 1) * 100, 1), "est_amount": ln.qty * ln.rate, "quoted_amount": ln.qty * q})

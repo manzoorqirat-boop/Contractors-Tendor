@@ -11,9 +11,10 @@ import io
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any
 
 from . import match as M
 from . import parse, rates, risk
@@ -122,7 +123,7 @@ class BoqService:
         verifier = _Capped(inner, MAX_VERIFY_CALLS) if inner else None
         results = M.Matcher.from_store(self.store, verifier).match_all(doc.lines)
         rows = doc.as_rows()
-        for row, r in zip(rows, results):
+        for row, r in zip(rows, results, strict=False):
             row.update(r.to_row())
         warnings = list(doc.warnings)
         if verifier and verifier.used >= MAX_VERIFY_CALLS:
@@ -138,7 +139,7 @@ class BoqService:
     def set_cost(self, tender_key: str, line_no: int, cost: float | None) -> dict:
         """Records what a line will cost you in total (needed for lump sums and items outside the catalogue), or removes it."""
         boq_id = self.store.latest_boq_id(tender_key)
-        if not boq_id or not any(ln["line_no"] == line_no for ln in self.store.get_boq(boq_id)["lines"]):
+        if not boq_id or not any(ln["line_no"] == line_no for ln in (self.store.get_boq(boq_id) or {"lines": []})["lines"]):
             raise BoqError("That BOQ line no longer exists. Reload the page.")
         if cost is not None and not 0 < cost < 1e13:
             raise BoqError("The cost must be an amount above zero")
@@ -252,5 +253,5 @@ class BoqService:
         return sim
 
     @classmethod
-    def open(cls, state_path: str, verifier_factory: Callable[[], Any] | None = None) -> "BoqService":
+    def open(cls, state_path: str, verifier_factory: Callable[[], Any] | None = None) -> BoqService:
         return cls(MasterStore(default_boq_path(state_path)), verifier_factory)

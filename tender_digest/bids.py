@@ -7,15 +7,17 @@ each bid keeps its own copy of the tender's facts.
 """
 from __future__ import annotations
 
+import builtins
 import json
 import logging
 import re
 import sqlite3
 import tempfile
 import uuid
-from datetime import datetime, timedelta
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .gepnic import parse_date
 from .sealing import Sealer
@@ -196,7 +198,7 @@ class BidError(ValueError):
     pass
 
 
-EDITABLE = {
+EDITABLE: dict[str, str | int] = {
     "stage": "stage", "owner": 60, "notes": 4000, "emd_due": "date", "prebid_date": "date", "query_deadline": "date", "portal_checked": "date", "closing": "date", "opening": "date",
     "my_value": "money", "l1_value": "money", "l1_bidder": 120, "result_note": 1000,
 }
@@ -250,7 +252,7 @@ def looks_like(ext: str, data: bytes) -> bool:
     if ext == ".txt":
         return b"\x00" not in data[:4096]
     sigs = _SIGNATURES.get(ext)
-    return bool(sigs) and data.startswith(sigs)
+    return sigs is not None and data.startswith(sigs)
 
 
 class BidBook:
@@ -259,7 +261,7 @@ class BidBook:
         self.store = store
         self.db, self.lock = store.db, store.lock
         self.vault_dir = Path(vault_dir) if vault_dir else None
-        self.on_event: Callable[[str, dict[str, Any]], None] | None = None  # told when something happens on a bid (outgoing webhooks listen here)
+        self.on_event: Callable[[str, dict[str, Any]], Any] | None = None  # told when something happens on a bid (outgoing webhooks listen here)
         with self.lock:
             self.db.executescript(
                 """
@@ -308,7 +310,7 @@ class BidBook:
             b = self.get(bid_id) or {}
             self.on_event(event, {"bid_id": bid_id, "tender_id": b.get("tender_id"), "title": (b.get("description") or b.get("title") or "")[:200],
                                   "organisation": b.get("organisation"), "stage": b.get("stage"), "closing": b.get("closing"), **extra})
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("event %s could not be sent on", event)
 
     # ---- bids ------------------------------------------------------------------------------------------------------
@@ -347,7 +349,7 @@ class BidBook:
                  t["published"], t["closing"], t.get("opening"), t.get("doc"), t.get("brief"), _iso(now), _iso(now), _iso(now)),
             )
             self.db.commit()
-            bid_id = cur.lastrowid
+            bid_id = int(cur.lastrowid or 0)
         self._emit("bid.created", bid_id)
         return self.get(bid_id) or {}, True
 
@@ -472,7 +474,7 @@ class BidBook:
 
     # ---- checklist -------------------------------------------------------------------------------------------------
 
-    def items(self, bid_id: int) -> list[dict]:
+    def items(self, bid_id: int) -> builtins.list[dict]:
         with self.lock:
             rows = self.db.execute("SELECT * FROM bid_items WHERE bid_id = ? ORDER BY position, id", (bid_id,)).fetchall()
         return [{**dict(r), "done": bool(r["done"])} for r in rows]
@@ -527,7 +529,7 @@ class BidBook:
             r = self.db.execute("SELECT * FROM bid_items WHERE id = ? AND bid_id = ?", (item_id, bid_id)).fetchone()
         return {**dict(r), "done": bool(r["done"])} if r else None
 
-    def items_for_owner(self, username: str) -> list[dict]:
+    def items_for_owner(self, username: str) -> builtins.list[dict]:
         """Open checklist items assigned to a person, on bids still in progress, soonest closing first."""
         with self.lock:
             rows = self.db.execute(
@@ -539,12 +541,12 @@ class BidBook:
 
     MAX_BIDDERS = 30
 
-    def bidders(self, bid_id: int) -> list[dict]:
+    def bidders(self, bid_id: int) -> builtins.list[dict]:
         with self.lock:
             rows = self.db.execute("SELECT id, name, price, rank, status, mine FROM bid_bidders WHERE bid_id = ? ORDER BY (rank IS NULL), rank, (price IS NULL), price, id", (bid_id,)).fetchall()
         return [{**dict(r), "mine": bool(r["mine"])} for r in rows]
 
-    def set_bidders(self, bid_id: int, raw: list[Any], now: datetime) -> dict:
+    def set_bidders(self, bid_id: int, raw: builtins.list[Any], now: datetime) -> dict:
         """Replaces the bidders of a bid. When the lowest qualified quote is known and no L1 was recorded, it is recorded as L1; the row marked
         as yours fills in your quoted price if that was empty. Returns the bid fields that changed."""
         if not isinstance(raw, list) or len(raw) > self.MAX_BIDDERS:
@@ -582,7 +584,7 @@ class BidBook:
         patch: dict[str, Any] = {}
         live = [r for r in rows if r[1] and not re.search(r"reject|disqual|withdr|non.?respons", r[3], re.I)]
         if live and not bid.get("l1_value"):
-            low = min(live, key=lambda r: r[1])
+            low = min(live, key=lambda r: r[1] or 0.0)
             patch["l1_value"] = low[1]
             if not bid.get("l1_bidder"):
                 patch["l1_bidder"] = low[0]
@@ -601,7 +603,7 @@ class BidBook:
         words = [w for w in s.split() if w not in {"m", "s", "ms", "pvt", "private", "ltd", "limited", "llp", "co", "company", "the", "and", "pl", "p"}]
         return " ".join(words)
 
-    def competitors(self) -> list[dict]:
+    def competitors(self) -> builtins.list[dict]:
         """Every company that bid against you: how often, how often it won, and how far from the estimate it quotes."""
         with self.lock:
             rows = [dict(r) for r in self.db.execute(
@@ -641,7 +643,7 @@ class BidBook:
             self.db.commit()
         return {"id": cur.lastrowid, "bid_id": bid_id, "at": _iso(now), "username": username, "text": text}
 
-    def comments(self, bid_id: int) -> list[dict]:
+    def comments(self, bid_id: int) -> builtins.list[dict]:
         with self.lock:
             return [dict(r) for r in self.db.execute("SELECT id, at, username, text FROM bid_comments WHERE bid_id = ? ORDER BY id", (bid_id,))]
 
@@ -688,7 +690,7 @@ class BidBook:
             added += 1
         return added
 
-    def with_matches(self, bid: dict, today: datetime) -> list[dict]:
+    def with_matches(self, bid: dict, today: datetime) -> builtins.list[dict]:
         """The checklist, each required document matched to the vault: ready, expires before the bid closes, expired, or missing."""
         ref = _day(bid.get("closing")) or today.date().isoformat()
         docs = self.vault_list()
@@ -760,7 +762,7 @@ class BidBook:
             self._sync_tender_dates(bid["key"], _when(closing_iso), None, "closing")
         return self.get(bid_id) or bid
 
-    def changes(self, bid_id: int, limit: int = 50) -> list[dict]:
+    def changes(self, bid_id: int, limit: int = 50) -> builtins.list[dict]:
         with self.lock:
             rows = self.db.execute("SELECT id, at, what, old, new, seen FROM bid_changes WHERE bid_id = ? ORDER BY id DESC LIMIT ?", (bid_id, limit)).fetchall()
         return [{**dict(r), "seen": bool(r["seen"])} for r in rows]
@@ -802,7 +804,7 @@ class BidBook:
         try:
             fetch = getattr(client, "detail_page", None)
             pairs, corr = fetch(t) if fetch else (client.detail(t), None)
-        except Exception as e:  # noqa: BLE001 - one tender's detail page failing must not stop the run
+        except Exception as e:  # one tender's detail page failing must not stop the run
             log.info("watch: detail failed for %s: %s", t.key, e)
             pairs, corr = {}, None
         if corr is not None:
@@ -843,7 +845,7 @@ class BidBook:
 
     # ---- alerts ----------------------------------------------------------------------------------------------------
 
-    def alerts(self, now: datetime, days: int = 7) -> list[dict]:
+    def alerts(self, now: datetime, days: int = 7) -> builtins.list[dict]:
         """Dates coming up (or just missed) across bids in progress, plus papers in the vault about to expire."""
         out: list[dict] = []
         today = now.date()
@@ -894,7 +896,7 @@ class BidBook:
         changes = [{"id": r["id"], "what": r["what"], "old": r["old"], "new": r["new"], "tender_id": r["tender_id"], "title": (r["description"] or r["title"] or "")[:140]} for r in rows]
         return {"alerts": [a for a in self.alerts(now, 5) if a["urgency"] != "later" or a["days_left"] <= 3], "changes": changes}
 
-    def mark_notified(self, change_ids: list[int]) -> None:
+    def mark_notified(self, change_ids: builtins.list[int]) -> None:
         with self.lock:
             self.db.executemany("UPDATE bid_changes SET notified = 1 WHERE id = ?", [(i,) for i in change_ids])
             self.db.commit()
@@ -930,12 +932,12 @@ class BidBook:
             "by_size": group("size", lambda r: _band(r["value"])),
         }
 
-    def l1_outcomes(self, work_type: str | None, value: float | None) -> tuple[list[float], str]:
+    def l1_outcomes(self, work_type: str | None, value: float | None) -> tuple[builtins.list[float], str]:
         with self.lock:
             rows = [dict(r) for r in self.db.execute("SELECT stage, work_type, value, my_value, l1_value FROM bids WHERE stage IN ('won','lost')")]
         return l1_outcomes_from(rows, work_type, value)
 
-    def history_notes(self, work_type: str | None, organisation: str | None, value: float | None) -> list[str]:
+    def history_notes(self, work_type: str | None, organisation: str | None, value: float | None) -> builtins.list[str]:
         """Plain lines about how you have done on similar tenders: used on a tender's page and in its bid brief."""
         with self.lock:
             rows = [dict(r) for r in self.db.execute("SELECT stage, work_type, organisation, value FROM bids WHERE stage IN ('won','lost')")]
@@ -953,7 +955,7 @@ class BidBook:
 
     # ---- vault -----------------------------------------------------------------------------------------------------
 
-    def vault_list(self) -> list[dict]:
+    def vault_list(self) -> builtins.list[dict]:
         with self.lock:
             return [dict(r) for r in self.db.execute("SELECT id, name, kind, issued, expiry, notes, filename, size, created FROM vault ORDER BY kind, name")]
 
@@ -1009,7 +1011,7 @@ class BidBook:
                 "INSERT INTO vault (name, kind, issued, expiry, notes, filename, stored, size, created) VALUES (?,?,?,?,?,?,?,?,?)",
                 (fields["name"], fields["kind"], fields.get("issued"), fields.get("expiry"), fields.get("notes", ""), shown, stored, size, _iso(now)))
             self.db.commit()
-        return self.vault_get(cur.lastrowid) or {}
+        return self.vault_get(int(cur.lastrowid or 0)) or {}
 
     def vault_update(self, doc_id: int, raw: dict[str, Any]) -> dict:
         fields = self._vault_fields(raw, True)
@@ -1066,7 +1068,7 @@ class BidBook:
                 continue
             try:
                 what = self.sealer.rotate_file(f)
-            except Exception:  # noqa: BLE001 - one unreadable file must not stop the rest
+            except Exception:  # one unreadable file must not stop the rest
                 log.exception("could not encrypt %s", f.name)
                 done["failed"] += 1
                 continue

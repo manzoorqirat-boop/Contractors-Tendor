@@ -1,0 +1,29 @@
+# Tooling settings only: the app is run with `python -m tender_digest.web`, not installed as a package.
+# CI runs `ruff check .` and `mypy` (see .github/workflows/ci.yml); both must stay clean. Versions are pinned in requirements-dev.txt.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 250            # long lines are normal in this code; E501 is not selected, this only keeps the formatter's idea of "long" honest
+extend-exclude = ["web", "probe"]
+
+[tool.ruff.lint]
+# E4/E7/E9/F: real mistakes (unused or missing names, bad comparisons, syntax). B: likely bugs. UP: out-of-date syntax. I: import order.
+# SIM: needlessly roundabout code. RUF100: a "noqa" that no longer silences anything.
+select = ["E4", "E7", "E9", "F", "B", "UP", "I", "SIM", "RUF100"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI reads these call results as parameter declarations, which is their purpose (rule B008 would flag every route).
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Body", "fastapi.Cookie", "fastapi.File", "fastapi.Form", "fastapi.Path"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and demo-data scripts get the mistake checks only. pytest fixtures are passed in by name (which "redefines" them, F811),
+# and a test is allowed to be terse (several statements on a line, imports after setup).
+"tests/*" = ["F811", "E702", "E402", "B", "UP", "SIM", "I"]
+"testdata/*" = ["F811", "E702", "E402", "B", "UP", "SIM", "I"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["tender_digest"]
+ignore_missing_imports = true      # several libraries ship no type information
+warn_unused_ignores = true         # a "type: ignore" must still be needed
+no_implicit_optional = true

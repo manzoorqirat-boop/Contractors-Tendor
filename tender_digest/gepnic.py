@@ -12,6 +12,7 @@ import socket
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -275,7 +276,7 @@ class GepnicClient:
                 raise PortalError(f"the portal pointed us to another website ({(parts.hostname or url)[:60]}), which this app does not follow", "different_software")
             if self._check_dns and not is_public_host(parts.hostname or ""):
                 raise PortalError("the portal's address points to a private network, so it was not contacted", "blocked")
-            kwargs = {"timeout": self.timeout, "allow_redirects": False}
+            kwargs: dict[str, Any] = {"timeout": self.timeout, "allow_redirects": False}
             response = self.http.get(url, stream=True, **kwargs) if stream else self.http.get(url, **kwargs)
             location = response.headers.get("Location") if getattr(response, "status_code", 0) in (301, 302, 303, 307, 308) and hasattr(response, "headers") else None
             if not location:

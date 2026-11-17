@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import learn, smartsearch
+from . import dbsetup, learn, smartsearch
 from .gepnic import Tender
 
 _DATES = ("published", "closing", "opening")
@@ -123,12 +123,13 @@ def drill(dim: str, key: str, now: datetime) -> dict[str, Any]:
     if dim == "closes_in":
         edge = lambda days: (now + timedelta(days=days)).isoformat()  # noqa: E731
         n = now.isoformat()
-        return {
+        windows: dict[str, dict[str, Any]] = {
             "Closed": {"status": "closed"}, "No date": {"no_closing": True},
             "Within 24 hours": {"closing_from": n, "closing_to": edge(1)}, "1 to 3 days": {"closing_from": edge(1), "closing_to": edge(4)},
             "4 to 7 days": {"closing_from": edge(4), "closing_to": edge(8)}, "8 to 14 days": {"closing_from": edge(8), "closing_to": edge(15)},
             "15 to 30 days": {"closing_from": edge(15), "closing_to": edge(31)}, "Over 30 days": {"closing_from": edge(31)},
-        }.get(key, {})
+        }
+        return windows.get(key, {})
     if dim in ("closing_day", "closing_week", "first_seen_day", "published_day"):
         if none:
             return {"no_closing": True} if dim.startswith("closing") else {"no_published": True}
@@ -181,6 +182,7 @@ class SeenStore:
             Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         # One connection shared by the web threads and the run thread; every use goes through the lock.
         self.db = sqlite3.connect(path, check_same_thread=False)
+        self.journal_mode = dbsetup.tune(self.db, path)
         self.db.row_factory = sqlite3.Row
         self.db.create_function("tsmatch", 2, smartsearch.match, deterministic=True)  # the search in the tender list
         self.lock = threading.RLock()
@@ -821,7 +823,7 @@ class SeenStore:
                 f"GROUP BY 1, 2 ORDER BY count DESC LIMIT 10", oa)]
             sw, sa = W(status="all", seen_from=_iso(day_start - timedelta(days=29)))
             per_day = {r["day"]: r["count"] for r in self.db.execute(f"SELECT substr(first_seen,1,10) AS day, COUNT(*) AS count FROM seen WHERE {sw} GROUP BY 1", sa)}
-            cw, ca = W(status="open", closing_to=_iso(day_start + timedelta(days=13))[:10])
+            cw, ca = W(status="open", closing_to=(_iso(day_start + timedelta(days=13)) or "")[:10])
             closing_days = {r["day"]: r["count"] for r in self.db.execute(f"SELECT substr(closing,1,10) AS day, COUNT(*) AS count FROM seen WHERE {cw} AND closing IS NOT NULL GROUP BY 1", ca)}
             biggest = [dict(r) for r in self.db.execute(
                 f"SELECT key, portal, tender_id, closing, value, category, organisation, title, description FROM seen WHERE {ow} AND value IS NOT NULL ORDER BY value DESC LIMIT 5", oa)]
@@ -856,7 +858,9 @@ class SeenStore:
         for (g, s), (c, v, vn) in cells.items():
             for tot, k in ((gtot, g), (stot, s)):
                 t = tot.setdefault(k, [0, 0.0, 0])
-                t[0] += c; t[1] += v; t[2] += vn
+                t[0] += c
+                t[1] += v
+                t[2] += vn
 
         def order(dim: str, keys: list[str], totals: dict[str, list[float]], limit: int) -> tuple[list[str], bool]:
             kind = DIMENSIONS[dim]["order"]
@@ -872,13 +876,13 @@ class SeenStore:
         skeys, s_more = order(split_by, list(stot), stot, top_split) if split_by else ([""], False)
         gset, sset = set(gkeys), set(skeys)
 
-        def cell(c: int, v: float, vn: int) -> dict:
+        def cell(c: float, v: float, vn: float) -> dict:
             return {"count": c, "value": v, "avg": (v / vn) if vn else None}
 
         out_rows = []
         for g in gkeys:
-            c, v, vn = gtot[g]
-            row = {"key": g, "drill": drill(group_by, g, now), **cell(c, v, vn), "parts": {}}
+            gc, gv, gvn = gtot[g]
+            row = {"key": g, "drill": drill(group_by, g, now), **cell(gc, gv, gvn), "parts": {}}
             if split_by:
                 for sk in skeys:
                     if (g, sk) in cells:
@@ -908,7 +912,7 @@ class SeenStore:
                 (trigger, _iso(now), json.dumps(portals), int(send_email)),
             )
             self.db.commit()
-            return int(cur.lastrowid)
+            return int(cur.lastrowid or 0)
 
     def update_run(self, run_id: int, **fields: Any) -> None:
         allowed = {"status", "finished", "reports", "new_civil", "emailed_count", "error", "log"}

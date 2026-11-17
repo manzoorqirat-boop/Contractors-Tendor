@@ -4,7 +4,6 @@ import json
 from datetime import datetime, timedelta
 
 from tender_digest import ai
-from tender_digest.boq import risk
 from tests.test_bids import NOW, app_ctx, kept  # noqa: F401  (app_ctx: a logged-in client with one collected tender)
 from tests.test_boq_api import FINDINGS
 

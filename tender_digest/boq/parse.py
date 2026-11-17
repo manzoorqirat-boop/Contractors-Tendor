@@ -105,7 +105,9 @@ def parse_rows(rows: list[list[Any]]) -> BoqDocument:
     section = ""
     for i in range(start + 1, len(rows)):
         r = rows[i]
-        cell = lambda k: (r[col[k]] if k in col and col[k] < len(r) else None)  # noqa: E731
+        def cell(k, r=r):  # r is bound as a default so each row keeps its own
+            return r[col[k]] if k in col and col[k] < len(r) else None
+
         desc = re.sub(r"\s+", " ", str(cell("desc") or "")).strip()
         if not desc or _SKIP.search(desc) or number(desc) is not None:  # a numbered "1 2 3 4 5" row under the header is not an item
             continue

@@ -17,7 +17,7 @@ _SYNONYMS = [
     (r"\breinforcement\s+steel\b", "tmt steel"), (r"\bcement\s+mortar\b", "cm"), (r"\bdia(meter)?\b", "dia"),
 ]
 # Scope words such as supply, laying and fixing are deliberately NOT stop words: "supply only" and "supply and laying" differ.
-_STOP = set("a an and of the in with for to at on by from as is be per all any etc including inclusive complete incl "
+_STOP = set("a an and of the in with for to at on by from as is be per all any etc including inclusive complete incl "  # noqa: SIM905 - read as a sentence, a word list is easier to check and extend
             "work works item items done carried out".split())
 _GRADE = re.compile(r"\bM[\s-]?(\d{2})\b")          # concrete grade, upper-case M only so 'm' (metre) is untouched
 _FE = re.compile(r"\bFe[\s-]?(\d{3})\s?(D|S)?\b", re.I)
@@ -76,8 +76,8 @@ def spec_conflicts(a: str, b: str) -> list[str]:
 def _grams(norm: str) -> Counter:
     words = norm.split()
     c: Counter = Counter(words)
-    for x, y in zip(words, words[1:]):
-        c[f"{x}_{y}"] += 0.5
+    for x, y in zip(words, words[1:], strict=False):
+        c[f"{x}_{y}"] += 0.5  # type: ignore[assignment]  # a pair of words counts half, so the totals are fractions
     return c
 
 

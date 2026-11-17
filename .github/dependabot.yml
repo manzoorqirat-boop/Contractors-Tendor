@@ -1,0 +1,41 @@
+# Keeps the pinned versions from going stale. Every package is pinned exactly (so the image that is tested is the image that is deployed),
+# which means nothing updates itself: Dependabot proposes the change as a pull request, CI tests it (including the security audit),
+# and a person merges it. Updates are grouped so a week's worth arrives as one or two pull requests, not twenty.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"                       # requirements.txt and requirements-dev.txt
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      python-packages:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]   # a new major version arrives as its own pull request, to be read before merging
+
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      web-packages:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: "/"                       # the actions used by .github/workflows
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: "/"                       # the Node and Python base images in the Dockerfile
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
