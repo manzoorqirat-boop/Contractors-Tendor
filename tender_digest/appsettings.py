@@ -26,7 +26,7 @@ class SettingsError(ValueError):
 def _words(value: Any, label: str) -> list[str]:
     if not isinstance(value, list):
         raise SettingsError(f"{label} must be a list")
-    out = []
+    out: list[str] = []
     for w in value:
         w = str(w).strip()
         if not w:
@@ -82,6 +82,28 @@ def clean_portal(raw: Any, taken: set[str]) -> dict[str, str]:
     if key in taken:
         raise SettingsError(f"There is already a portal called '{name}'. Use a different name")
     return {"key": key, "name": name, "state": state, "base_url": url}
+
+
+def size_limits(saved: dict[str, Any]) -> dict[str, float]:
+    """The size of work this company takes (Vault > Company), as {"size_min": ..., "size_max": ...}. A limit that is not set, is zero or is not a number is left out."""
+    out: dict[str, float] = {}
+    for key in ("size_min", "size_max"):
+        v = saved.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            out[key] = float(v)
+    return out
+
+
+def learning_on(saved: dict[str, Any]) -> bool:
+    """Whether the Recommended order may learn from the tenders you star, bid on, hide and drop (on unless switched off)."""
+    return saved.get("learning", DEFAULTS["learning"]) is not False
+
+
+def rescore(store: Any, now: Any) -> int:
+    """Works out the Recommended order again from the saved size limits and learning setting. Returns how many tenders were scored."""
+    saved = store.get_settings()
+    lim = size_limits(saved)
+    return int(store.recompute_priorities(now, lim.get("size_min"), lim.get("size_max"), learning_on(saved)))
 
 
 def all_portals(env: Settings, saved: dict[str, Any]) -> list[Portal]:
@@ -196,7 +218,7 @@ def current(env: Settings, saved: dict[str, Any]) -> dict[str, Any]:
         "company_profile": saved.get("company_profile", DEFAULTS["company_profile"]),
         "logo_text": saved.get("logo_text", DEFAULTS["logo_text"]),
         "accent": saved.get("accent", DEFAULTS["accent"]) if saved.get("accent") in ACCENTS else DEFAULTS["accent"],
-        "learning": saved.get("learning", DEFAULTS["learning"]) is not False,
+        "learning": learning_on(saved),
         "ai_digest_intro": saved.get("ai_digest_intro", DEFAULTS["ai_digest_intro"]),
         "ai_hide_noncivil": saved.get("ai_hide_noncivil", DEFAULTS["ai_hide_noncivil"]),
         "reminders_on": saved.get("reminders_on", DEFAULTS["reminders_on"]),

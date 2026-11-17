@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 from tender_digest import appsettings, reminders, web
 from tender_digest.appsettings import SettingsError
 from tender_digest.runner import local_now
-from tender_digest.store import SeenStore
 from tests.test_web import PASSWORD, ctx, settings, tender  # noqa: F401
 
 NOON = datetime(2026, 11, 20, 12, 0)
@@ -248,7 +247,7 @@ def test_the_calendar_feed_is_valid_and_correct():
 def test_a_tender_title_cannot_inject_calendar_lines():
     ics = reminders.build_ics([bid(1, closing="2026-12-02T17:30:00", title="x\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nSUMMARY:fake")], [], NOON)
     lines = ics.split("\r\n")
-    assert lines.count("BEGIN:VEVENT") == 1 and lines.count("END:VEVENT") == 1 and not any(l.startswith("SUMMARY:fake") for l in lines)  # the newline became text
+    assert lines.count("BEGIN:VEVENT") == 1 and lines.count("END:VEVENT") == 1 and not any(ln.startswith("SUMMARY:fake") for ln in lines)  # the newline became text
 
 
 def test_the_calendar_address_flow(ctx):

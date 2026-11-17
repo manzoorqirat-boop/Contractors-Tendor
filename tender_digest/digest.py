@@ -21,7 +21,7 @@ def format_inr(value: float | None) -> str:
     digits = str(whole)
     if len(digits) > 3:
         head, tail = digits[:-3], digits[-3:]
-        groups = []
+        groups: list[str] = []
         while len(head) > 2:
             groups.insert(0, head[-2:])
             head = head[:-2]
@@ -98,7 +98,7 @@ def tenders_workbook(rows: list[list]) -> bytes:
         for cell in ws[ws.max_row]:
             if isinstance(cell.value, str):
                 cell.data_type = "s"  # a tender title that starts with "=" must not run as a formula
-    for col, width in zip("ABCDEFGHIJK", (9, 18, 24, 60, 38, 22, 18, 20, 14, 18, 18)):
+    for col, width in zip("ABCDEFGHIJK", (9, 18, 24, 60, 38, 22, 18, 20, 14, 18, 18), strict=False):
         ws.column_dimensions[col].width = width
     for row in ws.iter_rows(min_row=2):
         row[3].alignment = Alignment(wrap_text=True, vertical="top")

@@ -9,6 +9,7 @@ The address must be a public https address (the same rule as the reminder webhoo
 """
 from __future__ import annotations
 
+import builtins
 import hashlib
 import hmac
 import json
@@ -82,7 +83,7 @@ class Events:
             waiting = {r["hook_id"]: r["n"] for r in self.db.execute("SELECT hook_id, COUNT(*) n FROM webhook_queue GROUP BY hook_id")}
         return [{**h, "waiting": waiting.get(h["id"], 0)} for h in hooks]
 
-    def create(self, name: str, url: str, events: list[str], now: datetime) -> tuple[dict, str]:
+    def create(self, name: str, url: str, events: builtins.list[str], now: datetime) -> tuple[dict, str]:
         """Returns (the webhook, its secret). The secret is shown once."""
         name = " ".join(str(name or "").split())[:60]
         if not name:
@@ -107,7 +108,7 @@ class Events:
             r = self.db.execute("SELECT * FROM webhooks WHERE id = ?", (hook_id,)).fetchone()
         return self._shape(r) if r else None
 
-    def update(self, hook_id: int, *, name: str | None = None, url: str | None = None, events: list[str] | None = None, active: bool | None = None) -> dict:
+    def update(self, hook_id: int, *, name: str | None = None, url: str | None = None, events: builtins.list[str] | None = None, active: bool | None = None) -> dict:
         sets: dict[str, Any] = {}
         if name is not None:
             n = " ".join(name.split())[:60]
@@ -172,7 +173,7 @@ class Events:
                     n += 1
                 self.db.commit()
             return n
-        except Exception:  # noqa: BLE001
+        except Exception:
             return 0
 
     def deliver(self, now: datetime, session: Any = None, limit: int = 20, timeout: int = 10) -> int:

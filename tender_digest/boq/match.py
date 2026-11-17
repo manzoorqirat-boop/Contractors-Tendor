@@ -15,8 +15,9 @@ Only an alias or an exact code can auto-match without Claude.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from .text import SemanticIndex, spec_conflicts
 
@@ -72,7 +73,7 @@ def clean_verdict(raw: Any, count: int) -> dict | None:
     choice = raw.get("choice")
     choice = choice if isinstance(choice, int) and not isinstance(choice, bool) and 1 <= choice <= count else None
     try:
-        conf = float(raw.get("confidence"))
+        conf = float(raw.get("confidence"))  # type: ignore[arg-type]  # a missing value raises TypeError, handled just below
     except (TypeError, ValueError):
         return None
     return {"choice": choice, "confidence": max(0.0, min(1.0, conf)), "reason": str(raw.get("reason") or "")[:240]}
@@ -119,7 +120,7 @@ class Matcher:
             self.sor.setdefault(_code(r["sor_code"]), []).append(r)
 
     @classmethod
-    def from_store(cls, store: Any, verifier: Verifier | None = None, top_k: int = 5) -> "Matcher":
+    def from_store(cls, store: Any, verifier: Verifier | None = None, top_k: int = 5) -> Matcher:
         return cls(store.items(), store.sor_rows(), store.find_alias, verifier, top_k)
 
     def _cand(self, n: int, score: float, desc: str) -> dict:

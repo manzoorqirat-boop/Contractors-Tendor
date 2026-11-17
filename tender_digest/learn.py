@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections import Counter
+from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
@@ -55,8 +55,8 @@ def features(row: dict[str, Any]) -> list[tuple[str, str]]:
 
 class Model:
     def __init__(self) -> None:
-        self.liked: Counter[tuple[str, str]] = Counter()
-        self.avoided: Counter[tuple[str, str]] = Counter()
+        self.liked: defaultdict[tuple[str, str], float] = defaultdict(float)
+        self.avoided: defaultdict[tuple[str, str], float] = defaultdict(float)
         self.signals = {"positive": 0, "negative": 0}
 
     def add(self, row: dict[str, Any], sign: int, weight: float = 1.0) -> None:
@@ -140,9 +140,7 @@ def priority(row: dict[str, Any], now: datetime, model: Model | None, size_min: 
     elif fit and int(fit) <= 2:
         notes.append(f"weak fit ({int(fit)}/5)")
     value = row.get("value")
-    if size_min is None and size_max is None:
-        size = 8
-    elif value is None:
+    if size_min is None and size_max is None or value is None:
         size = 8
     elif (size_min is None or value >= size_min) and (size_max is None or value <= size_max):
         size = 15

@@ -9,8 +9,7 @@ Outlook or an iPhone.
 from __future__ import annotations
 
 import ipaddress
-import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from html import escape
 from typing import Any
 from urllib.parse import urlparse
@@ -38,7 +37,7 @@ def deadlines(bids: list[dict[str, Any]], now: datetime, future_only: bool = Tru
     out = []
     for b in bids:
         if b["stage"] in PREPARING:
-            fields = (("closing", b.get("closing")), ("emd", b.get("emd_due")), ("prebid", b.get("prebid_date")), ("query", b.get("query_deadline")))
+            fields: tuple[tuple[str, Any], ...] = (("closing", b.get("closing")), ("emd", b.get("emd_due")), ("prebid", b.get("prebid_date")), ("query", b.get("query_deadline")))
         elif b["stage"] == "submitted":
             fields = (("opening", b.get("opening")),)
         else:
@@ -174,7 +173,8 @@ def _esc(text: str) -> str:
 
 def _fold(line: str) -> str:
     """Lines longer than 75 bytes are continued on the next line, as the calendar standard requires."""
-    out, cur = [], ""
+    out: list[str] = []
+    cur = ""
     for ch in line:
         if len((cur + ch).encode()) > (75 if not out else 74):
             out.append(cur)
@@ -188,7 +188,7 @@ def _fold(line: str) -> str:
 def build_ics(bids: list[dict[str, Any]], vault_docs: list[dict[str, Any]], now: datetime, tz_name: str = "Asia/Kolkata", app_url: str = "") -> str:
     """An iCalendar feed of every deadline on bids in progress (from a week ago on) and of Vault papers that expire."""
     tz = ZoneInfo(tz_name)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TendAI by QMSofts//Deadlines//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:TendAI deadlines",
              "REFRESH-INTERVAL;VALUE=DURATION:PT6H", "X-PUBLISHED-TTL:PT6H"]
 
@@ -200,7 +200,7 @@ def build_ics(bids: list[dict[str, Any]], vault_docs: list[dict[str, Any]], now:
             lines.append(f"DTSTART;VALUE=DATE:{when.strftime('%Y%m%d')}")
             lines.append(f"DTEND;VALUE=DATE:{(when + timedelta(days=1)).strftime('%Y%m%d')}")
         else:
-            start = when.replace(tzinfo=tz).astimezone(timezone.utc)
+            start = when.replace(tzinfo=tz).astimezone(UTC)
             lines.append(f"DTSTART:{start.strftime('%Y%m%dT%H%M%SZ')}")
             lines.append(f"DTEND:{(start + timedelta(minutes=30)).strftime('%Y%m%dT%H%M%SZ')}")
         lines.append(f"SUMMARY:{_esc(summary)}")

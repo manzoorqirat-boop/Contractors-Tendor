@@ -4,7 +4,7 @@ from itertools import product
 import pytest
 from fastapi.testclient import TestClient
 
-from tender_digest import runner, web
+from tender_digest import web
 from tender_digest.config import Portal
 from tender_digest.gepnic import Tender
 from tender_digest.runner import RunManager

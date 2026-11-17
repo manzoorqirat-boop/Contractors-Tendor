@@ -6,9 +6,9 @@ import logging
 import os
 import re
 import threading
-from dataclasses import asdict
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Callable
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from . import ai, alerts, appsettings, collector, digest, mailer, reminders
@@ -99,7 +99,7 @@ class RunManager:
             try:
                 self.sender(self.env.brevo_api_key, self.env.mail_from, self.env.mail_from_name, cur["recipients"], subject, html_body, text)
                 ok = True
-            except Exception as e:  # noqa: BLE001 - tried again in 10 minutes
+            except Exception as e:  # tried again in 10 minutes
                 log.warning("reminder email failed: %s", e)
         if hook:
             try:
@@ -154,12 +154,12 @@ class RunManager:
                 soon = self.store.closing_soon(now, settings.closing_soon_days)
                 try:
                     bid_block = self.bids.digest_block(now)
-                except Exception:  # noqa: BLE001 - the email goes out without the bid section
+                except Exception:  # the email goes out without the bid section
                     log.exception("bid section of the digest failed")
                     bid_block = {"alerts": [], "changes": []}
                 try:
                     bid_block["money"] = MoneyBook(self.bids).digest_lines(now)
-                except Exception:  # noqa: BLE001 - the email goes out without the money items
+                except Exception:  # the email goes out without the money items
                     log.exception("money section of the digest failed")
                     bid_block["money"] = []
                 quiet = (not pending and not soon and not any(r.errors for r in reports) and not bid_block["alerts"] and not bid_block["changes"]
@@ -170,16 +170,16 @@ class RunManager:
                     if ai.configured() and pending and saved.get("ai_digest_intro", True):
                         try:
                             info = self.store.ai_info([t.key for t in pending])
-                            items = sorted(({"tender_id": t.tender_id, "title": t.title, "description": t.description, "location": t.location, "value": t.value,
+                            items: list[dict[str, Any]] = sorted(({"tender_id": t.tender_id, "title": t.title, "description": t.description, "location": t.location, "value": t.value,
                                              "closing": t.closing.date().isoformat() if t.closing else None, "fit": (info.get(t.key) or {}).get("fit")} for t in pending),
                                            key=lambda x: (-(x["fit"] or 0), -(x["value"] or 0)))
                             intro = ai.digest_intro(items, profile)
-                        except Exception as e:  # noqa: BLE001 - the email goes out without the intro
+                        except Exception as e:  # the email goes out without the intro
                             say(f"Claude intro skipped: {str(e)[:120]}")
                     try:
                         searches = alerts.matches(self.store, now, saved.get("views", []), [t.key for t in pending], settings.closing_soon_days,
-                                                 size={k: float(saved[n]) for k, n in (("size_min", "size_min"), ("size_max", "size_max")) if isinstance(saved.get(n), (int, float)) and saved.get(n) > 0})
-                    except Exception:  # noqa: BLE001 - the email goes out without the saved-search section
+                                                 size=appsettings.size_limits(saved))
+                    except Exception:  # the email goes out without the saved-search section
                         log.exception("saved-search section of the digest failed")
                         searches = []
                     built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro, bid_block, searches)
@@ -195,10 +195,8 @@ class RunManager:
             failed = reports and all(r.failed for r in reports)
             self.store.prune(now, appsettings.current(self.env, self.store.get_settings())["tender_days"])
             try:  # new tenders, new AI labels and the passing hours all change the recommended order
-                lim = {k: self.store.get_settings().get(k) for k in ("size_min", "size_max")}
-                self.store.recompute_priorities(now, *(v if isinstance(v, (int, float)) and v > 0 else None for v in lim.values()),
-                                                appsettings.current(self.env, self.store.get_settings())["learning"])
-            except Exception:  # noqa: BLE001 - the run itself must not fail over its ordering
+                appsettings.rescore(self.store, now)
+            except Exception:  # the run itself must not fail over its ordering
                 log.exception("recomputing the recommended order failed")
             self.store.update_run(
                 run_id, status="failed" if failed else "ok", finished=local_now(self.tz_name).isoformat(timespec="seconds"),
@@ -206,7 +204,7 @@ class RunManager:
                 error="Every portal failed" if failed else None,
             )
             say("Finished")
-        except Exception as e:  # noqa: BLE001 - a run must always end in a recorded state
+        except Exception as e:  # a run must always end in a recorded state
             log.exception("run %s failed", run_id)
             self.store.update_run(run_id, status="failed", finished=local_now(self.tz_name).isoformat(timespec="seconds"), error=f"{type(e).__name__}: {e}"[:500])
             say(f"Failed: {e}")
@@ -282,7 +280,7 @@ class Scheduler(threading.Thread):
             manager.sender(manager.env.brevo_api_key, manager.env.mail_from, manager.env.mail_from_name, cur["recipients"], subject, body_html, body_text)
             store.put_settings({"last_failure_alert": day})
             return True
-        except Exception:  # noqa: BLE001 - an alert problem must never stop the scheduler
+        except Exception:  # an alert problem must never stop the scheduler
             log.exception("failure alert could not be sent")
             return False
 
@@ -301,7 +299,7 @@ class Scheduler(threading.Thread):
         if self.housekeeping:
             try:
                 self.housekeeping(now)
-            except Exception:  # noqa: BLE001 - a backup problem is logged and must never stop the daily run
+            except Exception:  # a backup problem is logged and must never stop the daily run
                 log.exception("housekeeping (daily backup) failed")
         if not self.due(now):
             self.maybe_alert(now)
@@ -320,5 +318,5 @@ class Scheduler(threading.Thread):
         while not self._stop.wait(self.interval):
             try:
                 self.tick()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("scheduler tick failed")

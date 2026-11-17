@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from . import filters, gem
 from .config import Portal, Settings
@@ -92,7 +93,7 @@ def _collect_portal(
                 if watcher:
                     try:
                         watcher(tender, client)
-                    except Exception:  # noqa: BLE001 - watching a bid must never stop the collection
+                    except Exception:  # watching a bid must never stop the collection
                         log.exception("bid watch failed for %s", tender.key)
                 continue
             if not filters.is_recent(tender, now, settings.lookback_days):

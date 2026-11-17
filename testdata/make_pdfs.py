@@ -24,7 +24,7 @@ except ImportError:
     sys.exit("This script needs reportlab: pip install reportlab")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import content as C  # noqa: E402
+import content as C
 
 FOOTER = "TEST DATA - fictional document created only for software testing. Not a real tender, certificate or legal paper."
 ss = getSampleStyleSheet()

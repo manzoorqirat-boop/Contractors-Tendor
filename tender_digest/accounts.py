@@ -13,13 +13,14 @@ Passwords are stored as salted scrypt hashes (standard library, nothing to insta
 from __future__ import annotations
 
 import base64
+import builtins
 import hashlib
 import hmac
 import re
 import secrets
 import struct
-import time
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -482,9 +483,10 @@ class Accounts:
             self.db.commit()
         return cur.rowcount
 
-    def activity(self, limit: int = 100, username: str = "", before: int | None = None) -> list[dict[str, Any]]:
-        sql, args = "SELECT id, at, username, role, action, target, detail, client FROM audit", []
-        where = []
+    def activity(self, limit: int = 100, username: str = "", before: int | None = None) -> builtins.list[dict[str, Any]]:
+        sql = "SELECT id, at, username, role, action, target, detail, client FROM audit"
+        args: list[Any] = []
+        where: list[str] = []
         if username:
             where.append("username = ?")
             args.append(username.strip().lower())

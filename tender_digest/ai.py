@@ -187,7 +187,7 @@ def enrich(store: Any, now: Any, profile: str, hide_noncivil: bool, cap: int, sa
     except (AIError, NotConfigured) as e:
         say(f"Claude labelling stopped: {e}")
         return {"scored": scored, "error": str(e)}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.exception("AI labelling failed")
         say("Claude labelling stopped: unexpected error")
         return {"scored": scored, "error": type(e).__name__}
@@ -363,7 +363,8 @@ def clean_award(raw: Any) -> dict:
         return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 1e13 else None
 
     bidders = []
-    for b in (raw.get("bidders") if isinstance(raw.get("bidders"), list) else [])[:30]:
+    listed = raw.get("bidders")
+    for b in (listed if isinstance(listed, list) else [])[:30]:
         if not isinstance(b, dict) or not isinstance(b.get("name"), str) or not b["name"].strip():
             continue
         rank = b.get("rank")

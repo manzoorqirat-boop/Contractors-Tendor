@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from tender_digest import web
 from tender_digest.runner import RunManager
 from tender_digest.store import SeenStore
-from tests.test_bids import NOW, kept
+from tests.test_bids import kept
 from tests.test_web import PASSWORD, FakeSender, settings
 
 GOOD = "purple-tractor-window"
