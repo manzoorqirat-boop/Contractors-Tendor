@@ -210,6 +210,7 @@ class SeenStore:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, at TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'run',
                   kind TEXT NOT NULL, departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
                 CREATE INDEX IF NOT EXISTS portal_history_key ON portal_history (key, id);
+                CREATE TABLE IF NOT EXISTS portal_coverage (key TEXT PRIMARY KEY, checked TEXT NOT NULL, result TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS portal_health (key TEXT PRIMARY KEY, state TEXT NOT NULL, since TEXT NOT NULL);
                 """
             )
@@ -1120,6 +1121,17 @@ class SeenStore:
             )
             return [dict(r) for r in rows]
 
+    def put_portal_coverage(self, key: str, result: dict[str, Any], at: datetime) -> None:
+        """The result of a deep test of one portal (see coverage.py): the latest one is kept."""
+        with self.lock:
+            self.db.execute("INSERT INTO portal_coverage (key, checked, result) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET checked=excluded.checked, result=excluded.result",
+                            (key, _iso(at), json.dumps(result)))
+            self.db.commit()
+
+    def portal_coverages(self) -> dict[str, dict[str, Any]]:
+        with self.lock:
+            return {r["key"]: {"checked": r["checked"], "result": json.loads(r["result"])} for r in self.db.execute("SELECT key, checked, result FROM portal_coverage")}
+
     def portal_health_states(self) -> dict[str, dict[str, str]]:
         """The health last announced for each portal: {key: {state, since}}. Used to alert once when it changes, not every hour."""
         with self.lock:
@@ -1142,6 +1154,7 @@ class SeenStore:
             self.db.execute("DELETE FROM portal_status WHERE key = ?", (key,))
             self.db.execute("DELETE FROM portal_history WHERE key = ?", (key,))
             self.db.execute("DELETE FROM portal_health WHERE key = ?", (key,))
+            self.db.execute("DELETE FROM portal_coverage WHERE key = ?", (key,))
             self.db.commit()
 
     def close(self) -> None:

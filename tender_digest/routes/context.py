@@ -40,6 +40,7 @@ class Ctx:
     company_facts: Callable[..., Any]
     config: AppConfig
     current_user: Callable[..., Any]
+    deep_probe: Callable[..., Any]
     encryption_problem: Any
     env: Settings
     hooks: Any

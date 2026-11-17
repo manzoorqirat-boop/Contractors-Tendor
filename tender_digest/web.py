@@ -22,7 +22,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import access, accounts, ai, appsettings, events, health, letters, offsite, sealing, tokens
+from . import access, accounts, ai, appsettings, coverage, events, health, letters, offsite, sealing, tokens
 
 # Names that moved to api_common.py, or are no longer used in this file, but that other code (and the tests) still reach as web.<name>.
 # "x as x" is the explicit re-export form: it is kept by the import sorter and the unused-import check.
@@ -398,7 +398,7 @@ def storage_warning(state_path: str, environ: Mapping[str, str] | None = None) -
 
 
 
-def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None, sso_session: Any = None) -> FastAPI:
+def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None, sso_session: Any = None, deep_prober: Callable[..., dict] | None = None) -> FastAPI:
     vault_dir = default_vault_dir(env.state_path)
     sealer = sealing.Sealer.from_env()  # raises with a clear message when the key is too short: better than quietly storing things unencrypted
     bids = BidBook(store, vault_dir, sealer)
@@ -471,6 +471,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     if storage_note:
         log.warning(storage_note)
     probe = prober or access.probe
+    deep_probe = deep_prober or coverage.deep_probe
     builtin_keys = {p.key for p in env.portals}
     # Portals typed into the page are saved in the database, so these lookups are refilled (in place) whenever they change.
     portal_names: dict[str, str] = {}
@@ -765,6 +766,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         company_facts=company_facts,
         config=config,
         current_user=current_user,
+        deep_probe=deep_probe,
         encryption_problem=encryption_problem,
         env=env,
         hooks=hooks,

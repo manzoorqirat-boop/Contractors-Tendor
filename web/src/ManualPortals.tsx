@@ -177,6 +177,8 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
         </ScrollX>
       </section>
 
+      <CoverageProof onDone={() => { list.reload(); onChange(); }} />
+
       <PortalCatalogue onDone={() => { list.reload(); onChange(); }} />
 
       <section className="card" style={{ marginBottom: 14 }}>
@@ -207,6 +209,77 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
         </div>
       </section>
     </>
+  );
+}
+
+function verdictLabel(v: string): string {
+  switch (v) {
+    case 'proven': return tr('Proven');
+    case 'partial': return tr('Partly');
+    case 'empty': return tr('Answers, no tenders');
+    case 'failed': return tr('Cannot be read');
+    default: return tr('Not tested yet');
+  }
+}
+
+/** Reads each portal in depth from this server and keeps the result: the proof of what this installation can and cannot cover. */
+function CoverageProof({ onDone }: { onDone: () => void }) {
+  const rep = useLoad(() => api.portalCoverage(), []);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Msg>(null);
+  const rows = rep.data?.rows ?? [];
+  const s = rep.data?.summary;
+
+  async function testAll() {
+    const todo = rows.filter((r) => r.enabled);
+    if (todo.length === 0) { setMsg({ tone: 'warn', text: tr('No portal is switched on yet.') }); return; }
+    setMsg(null);
+    try {
+      for (let i = 0; i < todo.length; i++) {
+        setProgress(`${tr('Checking')} ${i + 1} / ${todo.length}: ${todo[i].name}…`);
+        try { await api.testPortalCoverage(todo[i].key); } catch { /* the report shows it as not tested */ }
+      }
+    } finally {
+      setProgress(null);
+      rep.reload();
+      onDone();
+    }
+  }
+
+  return (
+    <section className="card" style={{ marginBottom: 14 }}>
+      <div className="card-head">
+        <div>
+          <h2>{tr('Coverage proof')}</h2>
+          <p className="sub">{tr('Whether a portal works depends on this server: a portal may refuse it, or change its layout. This reads each switched-on portal properly (its departments, one department\'s tenders and a few detail pages), not just opens its page, and keeps the result. Run it after setting up, and give the report to the customer.')}</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="btn small" onClick={testAll} disabled={progress !== null}>{progress ?? tr('Test all switched-on portals')}</button>
+          <a className="btn small" href="/api/portals/coverage.csv" download>{tr('Download the report (CSV)')}</a>
+        </div>
+      </div>
+      {msg && <div className={`alert ${msg.tone}`} role="alert">{msg.text}</div>}
+      {rep.error && <div className="alert bad">{rep.error}</div>}
+      {s && <p style={{ margin: '0 0 8px' }}><strong>{tr('{n} of {total} portals are proven readable from this server.', { n: s.proven, total: s.portals })}</strong>{s.untested > 0 && ` ${tr('{n} not tested yet.', { n: s.untested })}`}</p>}
+      {rows.length > 0 && (
+        <ScrollX label="Coverage">
+          <table className="tbl">
+            <thead><tr><th>{tr('Portal')}</th><th>{tr('Result')}</th><th className="num">{tr('Tenders')}</th><th className="num">{tr('With closing date')}</th><th>{tr('Tested')}</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key}>
+                  <td>{r.name}{!r.enabled && <span className="badge plain" style={{ marginLeft: 6 }}>{tr('Switched off')}</span>}</td>
+                  <td><span className={`badge ${r.verdict === 'proven' ? 'ok' : r.verdict === 'untested' ? 'plain' : r.verdict === 'failed' ? 'bad' : 'warn'}`} title={r.detail || undefined}>{verdictLabel(r.verdict)}</span>{r.verdict === 'failed' && r.label ? ` ${r.label}` : ''}</td>
+                  <td className="num">{r.listed ? r.listed : '-'}</td>
+                  <td className="num">{r.listed ? `${r.with_closing_pct}%` : '-'}</td>
+                  <td>{r.checked ? fmtDate(r.checked, true) : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ScrollX>
+      )}
+    </section>
   );
 }
 

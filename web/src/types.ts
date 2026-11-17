@@ -52,6 +52,14 @@ export interface PortalStatus {
 /** broken: failing reads after it had worked; dried_up: answers but lists nothing; stale: the daily run has not reached it for days. */
 export type HealthState = 'ok' | 'broken' | 'dried_up' | 'stale' | 'manual' | 'unknown' | 'off';
 export interface PortalHealth { key: string; name: string; health: HealthState; text: string; last_ok: string | null; failures_in_a_row: number; usual: number | null }
+export type CoverageVerdict = 'proven' | 'partial' | 'empty' | 'failed' | 'untested';
+/** The result of reading a portal in depth from this server (its departments, one department's tenders, a few detail pages). */
+export interface CoverageRow {
+  key: string; name: string; state: string; base_url: string; enabled: boolean; verdict: CoverageVerdict; verdict_text: string; checked: string | null;
+  kind: string; label: string; detail: string; department: string; departments: number; advertised: number; listed: number;
+  with_id_pct: number; with_closing_pct: number; with_value_pct: number; details_read: number; details_tried: number; seconds: number;
+}
+export interface CoverageReport { rows: CoverageRow[]; summary: { portals: number; tested: number } & Record<CoverageVerdict, number> }
 export interface NewPortal { name: string; state: string; base_url: string }
 
 export interface Settings {

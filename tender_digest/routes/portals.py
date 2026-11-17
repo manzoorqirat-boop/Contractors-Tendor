@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Response
 
-from .. import appsettings, catalogue, health, reminders
+from .. import appsettings, catalogue, coverage, health, reminders
 from ..api_common import (
     WebhookTest,
 )
@@ -26,6 +26,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     portal_health = ctx.portal_health
     portals_now = ctx.portals_now
     probe = ctx.probe
+    deep = ctx.deep_probe
     refresh_portals = ctx.refresh_portals
     store = ctx.store
 
@@ -103,6 +104,27 @@ def register(app: FastAPI, ctx: Ctx) -> None:
             store.put_settings({"custom_portals": customs})
             refresh_portals()
         return {"added": added, "skipped": skipped}
+
+    @app.get("/api/portals/coverage", dependencies=auth)
+    def portal_coverage() -> dict:
+        """What the last deep test of each portal found, from this server. Portals never tested show as such."""
+        return coverage.report(store.portal_coverages(), portals_now(), set(appsettings.current(env, store.get_settings())["portals"]))
+
+    @app.get("/api/portals/coverage.csv", dependencies=auth)
+    def portal_coverage_csv():
+        rep = coverage.report(store.portal_coverages(), portals_now(), set(appsettings.current(env, store.get_settings())["portals"]))
+        return Response(coverage.to_csv(rep).encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="portal-coverage-{now().date().isoformat()}.csv"'})
+
+    @app.post("/api/portals/{key}/coverage", dependencies=auth)
+    def test_portal_coverage(key: str) -> dict:
+        """Tests one portal in depth (its department list, a department's tenders, a few detail pages) and keeps the result."""
+        portal = next((p for p in portals_now() if p.key == key), None)
+        if not portal:
+            raise HTTPException(404, "No such portal")
+        result = deep(portal)
+        coverage.record(store, portal, result, now())
+        return {"key": key, **result}
 
     @app.get("/api/portals/{key}/sample", dependencies=auth)
     def portal_sample(key: str):
