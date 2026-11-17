@@ -309,6 +309,8 @@ only where two paths could match one address (a fixed `/api/bids/stats` before `
 
 Code checks (the same ones CI runs, settings in `pyproject.toml`, tool versions pinned in `requirements-dev.txt`): `ruff check .` (mistakes, likely bugs, old syntax, import order) and `mypy` (types). Both must stay clean. A "noqa" or "type: ignore" comment is allowed only with its reason beside it. CI runs the tests on Python 3.12 (what the Docker image uses) and 3.13, which bundle different SQLite versions. Dependabot proposes weekly updates for the pinned Python and npm packages, and monthly for GitHub Actions and the Docker base images.
 
+Frontend unit tests: `npm test` (in `web/`, Vitest, no browser needed) covers the page's plain logic: date and rupee formatting, parsing an amount typed as "50 lakh", "closes in 3 h" wording, and the filters with their web addresses (a filter must survive the trip to a link and back). CI runs it on every change. Anything that needs a screen is covered by the accessibility check below.
+
 Accessibility: `npm run a11y` (in `web/`) opens every screen and dialog in light and dark, on desktop and phone, and runs axe-core (WCAG 2.2 AA). It needs a running app with demo data (`A11Y_URL`, `A11Y_PASS`) and a browser (`npx playwright install chromium`); CI runs it on every change and fails on any violation.
 
 A command-line mode still exists for headless use: `python -m tender_digest --dry-run --portals delhi --preview out.html`

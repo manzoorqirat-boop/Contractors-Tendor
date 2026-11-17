@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
+    "test": "vitest run",
     "a11y": "node a11y/check.cjs",
     "i18n": "node scripts/i18n-check.cjs",
     "colours": "node scripts/colour-check.cjs",
@@ -24,6 +25,7 @@
     "axe-core": "4.14.0",
     "playwright": "1.65.1",
     "typescript": "5.7.2",
-    "vite": "6.0.3"
+    "vite": "6.0.3",
+    "vitest": "3.2.4"
   }
 }

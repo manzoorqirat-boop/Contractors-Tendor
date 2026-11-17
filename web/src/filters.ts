@@ -18,7 +18,13 @@ export function toParams(f: Filters, d?: Partial<Display>): URLSearchParams {
   for (const k of LISTS) for (const v of f[k]) p.append(k, v);
   for (const k of STRINGS) if (f[k]) p.set(k, String(f[k]));
   for (const k of FLAGS) if (f[k]) p.set(k, 'true');
-  if (d) for (const [k, v] of Object.entries(d)) if (v !== undefined && v !== '' && v !== (DISPLAY as unknown as Record<string, unknown>)[k]) p.set(k, String(v));
+  if (d) {
+    for (const [k, v] of Object.entries(d)) {
+      if (v === undefined || v === (DISPLAY as unknown as Record<string, unknown>)[k]) continue;
+      if (v === '' && k !== 'split_by') continue;   // empty means "not set", except for split_by, where empty is a real choice (do not split) that must survive in the address
+      p.set(k, String(v));
+    }
+  }
   return p;
 }
 
