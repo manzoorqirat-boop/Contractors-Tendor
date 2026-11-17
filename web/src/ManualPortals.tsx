@@ -30,6 +30,36 @@ export function ManualBanner({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+/** The reading-health badge's words; `null` for the states that are shown by the access label instead (unknown, check by hand, switched off). */
+function healthLabel(h: string | undefined): string | null {
+  switch (h) {
+    case 'broken': return tr('Stopped working');
+    case 'dried_up': return tr('Finding nothing');
+    case 'stale': return tr('Not read lately');
+    case 'ok': return tr('Reading properly');
+    default: return null;
+  }
+}
+
+/** Portals that have quietly stopped working: a failing portal looks just like a quiet week, so it is shown on the Dashboard. */
+export function HealthBanner({ onOpen }: { onOpen: () => void }) {
+  const { data } = useLoad(() => api.portalHealth(), []);
+  const problems = data?.problems ?? [];
+  if (problems.length === 0) return null;
+  return (
+    <div className="alert bad" role="status">
+      <strong>{tr('Portals that may have stopped working')}</strong>
+      <ul style={{ margin: '6px 0 6px 18px', padding: 0 }}>
+        {problems.map((p) => <li key={p.key}><strong>{p.name}</strong>: {p.text}</li>)}
+      </ul>
+      <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span>{tr('A portal that quietly fails looks like a quiet week. Check these, or press Check on each.')}</span>
+        <button className="btn small" onClick={onOpen}>See details</button>
+      </span>
+    </div>
+  );
+}
+
 /** Add portals, see which ones the app can read, and keep the list of those that need a person. */
 export function PortalsManager({ onChange }: { onChange: () => void }) {
   const confirm = useConfirm();
@@ -127,12 +157,13 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
         <p className="sub">What the app found the last time it looked: when a run reads a portal, or when you press Check.</p>
         <ScrollX label="Portals">
           <table className="tbl">
-            <thead><tr><th>Portal</th><th>Status</th><th className="num">Departments</th><th>Last checked</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <thead><tr><th>Portal</th><th>Status</th><th>{tr('Is it working?')}</th><th className="num">Departments</th><th>Last checked</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {portals.map((p) => (
                 <tr key={p.key}>
                   <td>{p.name}{p.custom && <span className="badge plain" style={{ marginLeft: 6 }}>Added by you</span>}</td>
                   <td><span className={`badge ${tone(p.kind)}`} title={p.detail || undefined}>{p.label}</span></td>
+                  <td>{healthLabel(p.health) ? <span className={`badge ${p.health === 'ok' ? 'ok' : 'bad'}`} title={p.health_text || undefined}>{healthLabel(p.health)}</span> : '-'}</td>
                   <td className="num">{p.kind === 'ok' ? p.departments : '-'}</td>
                   <td>{p.checked ? fmtDate(p.checked, true) : '-'}</td>
                   <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>

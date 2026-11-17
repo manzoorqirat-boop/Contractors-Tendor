@@ -47,7 +47,11 @@ export type AccessKind = 'ok' | 'captcha' | 'login' | 'otp' | 'blocked' | 'diffe
 export interface PortalStatus {
   key: string; name: string; state: string; base_url: string; custom: boolean; enabled: boolean;
   kind: AccessKind; label: string; advice: string; manual: boolean; detail: string; checked: string | null; departments: number; tenders: number;
+  health?: HealthState; health_text?: string; last_ok?: string | null;
 }
+/** broken: failing reads after it had worked; dried_up: answers but lists nothing; stale: the daily run has not reached it for days. */
+export type HealthState = 'ok' | 'broken' | 'dried_up' | 'stale' | 'manual' | 'unknown' | 'off';
+export interface PortalHealth { key: string; name: string; health: HealthState; text: string; last_ok: string | null; failures_in_a_row: number; usual: number | null }
 export interface NewPortal { name: string; state: string; base_url: string }
 
 export interface Settings {

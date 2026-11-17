@@ -54,6 +54,7 @@ class Ctx:
     owner: Any
     people: Accounts
     portal_entry: Callable[..., Any]
+    portal_health: Callable[..., Any]
     portal_names: Any
     portal_search: Any
     portal_states: Any

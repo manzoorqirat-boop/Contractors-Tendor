@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from . import ai, alerts, appsettings, collector, digest, mailer, reminders
+from . import ai, alerts, appsettings, collector, digest, health, mailer, reminders
 from .bids import BidBook
 from .config import Settings
 from .money import MoneyBook
@@ -162,8 +162,13 @@ class RunManager:
                 except Exception:  # the email goes out without the money items
                     log.exception("money section of the digest failed")
                     bid_block["money"] = []
+                try:
+                    unhealthy = health.problems(health.assess_all(self.store, settings.portals, {p.key for p in settings.portals}, now))
+                except Exception:  # the email goes out without the portal-health section
+                    log.exception("portal health section of the digest failed")
+                    unhealthy = []
                 quiet = (not pending and not soon and not any(r.errors for r in reports) and not bid_block["alerts"] and not bid_block["changes"]
-                         and not bid_block["money"])
+                         and not bid_block["money"] and not unhealthy)
                 if quiet and not saved.get("send_empty", True):
                     say("Nothing new, and 'send on empty days' is off: no email sent")
                 else:
@@ -182,7 +187,7 @@ class RunManager:
                     except Exception:  # the email goes out without the saved-search section
                         log.exception("saved-search section of the digest failed")
                         searches = []
-                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro, bid_block, searches)
+                    built = digest.build(now, pending, soon, reports, settings.subject_prefix, settings.max_new_per_portal, settings.max_soon_per_portal, intro, bid_block, searches, unhealthy)
                     say(f"Sending '{built.subject}' to {len(settings.recipients)} recipient(s)")
                     accepted = self.sender(
                         settings.brevo_api_key, settings.mail_from, settings.mail_from_name, settings.recipients, built.subject, built.html, built.text,

@@ -455,4 +455,11 @@ export const HI: Record<string, string> = {
   "more to look at in your bids": "और आपकी बोलियों में देखने के लिए",
   "Money": "पैसा",
   "password": "पासवर्ड",
+  "Portals that may have stopped working": "शायद बंद हो चुके पोर्टल",
+  "A portal that quietly fails looks like a quiet week. Check these, or press Check on each.": "जो पोर्टल चुपचाप खराब हो जाता है, वह शांत हफ़्ते जैसा दिखता है। इन्हें जाँचें, या हर एक पर जाँचें दबाएँ।",
+  "Is it working?": "क्या चल रहा है?",
+  "Stopped working": "बंद हो गया",
+  "Finding nothing": "कुछ नहीं मिल रहा",
+  "Not read lately": "हाल में नहीं पढ़ा गया",
+  "Reading properly": "ठीक से पढ़ा जा रहा है",
 };

@@ -455,4 +455,11 @@ export const MR: Record<string, string> = {
   "more to look at in your bids": "तुमच्या बोलींमध्ये पाहण्यासाठी आणखी",
   "Money": "पैसे",
   "password": "पासवर्ड",
+  "Portals that may have stopped working": "बंद पडले असण्याची शक्यता असलेली पोर्टल",
+  "A portal that quietly fails looks like a quiet week. Check these, or press Check on each.": "शांतपणे बिघडलेले पोर्टल शांत आठवड्यासारखे दिसते. यांची तपासणी करा, किंवा प्रत्येकावर तपासा दाबा.",
+  "Is it working?": "चालू आहे का?",
+  "Stopped working": "बंद पडले",
+  "Finding nothing": "काहीच मिळत नाही",
+  "Not read lately": "अलीकडे वाचले गेले नाही",
+  "Reading properly": "नीट वाचले जात आहे",
 };

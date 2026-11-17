@@ -206,6 +206,11 @@ class SeenStore:
                 CREATE TABLE IF NOT EXISTS portal_status (
                   key TEXT PRIMARY KEY, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', checked TEXT NOT NULL,
                   departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS portal_history (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, at TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'run',
+                  kind TEXT NOT NULL, departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
+                CREATE INDEX IF NOT EXISTS portal_history_key ON portal_history (key, id);
+                CREATE TABLE IF NOT EXISTS portal_health (key TEXT PRIMARY KEY, state TEXT NOT NULL, since TEXT NOT NULL);
                 """
             )
             have_s = {r["name"] for r in self.db.execute("PRAGMA table_info(sessions)")}
@@ -1084,13 +1089,47 @@ class SeenStore:
 
     # ---- can the app read each portal ---------------------------------------------------------------------------
 
-    def put_portal_status(self, key: str, kind: str, detail: str, checked: datetime, departments: int = 0, tenders: int = 0) -> None:
+    HISTORY_KEPT = 60  # reads remembered per portal: enough to tell a bad day from a portal that has stopped working
+
+    def put_portal_status(
+        self, key: str, kind: str, detail: str, checked: datetime, departments: int = 0, tenders: int = 0, source: str = "run",
+    ) -> None:
+        """Records the latest read of a portal, and adds it to the portal's short history (read by `health.assess`)."""
         with self.lock:
             self.db.execute(
                 "INSERT INTO portal_status (key, kind, detail, checked, departments, tenders) VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET kind=excluded.kind, detail=excluded.detail, checked=excluded.checked, "
                 "departments=excluded.departments, tenders=excluded.tenders",
                 (key, kind, detail[:300], _iso(checked), departments, tenders),
+            )
+            self.db.execute(
+                "INSERT INTO portal_history (key, at, source, kind, departments, tenders) VALUES (?, ?, ?, ?, ?, ?)",
+                (key, _iso(checked), source, kind, departments, tenders),
+            )
+            self.db.execute(
+                "DELETE FROM portal_history WHERE key = ? AND id NOT IN (SELECT id FROM portal_history WHERE key = ? ORDER BY id DESC LIMIT ?)",
+                (key, key, self.HISTORY_KEPT),
+            )
+            self.db.commit()
+
+    def portal_history(self, key: str, limit: int = 14) -> list[dict[str, Any]]:
+        """The latest reads of one portal, newest first."""
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT at, source, kind, departments, tenders FROM portal_history WHERE key = ? ORDER BY id DESC LIMIT ?", (key, limit),
+            )
+            return [dict(r) for r in rows]
+
+    def portal_health_states(self) -> dict[str, dict[str, str]]:
+        """The health last announced for each portal: {key: {state, since}}. Used to alert once when it changes, not every hour."""
+        with self.lock:
+            return {r["key"]: {"state": r["state"], "since": r["since"]} for r in self.db.execute("SELECT key, state, since FROM portal_health")}
+
+    def put_portal_health(self, key: str, state: str, since: datetime) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO portal_health (key, state, since) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET state=excluded.state, since=excluded.since",
+                (key, state, _iso(since)),
             )
             self.db.commit()
 
@@ -1101,6 +1140,8 @@ class SeenStore:
     def delete_portal_status(self, key: str) -> None:
         with self.lock:
             self.db.execute("DELETE FROM portal_status WHERE key = ?", (key,))
+            self.db.execute("DELETE FROM portal_history WHERE key = ?", (key,))
+            self.db.execute("DELETE FROM portal_health WHERE key = ?", (key,))
             self.db.commit()
 
     def close(self) -> None:

@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Response
 
-from .. import appsettings, catalogue, reminders
+from .. import appsettings, catalogue, health, reminders
 from ..api_common import (
     WebhookTest,
 )
@@ -23,6 +23,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     manager = ctx.manager
     now = ctx.now
     portal_entry = ctx.portal_entry
+    portal_health = ctx.portal_health
     portals_now = ctx.portals_now
     probe = ctx.probe
     refresh_portals = ctx.refresh_portals
@@ -33,7 +34,17 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     def list_portals() -> dict:
         saved, statuses = store.get_settings(), store.portal_statuses()
         entries = [portal_entry(p, saved, statuses) for p in portals_now()]
+        by_key = {h["key"]: h for h in portal_health()}
+        for e in entries:
+            h = by_key.get(e["key"])
+            e["health"], e["health_text"], e["last_ok"] = (h["health"], h["text"], h["last_ok"]) if h else ("unknown", "", None)
         return {"portals": entries, "manual": [e for e in entries if e["manual"]]}
+
+    @app.get("/api/portal-health", dependencies=auth)
+    def portal_health_report() -> dict:
+        """Which portals have quietly stopped working: unreadable for several reads, listing nothing any more, or not reached for days."""
+        items = portal_health()
+        return {"items": items, "problems": health.problems(items)}
 
     @app.post("/api/portals", dependencies=auth)
     def add_portal(body: dict[str, Any]) -> dict:
@@ -49,7 +60,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         result = probe(new["base_url"])
         # Added even when the app cannot read it: it then appears on the "check manually" list with the reason.
         store.put_settings({"custom_portals": [*saved.get("custom_portals", []), new]})
-        store.put_portal_status(new["key"], result["kind"], result["detail"], now(), result["departments"], result["tenders"])
+        store.put_portal_status(new["key"], result["kind"], result["detail"], now(), result["departments"], result["tenders"], "check")
         if result["kind"] == "ok":
             store.put_settings({"portals": [*appsettings.current(env, saved)["portals"], new["key"]]})
         refresh_portals()
@@ -117,7 +128,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         if not portal:
             raise HTTPException(404, "No such portal")
         result = probe(portal.base_url)
-        store.put_portal_status(key, result["kind"], result["detail"], now(), result["departments"], result["tenders"])
+        store.put_portal_status(key, result["kind"], result["detail"], now(), result["departments"], result["tenders"], "check")
         if enable and result["kind"] == "ok":
             on = appsettings.current(env, store.get_settings())["portals"]
             if key not in on:
