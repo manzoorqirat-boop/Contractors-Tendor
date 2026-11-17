@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
 MIN_SIGNALS = 5          # choices needed before anything is learned
+COMMON_SHARE = 0.6       # a feature on this share of all tenders or more cannot tell one tender from another, so it is never a reason
+POPULATION_MIN = 20      # and it is only judged common once there are this many tenders to compare
 SMOOTHING = 3.0          # evidence a feature needs before it counts for much
 KIND_WEIGHT = {"dept": 1.0, "category": 0.5, "work_type": 0.6, "location": 0.3, "portal": 0.2, "word": 0.5}
 KIND_LABEL = {"dept": "department", "category": "category", "work_type": "type of work", "location": "place", "portal": "portal", "word": "wording"}
@@ -53,11 +56,25 @@ def features(row: dict[str, Any]) -> list[tuple[str, str]]:
     return out
 
 
+def common_features(rows: Iterable[dict[str, Any]]) -> set[tuple[str, str]]:
+    """The features that most tenders have (almost every tender is "Works", a company that reads one portal sees only that portal). Liking
+    something that nearly everything has says nothing about taste, so these are left out of the score and out of the reasons shown."""
+    counts: Counter[tuple[str, str]] = Counter()
+    total = 0
+    for r in rows:
+        total += 1
+        counts.update(set(features(r)))
+    if total < POPULATION_MIN:
+        return set()
+    return {f for f, n in counts.items() if n / total >= COMMON_SHARE}
+
+
 class Model:
     def __init__(self) -> None:
         self.liked: defaultdict[tuple[str, str], float] = defaultdict(float)
         self.avoided: defaultdict[tuple[str, str], float] = defaultdict(float)
         self.signals = {"positive": 0, "negative": 0}
+        self.common: set[tuple[str, str]] = set()   # filled in from all collected tenders, see common_features
 
     def add(self, row: dict[str, Any], sign: int, weight: float = 1.0) -> None:
         target = self.liked if sign > 0 else self.avoided
@@ -75,7 +92,9 @@ class Model:
         return self.signals["positive"] + self.signals["negative"] >= MIN_SIGNALS
 
     def strength(self, feature: tuple[str, str]) -> float:
-        """-1 (always avoided) to +1 (always chosen), pulled towards 0 when there is little evidence."""
+        """-1 (always avoided) to +1 (always chosen), pulled towards 0 when there is little evidence. 0 for what most tenders have."""
+        if feature in self.common:
+            return 0.0
         up, down = self.liked.get(feature, 0.0), self.avoided.get(feature, 0.0)
         return (up - down) / (up + down + SMOOTHING) if (up or down) else 0.0
 

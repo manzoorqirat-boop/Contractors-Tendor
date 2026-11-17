@@ -425,6 +425,9 @@ class SeenStore:
                         m.add(d, -1)
                     else:
                         m.add(d, +1, {"interested": 1.0, "preparing": 1.5, "submitted": 2.0, "opened": 2.0, "lost": 1.5, "won": 3.0}.get(stage, 1.0))
+            if m.ready:   # what nearly every tender has is no reason to rank one above another: judged on the most recent 5,000
+                m.common = learn.common_features(dict(r) for r in self.db.execute(
+                    f"SELECT {cols} FROM seen WHERE civil = 1 ORDER BY first_seen DESC LIMIT 5000"))
         return m
 
     def recompute_priorities(self, now: datetime, size_min: float | None = None, size_max: float | None = None, learning: bool = True) -> int:

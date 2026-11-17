@@ -315,3 +315,67 @@ def test_a_single_tender_carries_its_reason_too(app):
     key = listing(app.owner)[0]["key"]
     one = app.owner.get("/api/tenders/detail", params={"key": key}).json()
     assert one["priority"] is not None and "closes in" in one["priority_note"]
+
+
+# ---- what nearly every tender has is no reason -------------------------------------------------------------------
+
+def population(n_works=95, n_other=5, dept=lambda i: "PWD" if i % 10 < 3 else "Water"):
+    rows = [row(category="Works", organisation=f"{dept(i)}||X", title=f"Job {i}") for i in range(n_works)]
+    rows += [row(category="Buildings", organisation=f"{dept(i)}||X", title=f"Job {i}") for i in range(n_other)]
+    return rows
+
+
+def test_a_feature_on_most_tenders_is_common_and_a_selective_one_is_not():
+    common = learn.common_features(population())
+    assert ("category", "works") in common and ("portal", "maha") in common            # 95% of tenders, and every tender
+    assert ("dept", "PWD") not in common and ("category", "buildings") not in common   # about 30% and 5%
+
+
+def test_nothing_is_judged_common_until_there_are_enough_tenders_to_compare():
+    assert learn.common_features(population(n_works=10, n_other=5)) == set()           # 15 tenders: too few to say
+    assert learn.common_features([]) == set()
+
+
+def test_the_threshold_is_a_share_not_a_count():
+    rows = [row(category="Works" if i < 60 else "Other") for i in range(100)]          # exactly 60%
+    assert ("category", "works") in learn.common_features(rows)
+    rows = [row(category="Works" if i < 59 else "Other") for i in range(100)]          # 59%
+    assert ("category", "works") not in learn.common_features(rows)
+
+
+def test_a_common_feature_has_no_strength_no_part_in_the_score_and_no_place_in_the_list():
+    m = Model()
+    for _ in range(10):
+        m.add(row(organisation="PWD||A", category="Works"), +1)
+    assert m.strength(("category", "works")) > 0.5
+    m.common = {("category", "works"), ("portal", "maha")}
+    assert m.strength(("category", "works")) == 0 and m.strength(("dept", "PWD")) > 0.5
+    score, why = m.score(row(organisation="PWD||C", category="Works", title="Unrelated thing"))
+    kinds = {(k, v) for k, v, _ in why}
+    assert ("category", "works") not in kinds and ("dept", "PWD") in kinds
+    top = m.top()
+    assert all(x["value"] != "works" for x in top["liked"]) and any(x["value"] == "PWD" for x in top["liked"])
+
+
+def test_the_notes_name_what_sets_tenders_apart_not_what_all_of_them_share(tmp_path):
+    s = SeenStore(":memory:")
+    for i in range(30):                                            # three departments, every tender "Works", all on one portal
+        s.keep(tender(i, ("PWD", "Housing", "Water")[i % 3], f"Bridge job {i}"), NOW)
+    for i in (0, 3, 6, 9, 12, 15):
+        s.set_starred(f"maha:T{i}", True, NOW)                     # six PWD tenders starred
+    s.recompute_priorities(NOW)
+    note = s.db.execute("SELECT priority_note FROM seen WHERE tender_id = 'T18'").fetchone()[0]
+    assert "you often bid on or star PWD" in note                  # one department in three: a real preference
+    assert "category" not in note and "portal" not in note and "place" not in note   # all thirty are Works, on one portal, in one place
+
+
+def test_the_card_in_the_vault_lists_only_what_tells_tenders_apart(app):
+    c = app.owner
+    for i in range(30, 50):                                        # 16 tenders become 36: enough to judge
+        t = tender(i, "Irrigation", f"Canal job {i}")
+        t.closing, t.published = datetime.now() + timedelta(days=7), datetime.now()
+        app.store.keep(t, datetime.now())
+    for i in range(1, 7):
+        c.post("/api/tenders/star", json={"key": next(x["key"] for x in listing(c) if x["tender_id"] == f"T{i}"), "starred": True})
+    liked = [x["value"] for x in c.get("/api/learning").json()["liked"]]
+    assert "PWD" in liked and "works" not in liked
