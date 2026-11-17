@@ -178,6 +178,12 @@ def read_xls(path: str | Path) -> list[list[Any]]:
     return _best_sheet(sheets)
 
 
+def _data_text(cell: Any) -> str:
+    """The text of an Excel 2003 XML cell's <Data> element, or nothing when it has none."""
+    data = cell.find("Data")
+    return data.get_text(strip=True) if data else ""
+
+
 def read_markup(path: str | Path) -> list[list[Any]]:
     """Many portals save an HTML table, or Excel 2003 XML, under an .xls name. Both open in Excel, so both are accepted here."""
     from bs4 import BeautifulSoup
@@ -185,7 +191,7 @@ def read_markup(path: str | Path) -> list[list[Any]]:
     text = raw.decode("utf-8-sig", errors="replace")
     if "<Workbook" in text[:2000] or "urn:schemas-microsoft-com:office:spreadsheet" in text[:2000]:
         soup = BeautifulSoup(text, "xml")
-        return _best_sheet([[[(c.find("Data").get_text(strip=True) if c.find("Data") else "") for c in tr.find_all("Cell")] for tr in ws.find_all("Row")] for ws in soup.find_all("Worksheet")])
+        return _best_sheet([[[_data_text(c) for c in tr.find_all("Cell")] for tr in ws.find_all("Row")] for ws in soup.find_all("Worksheet")])
     soup = BeautifulSoup(text, "lxml")
     return _best_sheet([[[c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])] for tr in t.find_all("tr")] for t in soup.find_all("table")])
 

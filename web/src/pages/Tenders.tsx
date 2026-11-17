@@ -197,7 +197,7 @@ function Card({ t, now, why, picked, onPick, onOpen, onStar, onCopy, onStart }: 
           {!t.work_type && t.category && <span className="badge plain">{t.category}</span>}
           {t.location && <span className="badge plain">{t.location}</span>}
           <span className="mono">{t.tender_id}</span>
-          <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`Copy Tender ID ${t.tender_id}`}>{tr('Copy ID')}</button>
+          <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onCopy(); }} aria-label={`${tr('Copy ID')} ${t.tender_id}`}>{tr('Copy ID')}</button>
           <Only role="bidder"><button className="btn small primary" onClick={(e) => { e.stopPropagation(); onStart(); }}>{tr('Start bid')}</button></Only>
         </div>
       </div>
