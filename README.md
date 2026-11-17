@@ -301,7 +301,15 @@ cd web && npm ci && npm run dev         # page on :5173, forwards /api to :8000
 npm run build                           # then the Python service serves web/dist itself
 ```
 
+Where the code is: `tender_digest/web.py` builds the app once (`create_app`: the stores, settings, sign-in and the helpers every route shares) and then calls
+`routes.register_all`. The routes themselves are one module per area in `tender_digest/routes/` (`bids.py`, `money.py`, `portals.py`, `tenders.py` and so on, each
+with a `register(app, ctx)`), the shapes of what the API receives are in `tender_digest/api_common.py`, and `routes/context.py` lists what the shared setup
+holds. To add a route, put it in the module for its area, or add a module and list it in `routes/__init__.py` (a test fails if a module is left out). Order matters
+only where two paths could match one address (a fixed `/api/bids/stats` before `/api/bids/{bid_id}`); a test covers the known cases.
+
 Code checks (the same ones CI runs, settings in `pyproject.toml`, tool versions pinned in `requirements-dev.txt`): `ruff check .` (mistakes, likely bugs, old syntax, import order) and `mypy` (types). Both must stay clean. A "noqa" or "type: ignore" comment is allowed only with its reason beside it. CI runs the tests on Python 3.12 (what the Docker image uses) and 3.13, which bundle different SQLite versions. Dependabot proposes weekly updates for the pinned Python and npm packages, and monthly for GitHub Actions and the Docker base images.
+
+Frontend unit tests: `npm test` (in `web/`, Vitest, no browser needed) covers the page's plain logic: date and rupee formatting, parsing an amount typed as "50 lakh", "closes in 3 h" wording, and the filters with their web addresses (a filter must survive the trip to a link and back). CI runs it on every change. Anything that needs a screen is covered by the accessibility check below.
 
 Accessibility: `npm run a11y` (in `web/`) opens every screen and dialog in light and dark, on desktop and phone, and runs axe-core (WCAG 2.2 AA). It needs a running app with demo data (`A11Y_URL`, `A11Y_PASS`) and a browser (`npx playwright install chromium`); CI runs it on every change and fails on any violation.
 

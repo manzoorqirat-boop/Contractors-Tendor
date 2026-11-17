@@ -126,3 +126,24 @@ def test_a_backup_zip_still_holds_exactly_the_two_databases_and_the_vault(tmp_pa
             assert set(f.namelist()) == {"tender_state.db", "boq.db", "manifest.json"}             # no -wal or -shm in the zip
     finally:
         z.unlink()
+
+
+def test_both_databases_are_closed_and_the_wal_folded_back_when_the_app_shuts_down(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from tender_digest import web
+    from tender_digest.runner import RunManager
+    from tests.test_web import PASSWORD, settings
+
+    path = tmp_path / "tender_state.db"
+    store, env = SeenStore(str(path)), settings()
+    for i in range(10):
+        store.keep(tender(i), DAY)
+    app = web.create_app(web.AppConfig(PASSWORD, "k", cookie_secure=False, run_scheduler=False), env, store, RunManager(env, store, background=False))
+    assert (tmp_path / "tender_state.db-wal").stat().st_size > 0                       # saves are waiting in the side file
+    with TestClient(app) as client:                                                      # entering and leaving runs the app's start-up and shutdown
+        assert client.get("/api/health").status_code == 200
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.db.execute("SELECT 1")                                                     # closed
+    assert not (tmp_path / "tender_state.db-wal").exists() or (tmp_path / "tender_state.db-wal").stat().st_size == 0   # a clean close folds the WAL into the database
+    assert count(path) == 10                                                             # and nothing was lost

@@ -1,5 +1,4 @@
-import { useState, type ReactNode } from 'react';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { Suspense, lazy, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { FilterBar } from '../FilterBar';
 import { mergeDrill } from '../filters';
@@ -12,7 +11,9 @@ import { ManualBanner } from '../ManualPortals';
 import { MoneyCard } from '../Money';
 import { Only, useSession } from '../session';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
-import { BarBlock, labelFor, metricOf, MEASURES } from './Charts';
+import { labelFor, metricOf, MEASURES } from './chartdata';
+import { BarBlock } from './LazyCharts';
+import type { Slice } from './DonutChart';
 import { tr } from '../i18n';
 
 const day = (iso: string, plus = 0) => {
@@ -352,22 +353,17 @@ function ClosingList({ filters, now, go }: { filters: Filters; now: string; go: 
   );
 }
 
+const DonutChart = lazy(() => import('./DonutChart'));
+
 function Donut({ p, measure, onOpen }: { p: Pivot; measure: Measure; onOpen: (d: Drill | null) => void }) {
-  const data = p.rows.filter((r) => r.key !== 'Other').map((r, i) => ({ name: labelFor(p.group_by, r.key, p.labels), n: metricOf(r, measure), drill: r.drill, fill: `var(--c${(i % 8) + 1})` }));
+  const data: Slice[] = p.rows.filter((r) => r.key !== 'Other').map((r, i) => ({ name: labelFor(p.group_by, r.key, p.labels), n: metricOf(r, measure), drill: r.drill, fill: `var(--c${(i % 8) + 1})` }));
   const total = data.reduce((a, d) => a + d.n, 0);
   const fmt = (n: number) => (measure === 'value' ? inr(n) : n.toLocaleString('en-IN'));
   if (data.length === 0 || total === 0) return <div className="empty">{tr('Nothing to show.')}</div>;
   return (
     <div className="donut">
       <div className="donut-chart">
-        <ResponsiveContainer width="100%" height={190}>
-          <PieChart>
-            <Pie data={data} dataKey="n" nameKey="name" innerRadius="64%" outerRadius="92%" paddingAngle={2} stroke="none" onClick={(_: unknown, i: number) => onOpen(data[i]?.drill ?? null)}>
-              {data.map((d) => <Cell key={d.name} fill={d.fill} style={{ cursor: 'pointer' }} />)}
-            </Pie>
-            <Tooltip formatter={(v) => fmt(Number(v))} />
-          </PieChart>
-        </ResponsiveContainer>
+        <Suspense fallback={<ChartSkeleton height={190} />}><DonutChart data={data} format={fmt} onOpen={onOpen} /></Suspense>
         <div className="donut-total"><strong>{fmt(total)}</strong><span>{measure === 'value' ? 'total value' : 'tenders'}</span></div>
       </div>
       <ul className="legend">

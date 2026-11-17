@@ -102,8 +102,9 @@ def test_excel_upload(svc, tmp_path):
     openpyxl = pytest.importorskip("openpyxl")
     wb = openpyxl.Workbook()
     ws = wb.active
-    for r in __import__("csv").reader(open(FIX / "boq_sample.csv", encoding="utf-8")):
-        ws.append(r)
+    with open(FIX / "boq_sample.csv", encoding="utf-8") as f:
+        for r in __import__("csv").reader(f):
+            ws.append(r)
     wb.save(tmp_path / "b.xlsx")
     assert len(svc.analyse(KEY, "b.xlsx", b64(tmp_path / "b.xlsx"))["boq"]["lines"]) == 26
 

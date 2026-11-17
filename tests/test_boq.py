@@ -88,8 +88,9 @@ def test_excel_roundtrip(tmp_path):
     openpyxl = pytest.importorskip("openpyxl")
     wb = openpyxl.Workbook()
     ws = wb.active
-    for r in csv.reader(open(FIX / "boq_sample.csv", encoding="utf-8")):
-        ws.append(r)
+    with open(FIX / "boq_sample.csv", encoding="utf-8") as f:
+        for r in csv.reader(f):
+            ws.append(r)
     wb.save(tmp_path / "b.xlsx")
     assert len(parse.parse_file(tmp_path / "b.xlsx").lines) == 26
     # portals often rename files: an .xlsx called .xls, and macro-enabled .xlsm, must both read
