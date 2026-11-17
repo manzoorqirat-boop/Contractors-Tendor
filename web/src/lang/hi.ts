@@ -454,4 +454,5 @@ export const HI: Record<string, string> = {
   "Soon": "जल्द",
   "more to look at in your bids": "और आपकी बोलियों में देखने के लिए",
   "Money": "पैसा",
+  "password": "पासवर्ड",
 };

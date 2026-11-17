@@ -153,7 +153,7 @@ export function Login({ onDone }: { onDone: () => void }) {
                 <input type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)}
                   onKeyUp={(e) => setCaps(e.getModifierState('CapsLock'))} onBlur={() => setCaps(false)}
                   autoComplete="current-password" placeholder={tr('Enter your password')} />
-                <button type="button" className="lf-toggle" onClick={() => setShow((v) => !v)} aria-pressed={show} aria-label={show ? 'Hide password' : 'Show password'}>{show ? tr('Hide') : tr('Show')}</button>
+                <button type="button" className="lf-toggle" onClick={() => setShow((v) => !v)} aria-pressed={show}>{show ? tr('Hide') : tr('Show')}<span className="sr-only"> {tr('password')}</span></button>
               </span>
               {caps && <em className="lf-warn">{tr('Caps Lock is on')}</em>}
             </label>
