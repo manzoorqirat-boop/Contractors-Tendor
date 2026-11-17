@@ -763,6 +763,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         yield
         if scheduler:
             scheduler.stop()
+        for name, closer in (("boq", boq.store.close), ("main", store.close)):   # a clean close also folds the write-ahead log back into the database file
+            try:
+                closer()
+            except Exception:  # the process is ending: a failure here must not hide the real shutdown
+                log.exception("closing the %s database failed", name)
 
     app = FastAPI(title="TendAI by QMSofts", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
