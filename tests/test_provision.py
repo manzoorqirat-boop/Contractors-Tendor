@@ -240,5 +240,6 @@ def test_a_site_without_the_customers_logo_gets_a_reminder_until_it_is_uploaded(
     from tests.test_branding import png
     client = site()
     assert check(client)["The customer's logo picture is uploaded"][0] == provision.WARN
-    client.client.put("/api/settings/logo", json={"file_base64": base64.b64encode(png()).decode()})
+    client.client.post("/api/login", json={"username": "admin", "password": PASSWORD})
+    assert client.client.put("/api/settings/logo", json={"file_base64": base64.b64encode(png()).decode()}).status_code == 200
     assert check(client)["The customer's logo picture is uploaded"][0] == provision.PASS
