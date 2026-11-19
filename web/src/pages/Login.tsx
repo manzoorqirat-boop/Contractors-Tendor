@@ -136,6 +136,7 @@ export function Login({ onDone }: { onDone: () => void }) {
           </main>
         ) : (
         <main className="login-card">
+          <div className="login-brand login-brand-small"><Logo /></div>
           <h1>{tr('Welcome back')}</h1>
           <p className="login-sub">{greeting()}. Sign in to TendAI by QMSofts.</p>
 

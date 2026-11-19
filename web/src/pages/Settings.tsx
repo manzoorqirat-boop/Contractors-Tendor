@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import { api } from '../api';
 import { inr } from '../format';
 import { useLoad } from '../hooks';
-import { resetAiStatus } from '../ai';
+import { readBase64, resetAiStatus } from '../ai';
 import { PortalsManager } from '../ManualPortals';
-import { setLogoText } from '../Brand';
+import { setLogoImage, setLogoText, useLogoImage } from '../Brand';
 import { Tabs } from '../Tabs';
 import { useToast } from '../ui';
 import { useConfirm } from '../confirm';
@@ -225,7 +225,9 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
             </section>
             <section className="card">
               <h2>Logo</h2>
-              <p className="sub">The letters in the tile at the top left, on the sign-in screen and in the browser tab.</p>
+              <LogoPicture />
+              <h3 style={{ margin: '18px 0 4px' }}>Logo letters</h3>
+              <p className="sub">Shown in the tile at the top left, on the sign-in screen and in the browser tab when no logo picture is uploaded.</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <label className="field" style={{ margin: 0 }}>
                   Letters
@@ -352,6 +354,61 @@ function BackupPanel() {
           <p className="sub">Your administrator runs this on the server, with the zip uploaded there: <code>python -m tender_digest.backup restore backup.zip --target-dir /data --force</code>, then restarts the service. Existing data is moved aside, not deleted.</p>
         </details>
       </section>
+    </div>
+  );
+}
+
+const LOGO_MAX_KB = 400;
+
+/** Upload the company's logo picture. It is saved at once (not with the Save button below), and shown on the sign-in screen, in the menu and as the tab icon. */
+function LogoPicture() {
+  const url = useLogoImage();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+
+  async function pick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';  // so choosing the same file again still counts
+    if (!file) return;
+    if (file.size > LOGO_MAX_KB * 1024) { setMsg({ tone: 'bad', text: `That file is ${Math.round(file.size / 1024)} KB. Save the picture under ${LOGO_MAX_KB} KB and try again.` }); return; }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api.uploadLogo(await readBase64(file));
+      setLogoImage(r.logo_url);
+      setMsg({ tone: 'ok', text: `Logo picture saved (${r.width} x ${r.height}).` });
+    } catch (err) {
+      setMsg({ tone: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.removeLogo();
+      setLogoImage(null);
+      setMsg({ tone: 'ok', text: 'Logo picture removed. The letters are shown again.' });
+    } catch (err) {
+      setMsg({ tone: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <h3 style={{ margin: '0 0 4px' }}>Logo picture</h3>
+      <p className="sub">Your company logo, on the sign-in screen, in the menu and as the browser-tab icon. PNG, JPEG or WebP, under {LOGO_MAX_KB} KB; about 200 pixels wide is plenty. A transparent background looks best. It is saved as soon as you choose it.</p>
+      {msg && <div className={`alert ${msg.tone}`} role="status">{msg.text}</div>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        {url ? <img className="logo-img" src={url} alt="Current logo picture" style={{ height: 52, maxWidth: 200 }} /> : <span className="muted small">No picture uploaded: the letters below are used.</span>}
+        <input type="file" accept="image/png,image/jpeg,image/webp" onChange={pick} disabled={busy} aria-label="Choose a logo picture" />
+        {url && <button type="button" className="btn small" onClick={remove} disabled={busy}>Remove the picture</button>}
+        {busy && <span className="spinner" />}
+      </div>
     </div>
   );
 }

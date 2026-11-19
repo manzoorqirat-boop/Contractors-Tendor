@@ -232,3 +232,14 @@ def test_the_command_takes_the_password_from_the_environment_never_the_command_l
     lines.clear()
     assert provision.main(["verify", "--url", "https://tend.acme.in"], out=lines.append, session=site()) == 1       # no encryption key: a failure
     assert "FAIL  Stored papers are encrypted" in lines[0]
+
+
+def test_a_site_without_the_customers_logo_gets_a_reminder_until_it_is_uploaded(monkeypatch):
+    import base64
+
+    from tests.test_branding import png
+    client = site()
+    assert check(client)["The customer's logo picture is uploaded"][0] == provision.WARN
+    client.client.post("/api/login", json={"username": "admin", "password": PASSWORD})
+    assert client.client.put("/api/settings/logo", json={"file_base64": base64.b64encode(png()).decode()}).status_code == 200
+    assert check(client)["The customer's logo picture is uploaded"][0] == provision.PASS

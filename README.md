@@ -146,7 +146,11 @@ python -m tender_digest.provision new --name "Acme Infra" --url https://tend.acm
 TENDAI_PASSWORD=... python -m tender_digest.provision verify --url https://tend.acme.in
 ```
 
-`new` writes `customers/acme-infra/`: a settings file to paste into the new service (a fresh password, signing key and encryption key, generated and never reused; readable by you only; the folder is kept out of git and nothing secret is printed), and a go-live checklist for that customer. `verify` checks the running site from outside and prints PASS, WARN or FAIL for: https, login, the data folder being on a volume, encryption, a daily backup, off-site backup, email being set up, portals proven readable, and no portal having stopped working. It exits 1 if anything must be fixed before handing over, and takes the password from the environment so it stays out of shell history. A new site will show WARN for backups until the first night has passed.
+`new` writes `customers/acme-infra/`: a settings file to paste into the new service (a fresh password, signing key and encryption key, generated and never reused; readable by you only; the folder is kept out of git and nothing secret is printed), and a go-live checklist for that customer. `verify` checks the running site from outside and prints PASS, WARN or FAIL for: https, login, the data folder being on a volume, encryption, a daily backup, off-site backup, email being set up, portals proven readable, and no portal having stopped working. It exits 1 if anything must be fixed before handing over, and takes the password from the environment so it stays out of shell history. A new site will show WARN for backups until the first night has passed, and for the logo until one is uploaded.
+
+### Company logo on the sign-in screen
+
+Settings > AI & logo > **Logo picture** (administrators): choose a PNG, JPEG or WebP file under 400 KB (200 pixels wide is plenty; a transparent background looks best). It is saved as soon as you choose it, replaces the letter tile on the sign-in screen and in the menu, and becomes the browser-tab icon. **Remove the picture** brings the letters back. SVG and GIF are refused on purpose (an SVG can carry scripts), and the file is judged by its contents, not its name. The picture is public (the sign-in screen has to show it before anyone signs in), is kept in the database so backups carry it, and changes are in the activity log. The *Logo letters* and company colour settings still apply.
 
 ## Deploy on Railway (one service)
 

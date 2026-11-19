@@ -48,6 +48,7 @@ class Ctx:
     keep_source: Callable[..., Any]
     letter_book: Letters
     limiter: Any
+    logo_url: Callable[..., Any]
     manager: RunManager
     money: MoneyBook
     notify: Callable[..., Any]
