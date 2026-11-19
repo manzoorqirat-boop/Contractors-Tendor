@@ -210,6 +210,7 @@ class SeenStore:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, at TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'run',
                   kind TEXT NOT NULL, departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
                 CREATE INDEX IF NOT EXISTS portal_history_key ON portal_history (key, id);
+                CREATE TABLE IF NOT EXISTS brand_logo (id INTEGER PRIMARY KEY CHECK (id = 1), mime TEXT NOT NULL, data BLOB NOT NULL, updated TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS portal_coverage (key TEXT PRIMARY KEY, checked TEXT NOT NULL, result TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS portal_health (key TEXT PRIMARY KEY, state TEXT NOT NULL, since TEXT NOT NULL);
                 """
@@ -1120,6 +1121,31 @@ class SeenStore:
                 "SELECT at, source, kind, departments, tenders FROM portal_history WHERE key = ? ORDER BY id DESC LIMIT ?", (key, limit),
             )
             return [dict(r) for r in rows]
+
+    # ---- the company's logo picture (one row) -----------------------------------------------------------------------
+
+    def put_logo(self, mime: str, data: bytes, at: datetime) -> None:
+        with self.lock:
+            self.db.execute("INSERT INTO brand_logo (id, mime, data, updated) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET mime=excluded.mime, data=excluded.data, updated=excluded.updated",
+                            (mime, data, _iso(at)))
+            self.db.commit()
+
+    def get_logo(self) -> dict[str, Any] | None:
+        with self.lock:
+            r = self.db.execute("SELECT mime, data, updated FROM brand_logo WHERE id = 1").fetchone()
+            return {"mime": r["mime"], "data": bytes(r["data"]), "updated": r["updated"]} if r else None
+
+    def logo_version(self) -> str | None:
+        """When the logo last changed (cheap: the picture itself is not read), or None when there is none."""
+        with self.lock:
+            r = self.db.execute("SELECT updated FROM brand_logo WHERE id = 1").fetchone()
+            return r["updated"] if r else None
+
+    def delete_logo(self) -> bool:
+        with self.lock:
+            n = self.db.execute("DELETE FROM brand_logo").rowcount
+            self.db.commit()
+            return bool(n)
 
     def put_portal_coverage(self, key: str, result: dict[str, Any], at: datetime) -> None:
         """The result of a deep test of one portal (see coverage.py): the latest one is kept."""

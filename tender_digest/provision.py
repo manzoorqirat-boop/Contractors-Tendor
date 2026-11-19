@@ -121,6 +121,7 @@ Site: {url}   (one service, one volume, one database for this customer only)
 
 ## First setup, with the customer
 - [ ] Sign in as `admin`; **Settings > Daily email**: recipients, then *Send a test email* and confirm it arrives.
+- [ ] **Settings > AI & logo**: upload the customer's logo picture (PNG, JPEG or WebP under 400 KB) so their sign-in screen carries their brand; pick the company colour.
 - [ ] **Settings > Portals**: tick the portals the customer bids in; press **Test all switched-on portals** (Coverage proof).
   Only the portals shown as *Proven* are covered. Tell the customer which others need checking by hand. Download the CSV for your records.
 - [ ] **Runs > Run now**: the first run takes 20 to 40 minutes. Confirm the numbers look right.
@@ -251,6 +252,9 @@ def verify(url: str, password: str, username: str = "admin", session: Any = None
             add(WARN, "Portals are switched on and proven readable", f"{len(proven_on)} of {len(on)} proven. Not proven: {names[:200]}")
         else:
             add(PASS, "Portals are switched on and proven readable", f"{len(proven_on)} of {len(on)} ({s.get('portals', 0)} in the list)")
+    brand = read("/api/branding")
+    if brand is not None:
+        add(PASS if brand.get("logo_url") else WARN, "The customer's logo picture is uploaded", "" if brand.get("logo_url") else "Settings > AI & logo > Logo picture: the sign-in screen shows the letters until then")
     health = read("/api/portal-health")
     if health is not None:
         bad = health.get("problems") or []

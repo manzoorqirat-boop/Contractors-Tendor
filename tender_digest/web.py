@@ -501,6 +501,11 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             "departments": st["departments"] if st else 0, "tenders": st["tenders"] if st else 0,
         }
 
+    def logo_url() -> str | None:
+        """Where the logo picture is served, with its change time so browsers fetch it again only when it changes. None when there is none."""
+        version = store.logo_version()
+        return f"/api/branding/logo?v={re.sub(r'[^0-9]', '', version)}" if version else None
+
     def portal_health() -> list[dict[str, Any]]:
         """How each portal has been reading lately (see health.py), the ones with a problem first."""
         enabled = set(appsettings.current(env, store.get_settings())["portals"])
@@ -556,7 +561,8 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         elif not path.startswith("/api/") and response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Cache-Control"] = "no-cache"  # the page itself is always checked, so a new release shows at once
         if request.url.path.startswith("/api/"):
-            response.headers["Cache-Control"] = "no-store"
+            if request.url.path != "/api/branding/logo":  # the logo picture is public and its address changes with it, so it may be cached
+                response.headers["Cache-Control"] = "no-store"
             record_activity(request, response.status_code)
         return response
 
@@ -774,6 +780,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         keep_source=keep_source,
         letter_book=letter_book,
         limiter=limiter,
+        logo_url=logo_url,
         manager=manager,
         money=money,
         notify=notify,

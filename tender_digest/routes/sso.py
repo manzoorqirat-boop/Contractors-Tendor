@@ -128,7 +128,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     def branding() -> dict:
         # Public on purpose: the login screen shows the logo before anyone has signed in. Nothing secret is in it.
         cur = appsettings.current(env, store.get_settings())
-        return {"logo_text": cur["logo_text"], "accent": cur["accent"]}
+        return {"logo_text": cur["logo_text"], "accent": cur["accent"], "logo_url": ctx.logo_url()}
 
     @app.get("/api/me")
     def me(request: Request) -> dict:
