@@ -22,7 +22,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import access, accounts, ai, appsettings, events, letters, offsite, sealing, tokens
+from . import access, accounts, ai, appsettings, coverage, events, health, letters, offsite, sealing, tokens
 
 # Names that moved to api_common.py, or are no longer used in this file, but that other code (and the tests) still reach as web.<name>.
 # "x as x" is the explicit re-export form: it is kept by the import sorter and the unused-import check.
@@ -398,7 +398,7 @@ def storage_warning(state_path: str, environ: Mapping[str, str] | None = None) -
 
 
 
-def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None, sso_session: Any = None) -> FastAPI:
+def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunManager | None = None, prober: Callable[[str], dict] | None = None, sso_session: Any = None, deep_prober: Callable[..., dict] | None = None) -> FastAPI:
     vault_dir = default_vault_dir(env.state_path)
     sealer = sealing.Sealer.from_env()  # raises with a clear message when the key is too short: better than quietly storing things unencrypted
     bids = BidBook(store, vault_dir, sealer)
@@ -433,7 +433,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     def housekeeping(now: datetime) -> None:
         """Run by the scheduler every half minute: the daily backup, then any deadline reminders that are due. One failing never stops the other."""
-        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hooks.deliver(now), lambda: prune_audit_daily(now), lambda: refresh_priorities_hourly(now)):
+        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hooks.deliver(now), lambda: prune_audit_daily(now), lambda: refresh_priorities_hourly(now), lambda: check_portal_health_hourly(now)):
             try:
                 job()
             except Exception:
@@ -471,6 +471,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     if storage_note:
         log.warning(storage_note)
     probe = prober or access.probe
+    deep_probe = deep_prober or coverage.deep_probe
     builtin_keys = {p.key for p in env.portals}
     # Portals typed into the page are saved in the database, so these lookups are refilled (in place) whenever they change.
     portal_names: dict[str, str] = {}
@@ -499,6 +500,21 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             "detail": st["detail"] if st else "", "checked": st["checked"] if st else None,
             "departments": st["departments"] if st else 0, "tenders": st["tenders"] if st else 0,
         }
+
+    def portal_health() -> list[dict[str, Any]]:
+        """How each portal has been reading lately (see health.py), the ones with a problem first."""
+        enabled = set(appsettings.current(env, store.get_settings())["portals"])
+        return health.assess_all(store, portals_now(), enabled, now())
+
+    health_at: dict[str, datetime | None] = {"when": None}
+
+    def check_portal_health_hourly(at: datetime) -> None:
+        """Once an hour: when a portal turns unhealthy, or recovers, tell the webhooks once (not every hour while it stays that way)."""
+        last = health_at["when"]
+        if last is not None and (at - last).total_seconds() < 3600:
+            return
+        health_at["when"] = at
+        health.announce(store, portal_health(), lambda event, data: hooks.emit(event, data, at), at)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -750,6 +766,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         company_facts=company_facts,
         config=config,
         current_user=current_user,
+        deep_probe=deep_probe,
         encryption_problem=encryption_problem,
         env=env,
         hooks=hooks,
@@ -764,6 +781,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         owner=owner,
         people=people,
         portal_entry=portal_entry,
+        portal_health=portal_health,
         portal_names=portal_names,
         portal_search=portal_search,
         portal_states=portal_states,

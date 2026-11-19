@@ -7,7 +7,7 @@ import { useLoad } from '../hooks';
 import type { Nav } from '../App';
 import { ChartSkeleton, Skeleton, useToast } from '../ui';
 import { useConfirm } from '../confirm';
-import { ManualBanner } from '../ManualPortals';
+import { HealthBanner, ManualBanner } from '../ManualPortals';
 import { MoneyCard } from '../Money';
 import { Only, useSession } from '../session';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
@@ -135,6 +135,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
 
       <SetupCard onChanged={() => stats.reload()} />
 
+      <HealthBanner onOpen={() => go('settings')} />
       <ManualBanner onOpen={() => go('settings')} />
 
       <MoneyCard onOpenBid={(id) => { window.location.hash = `#/bids/${id}`; }} />

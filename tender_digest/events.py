@@ -31,6 +31,8 @@ EVENTS = {
     "bid.stage_changed": "A bid moves to another stage (interested, preparing, submitted, won, lost...)",
     "bid.changed": "A closing date, opening date or corrigendum changes on a bid",
     "bid.result": "Bidders and prices are recorded for a bid",
+    "portal.unhealthy": "A portal looks like it has stopped working (cannot be read, or lists nothing any more)",
+    "portal.recovered": "A portal that had stopped working is being read properly again",
     "test": "A test message you send yourself",
 }
 MAX_HOOKS = 10

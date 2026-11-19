@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -104,6 +104,9 @@ export const api = {
   saveSettings: (s: Partial<Settings>) => call<Settings>('/api/settings', { method: 'PUT', body: JSON.stringify(s) }),
   branding: () => call<{ logo_text: string; accent: string }>('/api/branding'),
   portals: () => call<{ portals: PortalStatus[]; manual: PortalStatus[] }>('/api/portals'),
+  portalHealth: () => call<{ items: PortalHealth[]; problems: PortalHealth[] }>('/api/portal-health'),
+  portalCoverage: () => call<CoverageReport>('/api/portals/coverage'),
+  testPortalCoverage: (key: string) => call<{ key: string; verdict: string }>(`/api/portals/${encodeURIComponent(key)}/coverage`, { method: 'POST' }),
   addPortal: (p: NewPortal) => call<PortalStatus>('/api/portals', { method: 'POST', body: JSON.stringify(p) }),
   checkPortal: (key: string, enable = false) => call<PortalStatus>(`/api/portals/${encodeURIComponent(key)}/check${enable ? '?enable=true' : ''}`, { method: 'POST' }),
   portalCatalogue: () => call<{ entries: PortalChoice[] }>('/api/portals/catalogue'),

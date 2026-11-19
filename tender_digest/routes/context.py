@@ -40,6 +40,7 @@ class Ctx:
     company_facts: Callable[..., Any]
     config: AppConfig
     current_user: Callable[..., Any]
+    deep_probe: Callable[..., Any]
     encryption_problem: Any
     env: Settings
     hooks: Any
@@ -54,6 +55,7 @@ class Ctx:
     owner: Any
     people: Accounts
     portal_entry: Callable[..., Any]
+    portal_health: Callable[..., Any]
     portal_names: Any
     portal_search: Any
     portal_states: Any

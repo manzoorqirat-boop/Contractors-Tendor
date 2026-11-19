@@ -142,6 +142,7 @@ def build(
     intro: str = "",
     bids: dict | None = None,
     searches: list[dict] | None = None,
+    unhealthy: list[dict] | None = None,
 ) -> Digest:
     by_portal = {r.portal.key: r for r in reports}
     new_keys = {t.key for t in new}
@@ -203,6 +204,14 @@ def build(
         items = "".join(f"<li><b>{escape(r.portal.name)}</b>: {escape(access.describe(r.access)['label'])}</li>" for r in manual)
         notes += (
             "<div class=w>Check these portals by hand. The app cannot read them on its own, so nothing from them is in this list:"
+            f"<ul style='margin:6px 0 0 18px'>{items}</ul></div>"
+        )
+
+    unhealthy = unhealthy or []
+    if unhealthy:
+        items = "".join(f"<li><b>{escape(h['name'])}</b>: {escape(h['text'])}</li>" for h in unhealthy)
+        notes += (
+            "<div class=w><b>These portals may have stopped working.</b> A portal that is quietly failing looks the same as a quiet week, so check them:"
             f"<ul style='margin:6px 0 0 18px'>{items}</ul></div>"
         )
 
@@ -279,6 +288,8 @@ def build(
         text_lines.append(f"Note: {r.portal.name}: {r.errors[0]}")
     for r in manual:
         text_lines.append(f"CHECK BY HAND: {r.portal.name}: {access.describe(r.access)['label']}")
+    for h in unhealthy:
+        text_lines.append(f"PORTAL MAY HAVE STOPPED WORKING: {h['name']}: {h['text']}")
     names = {k: r.portal.name for k, r in by_portal.items()}
     csv_rows = [("New", t, names.get(t.portal, t.portal)) for t in sorted(new, key=lambda x: (x.portal, -(x.value or 0)))]
     csv_rows += [("Closing soon", t, names.get(t.portal, t.portal)) for t in sorted(soon, key=lambda x: (x.portal, x.closing or datetime.max))]
