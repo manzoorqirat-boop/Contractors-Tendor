@@ -245,3 +245,10 @@ export interface Forecast {
 }
 
 export interface WhatsAppStatus { enabled: boolean; missing: string[]; webhook_url: string; app_url_set: boolean; numbers: { ending: string; role: string }[]; version: string }
+
+export interface PortalDiagnosis {
+  key: string; name: string; verdict: string; page_kind?: string;
+  departments: { exact_layout: number; by_content: number };
+  tenders: { exact_layout: number; by_content: number; sample: { tender_id: string; title: string; closing: string | null; organisation: string }[] };
+  tables: { id: string; class: string; rows: number; columns: number }[];
+}

@@ -62,6 +62,9 @@ def collect(
             report.access, report.access_detail = e.kind, str(e)[:300]
             log.warning("%s: %s", portal.key, e)
             say(f"{portal.name}: could not be read ({e})")
+        adapted = getattr(client, "adaptations", None)
+        if adapted and report.access == "ok":
+            report.access_detail = "Layout changed: " + "; ".join(adapted.values())     # the portal is still read, but its page is no longer what the reader was written for
         store.put_portal_status(portal.key, report.access, report.access_detail, now, report.organisations_read, report.listed)
         say(f"{portal.name}: done, {report.listed} listed, {report.new_civil} new civil")
         reports.append(report)

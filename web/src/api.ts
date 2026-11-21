@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { WhatsAppStatus, Forecast, Plan, Rivals, WinChance, Clause, CorrigendumRead, Backtest, MarketImport, MarketSummary, CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { PortalDiagnosis, WhatsAppStatus, Forecast, Plan, Rivals, WinChance, Clause, CorrigendumRead, Backtest, MarketImport, MarketSummary, CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -205,6 +205,7 @@ export const api = {
   compareTenders: (keys: string[]) => call<{ tenders: CompareTender[] }>(`/api/tenders/compare?${keys.map((k) => `keys=${encodeURIComponent(k)}`).join('&')}`),
   findClauses: (bidId: number, text: string, pdf_base64: string) => call<{ clauses: Clause[]; chars: number; note: string }>(`/api/bids/${bidId}/clauses`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
   readCorrigendum: (bidId: number, text: string, pdf_base64: string) => job<CorrigendumRead>(`/api/bids/${bidId}/corrigenda/read`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  diagnosePortal: (key: string) => call<PortalDiagnosis>(`/api/portals/${encodeURIComponent(key)}/diagnose`),
   whatsappStatus: () => call<WhatsAppStatus>('/api/whatsapp/status'),
   forecast: () => call<Forecast>('/api/forecast'),
   plan: (budget: number | null, margin: number) => call<Plan>(`/api/plan?margin=${margin}${budget === null ? '' : `&budget=${budget}`}`),

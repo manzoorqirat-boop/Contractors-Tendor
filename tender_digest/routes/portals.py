@@ -126,6 +126,21 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         coverage.record(store, portal, result, now())
         return {"key": key, **result}
 
+    @app.get("/api/portals/{key}/diagnose", dependencies=auth)
+    def portal_diagnose(key: str) -> dict:
+        """What the reader sees on this portal right now: tables found, whether the exact layout or the by-content fallback can read them, and a verdict in words."""
+        portal = next((p for p in portals_now() if p.key == key), None)
+        if not portal:
+            raise HTTPException(404, "No such portal")
+        client = manager.client_factory(portal, env)
+        look = getattr(client, "diagnose", None)
+        if look is None:
+            raise HTTPException(422, "This portal's reader cannot be diagnosed this way")
+        try:
+            return {"key": key, "name": portal.name, **look()}
+        except PortalError as e:
+            raise HTTPException(502, f"The portal could not be read: {e}") from None
+
     @app.get("/api/portals/{key}/sample", dependencies=auth)
     def portal_sample(key: str):
         """What the portal actually returns to this server, saved as a file. For fixing or writing a reader for a portal the app cannot read yet."""

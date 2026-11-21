@@ -261,6 +261,7 @@ class GepnicClient:
         self._last = 0.0
         self._host = _bare_host(self.base)
         self._check_dns = session is None  # a session handed in (tests) is not a real network
+        self.adaptations: dict[str, str] = {}  # pages the exact layout could not read but the fallback could, for the run's report
 
     @property
     def search_url(self) -> str:
@@ -324,6 +325,13 @@ class GepnicClient:
         html = self._get("app?page=FrontEndTendersByOrganisation&service=page", attempts)
         orgs = parse_organisations(html)
         if not orgs:
+            from . import layout
+            found, info = layout.adaptive_organisations(html)
+            if len(found) >= 3:  # a real department list has many rows: fewer is more likely some other table
+                orgs = found
+                self.adaptations["departments"] = f"department list read by its contents (table {info['table']['id'] or info['table']['class'] or 'unnamed'})"
+                log.warning("%s: department list layout changed; read by content", self.base)
+        if not orgs:
             kind = classify_page(html)
             why = {
                 "otp": "the portal asks for an OTP login",
@@ -334,7 +342,26 @@ class GepnicClient:
         return orgs
 
     def tenders_of(self, link: str, portal: str) -> list[Tender]:
-        return parse_tender_list(self._get(link), portal)
+        html = self._get(link)
+        tenders = parse_tender_list(html, portal)
+        from . import layout
+        if not tenders or not layout.dates_sane(tenders):   # nothing found, or found with closing dates before publish dates (columns swapped)
+            found, info = layout.adaptive_tender_list(html, portal)
+            if found and layout.dates_sane(found):
+                self.adaptations["tenders"] = f"tender lists read by column contents ({info['how']}; {info['read']} of {info['rows']} rows)"
+                log.warning("%s: tender list layout changed; read by content", self.base)
+                return found
+        return tenders
+
+    def diagnose(self) -> dict[str, Any]:
+        """Looks at the portal's department page and its busiest department's tender list, and reports what the reader can and cannot make of them."""
+        from . import layout
+        orgs_html = self._get("app?page=FrontEndTendersByOrganisation&service=page", 1)
+        strict_orgs = parse_organisations(orgs_html)
+        orgs = strict_orgs or layout.adaptive_organisations(orgs_html)[0]
+        busy = max((o for o in orgs if o[1] > 0), key=lambda o: o[1], default=None)
+        list_html = self._get(busy[2], 1) if busy else ""
+        return {**layout.diagnose(orgs_html, list_html, len(strict_orgs), len(parse_tender_list(list_html, "diagnose")) if list_html else 0), "page_kind": classify_page(orgs_html) if not orgs else "ok"}
 
     def detail(self, tender: Tender) -> dict[str, str]:
         return parse_detail(self._get(tender.detail_path))
