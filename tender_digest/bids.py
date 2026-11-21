@@ -932,6 +932,12 @@ class BidBook:
             "by_size": group("size", lambda r: _band(r["value"])),
         }
 
+    def model_rows(self) -> builtins.list[dict]:
+        """Every bid with what the win model needs, including how well the AI said it fitted (when that tender is still known)."""
+        with self.lock:
+            return [dict(r) for r in self.db.execute(
+                "SELECT b.id, b.key, b.stage, b.work_type, b.organisation, b.value, b.portal, b.my_value, b.stage_changed, b.updated, s.fit AS fit FROM bids b LEFT JOIN seen s ON s.key = b.key")]
+
     def l1_outcomes(self, work_type: str | None, value: float | None) -> tuple[builtins.list[float], str]:
         with self.lock:
             rows = [dict(r) for r in self.db.execute("SELECT stage, work_type, value, my_value, l1_value FROM bids WHERE stage IN ('won','lost')")]

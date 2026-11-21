@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { Clause, CorrigendumRead, Backtest, MarketImport, MarketSummary, CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { WinChance, Clause, CorrigendumRead, Backtest, MarketImport, MarketSummary, CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -205,6 +205,8 @@ export const api = {
   compareTenders: (keys: string[]) => call<{ tenders: CompareTender[] }>(`/api/tenders/compare?${keys.map((k) => `keys=${encodeURIComponent(k)}`).join('&')}`),
   findClauses: (bidId: number, text: string, pdf_base64: string) => call<{ clauses: Clause[]; chars: number; note: string }>(`/api/bids/${bidId}/clauses`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
   readCorrigendum: (bidId: number, text: string, pdf_base64: string) => job<CorrigendumRead>(`/api/bids/${bidId}/corrigenda/read`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  winChance: (bidId: number) => call<WinChance>(`/api/bids/${bidId}/win-chance`),
+  winModel: () => call<WinChance>('/api/win-model'),
   recordCorrigendum: (bidId: number, note: string, closing: string) => call<BidDetail>(`/api/bids/${bidId}/corrigenda`, { method: 'POST', body: JSON.stringify({ note, closing: closing || null }) }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
 };

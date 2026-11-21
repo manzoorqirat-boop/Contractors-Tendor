@@ -11,6 +11,7 @@ import { AssigneeSelect, MyWork, TeamTab } from '../Team';
 import { BiddersCard, CompetitorsCard } from '../Bidders';
 import { PriceHistoryCard } from '../PriceHistory';
 import { DocumentEvidence } from '../Clauses';
+import { WinChanceCard } from '../WinChance';
 import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
 import { useKeepActiveVisible } from '../Tabs';
@@ -162,6 +163,7 @@ function Results() {
         <div className="kpi"><div className="label">{tr('Your price vs the winner')}</div><div className="num">{data.avg_gap_to_l1 === null ? '-' : `${data.avg_gap_to_l1 > 0 ? '+' : ''}${data.avg_gap_to_l1}%`}</div><div className="note">{data.gap_samples ? `average over ${plural(data.gap_samples, 'lost bid')}` : 'Add the winning price on lost bids'}</div></div>
       </div>
       {decided === 0 && <div className="card empty">Mark a bid <strong>{tr('Won')}</strong> or <strong>{tr('Lost')}</strong> and add the prices on its page. Your record builds up here, and shows on similar tenders.</div>}
+      <WinChanceCard />
       <PriceHistoryCard />
       <CompetitorsCard />
       <GroupTable title={tr('By work type')} rows={data.by_work_type} />
@@ -318,6 +320,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       {tab === 'money' && can('bidder') && <MoneyTab bidId={bid.id} />}
       {tab === 'decide' && (
         <>
+          <WinChanceCard bidId={bid.id} />
           <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
           {bid.brief && <section className="card" style={{ marginBottom: 14 }}><h2>{tr('Bid / no-bid brief')}</h2><BriefView b={bid.brief} /></section>}
           {!ai?.configured && !bid.eligibility && !bid.brief && <div className="card empty">Eligibility checks and bid / no-bid briefs need the AI assistant. Until it is on, use the checklist to record the conditions yourself.</div>}

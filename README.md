@@ -80,6 +80,14 @@ The estimate uses the most specific group with enough results (same department a
 
 **It tests itself.** With 16 or more dated results, each result is predicted from the earlier ones only, and the card shows how often the real L1 fell in the predicted middle half (about 50% is right) and middle 80% (about 80% is right), and how far its middle guess was off against simply averaging everything. Treat the advice with the confidence that test supports. It is only as good as the results behind it: with fewer than 15 similar results the panel says it is a rough guide, and with fewer than 3 it shows no win chance. It does not know about things outside the numbers (a competitor who needs the work, a rate escalation clause), so it supports the decision and never makes it.
 
+### Win chance
+
+On a bid's Decide tab (and in Bids > Results) the app can show the chance of winning, learned from **your own won and lost bids**. It is a small, explainable model on purpose: each feature of a bid (work type, department, size, portal, how well the AI said it fitted you, how you priced against the estimate) has a win rate among your past bids, pulled towards your overall win rate in proportion to how few bids it rests on, then combined and damped so overlapping features are not counted twice. The page lists what moved the number ("Department PWD: you won 38 of 43 such bids, which raises it").
+
+**A score is shown only when it has been earned.** It needs 40 decided bids. Then, for each past bid in date order, the model predicts from the bids before it, and the score appears only if those predictions beat simply guessing your overall win rate (Brier score at most 95% of the baseline's). If they do not, the page says your history does not yet show what makes you win and shows no number. On simulated histories with a real difference between departments, the model earns its score about 40% of the time with 40 bids, 55% with 60 and 65% with 100; on histories where nothing matters it wrongly earns one about 12%, 4% and 1% of the time. So a shown score is probably real but not guaranteed, and a missing one means "cannot tell yet", not "no pattern".
+
+It cannot know who else is bidding or what the department wants this year, and it only sees the bids you chose to make. Use it as a hint, never as the decision.
+
 ### Reading tender documents you can check
 
 A wrong EMD or completion period costs money, so the document tools are built so that every claim can be checked in a second:

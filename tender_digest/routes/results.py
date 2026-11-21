@@ -1,9 +1,9 @@
 """Who bid, the award, and who the competitors are."""
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
-from .. import ai
+from .. import ai, winmodel
 from ..api_common import (
     AwardBody,
     BiddersBody,
@@ -50,3 +50,21 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     @app.get("/api/competitors", dependencies=auth)
     def competitors() -> dict:
         return {"competitors": bids.competitors()}
+
+    @app.get("/api/win-model", dependencies=auth)
+    def win_model() -> dict:
+        """How many bids are decided, whether the win model has earned a score on your history, and how it did when tested on your past bids."""
+        return winmodel.assess(bids.model_rows())
+
+    @app.get("/api/bids/{bid_id}/win-chance", dependencies=auth)
+    def bid_win_chance(bid_id: int) -> dict:
+        """The chance of winning this bid, learned from your decided bids, shown only when there is enough history and the model beat the plain win rate in testing."""
+        bid_or_404(bid_id)
+        rows = bids.model_rows()
+        me = next((r for r in rows if r["id"] == bid_id), None)
+        if me is None:
+            raise HTTPException(404, "No such bid")
+        if me["stage"] in ("won", "lost", "dropped"):
+            return {**winmodel.assess(rows), "applies": False}
+        # this bid is not decided, so it is not in the training rows; its own features are what is asked about
+        return {**winmodel.assess(rows, me), "applies": True}

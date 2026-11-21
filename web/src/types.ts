@@ -225,3 +225,7 @@ export interface MoneySummary {
 export interface PortalChoice { id: string; name: string; state: string; base_url: string; group: string; added: boolean; note: string }
 export interface MutedDepartment { dept: string; at: string; by: string | null; tenders: number }
 export interface CleanupPreview { days: number; closed: number; ignored_among_them: number; placeholders: number; kept_because_starred_or_bid: number; oldest: { tender_id: string; title: string; closing: string | null }[]; tenders_now: number }
+
+export interface WinPart { feature: string; value: string; wins: number; of: number; shift: number }
+export interface WinTest { tested: number; reliable: boolean; brier_model?: number; brier_baseline?: number; have?: number; needed?: number; calibration?: { band: string; n: number; predicted_pct: number; actual_pct: number }[] }
+export interface WinChance { decided: number; won: number; need: number; state: 'too_few' | 'no_edge' | 'ready'; overall_pct: number | null; score_pct: number | null; parts: WinPart[]; test: WinTest | null; applies?: boolean }
