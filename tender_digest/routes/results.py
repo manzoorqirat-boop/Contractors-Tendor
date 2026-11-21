@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Query
 
-from .. import ai, planner, rivals, winmodel
+from .. import ai, forecast, planner, rivals, winmodel
 from ..api_common import (
     AwardBody,
     BiddersBody,
@@ -22,6 +22,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     bids = ctx.bids
     market = ctx.market
     money = ctx.money
+    store = ctx.store
     now = ctx.now
     run_job = ctx.run_job
 
@@ -94,3 +95,8 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         out = planner.plan(cands, budget, margin)
         out["cash_locked"] = money.summary(today)["totals"].get("cash_locked", 0)
         return out
+
+    @app.get("/api/forecast", dependencies=auth)
+    def forecast_tenders() -> dict:
+        """How many new civil tenders to expect in the next four weeks, how that method did when tested on the past, and which tenders come round again about this time each year."""
+        return forecast.build(store, now())

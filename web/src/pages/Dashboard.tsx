@@ -9,6 +9,7 @@ import { ChartSkeleton, Skeleton, useToast } from '../ui';
 import { useConfirm } from '../confirm';
 import { HealthBanner, ManualBanner } from '../ManualPortals';
 import { MoneyCard } from '../Money';
+import { ForecastCard } from '../Forecast';
 import { Only, useSession } from '../session';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
 import { labelFor, metricOf, MEASURES } from './chartdata';
@@ -139,6 +140,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
       <ManualBanner onOpen={() => go('settings')} />
 
       <MoneyCard onOpenBid={(id) => { window.location.hash = `#/bids/${id}`; }} />
+      <ForecastCard />
 
       <FilterBar filters={filters} display={display} config={config} facets={nav.facets} onChange={nav.setFilters} onApplyView={(f, d) => go('dashboard', f, d)} hideStatus />
 

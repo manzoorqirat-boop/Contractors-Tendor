@@ -235,3 +235,11 @@ export interface Rivals { total: number; basis: string; rows: RivalRow[]; top3_s
 
 export interface PlanRow { id: number; title: string; tender_id: string | null; value: number | null; emd: number; emd_known: boolean; closing: string | null; p: number; p_source: string; profit: number; decision: 'submit' | 'skip'; reason: string }
 export interface Plan { rows: PlanRow[]; emd_used: number; available: number | null; left: number | null; expected_profit: number; submit: number; candidates: number; margin_pct: number; cash_locked: number; emd_unknown: number; with_more_cash: { id: number; title: string; extra_cash: number; profit: number } | null }
+
+export interface ForecastTotal { expected: number; low: number | null; high: number | null; range_from: string; per_week: number }
+export interface Forecast {
+  history_days: number; weeks_observed: number; enough: boolean; season_used: boolean; recent_four_weeks: number | null; total: ForecastTotal | null;
+  backtest: { tested: number; reliable: boolean; mae?: number; naive_mae?: number; needed?: number } | null;
+  departments: { dept: string; expected: number; last_four_weeks: number; weeks_with_tenders: number }[];
+  coming_round: { dept: string; title: string; last_year: string; value: number | null; expected_from: string }[];
+}
