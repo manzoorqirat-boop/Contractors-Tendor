@@ -152,3 +152,25 @@ def assess(bids: list[dict[str, Any]], candidate: dict[str, Any] | None = None) 
         out["score_pct"] = round(100 * pr["p"])
         out["parts"] = [p for p in pr["parts"] if abs(p["shift"]) >= 0.15][:4]      # only what really moved the answer is worth explaining
     return out
+
+
+DEFAULT_CHANCE = 0.20    # used only when there is no history at all, and always labelled as an assumption
+MIN_FOR_RATE = 10        # decided bids before your own overall win rate is believed
+
+
+class Predictor:
+    """Tests the model once, then answers for any number of bids: the model's score when it has earned one, else your overall win rate, else a labelled assumption."""
+
+    def __init__(self, bids: list[dict[str, Any]]):
+        self.rows = rows_from(bids)
+        self.n = len(self.rows)
+        self.wins = sum(1 for r in self.rows if r["won"])
+        self.model = fit(self.rows) if self.rows else None
+        self.ready = self.n >= MIN_DECIDED and backtest(self.rows)["reliable"]
+
+    def chance(self, candidate: dict[str, Any]) -> tuple[float, str]:
+        if self.ready and self.model:
+            return predict(self.model, features(candidate))["p"], "your win model"
+        if self.n >= MIN_FOR_RATE:
+            return (self.wins + 1) / (self.n + 2), "your overall win rate"
+        return DEFAULT_CHANCE, "an assumed 20% (not enough history)"

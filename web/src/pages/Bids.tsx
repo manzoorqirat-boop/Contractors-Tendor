@@ -13,6 +13,7 @@ import { PriceHistoryCard } from '../PriceHistory';
 import { DocumentEvidence } from '../Clauses';
 import { WinChanceCard } from '../WinChance';
 import { RivalsCard } from '../Rivals';
+import { PlanCard } from '../Plan';
 import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
 import { useKeepActiveVisible } from '../Tabs';
@@ -75,6 +76,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
       {mode === 'results' ? <Results /> : (
         <>
           <MyWork onOpen={onOpen} />
+          <PlanCard />
           {(alerts.data?.alerts.length ?? 0) > 0 && (
             <section className="card" style={{ marginBottom: 14 }}>
               <h2>{tr('Coming up')}</h2>

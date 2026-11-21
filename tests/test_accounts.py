@@ -35,7 +35,9 @@ def world(monkeypatch):
 @pytest.mark.parametrize("method,path,role", [
     ("GET", "/api/tenders", "viewer"), ("GET", "/api/bids/3", "viewer"), ("GET", "/api/me", "viewer"), ("GET", "/api/portals", "viewer"),
     ("POST", "/api/account/password", "viewer"),
-    ("GET", "/api/vault/4/file", "bidder"), ("GET", "/api/vault", "viewer"),
+    ("GET", "/api/vault/4/file", "bidder"), ("GET", "/api/vault", "viewer"), ("GET", "/api/plan", "bidder"), ("GET", "/api/money", "bidder"),
+    ("GET", "/api/market-results", "viewer"), ("POST", "/api/market-results/import", "bidder"), ("PUT", "/api/settings/logo", "admin"), ("GET", "/api/branding/logo", "viewer"),
+    ("GET", "/api/win-model", "viewer"), ("GET", "/api/bids/3/rivals", "viewer"), ("POST", "/api/bids/3/clauses", "bidder"),
     ("POST", "/api/tenders/star", "bidder"), ("POST", "/api/bids", "bidder"), ("PATCH", "/api/bids/2", "bidder"), ("DELETE", "/api/bids/2", "bidder"),
     ("POST", "/api/runs", "bidder"), ("POST", "/api/ai/score", "bidder"), ("PUT", "/api/company-facts", "bidder"), ("POST", "/api/vault", "bidder"),
     ("GET", "/api/settings", "admin"), ("PUT", "/api/settings", "admin"), ("POST", "/api/settings/test-email", "admin"),

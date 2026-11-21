@@ -232,3 +232,6 @@ export interface WinChance { decided: number; won: number; need: number; state: 
 
 export interface RivalRow { key: string; name: string; mine: boolean; wins: number; share_pct: number; usual_vs_estimate: number | null; priced: number; last: string | null; met: number; ahead: number }
 export interface Rivals { total: number; basis: string; rows: RivalRow[]; top3_share_pct: number | null; own: number; market: number }
+
+export interface PlanRow { id: number; title: string; tender_id: string | null; value: number | null; emd: number; emd_known: boolean; closing: string | null; p: number; p_source: string; profit: number; decision: 'submit' | 'skip'; reason: string }
+export interface Plan { rows: PlanRow[]; emd_used: number; available: number | null; left: number | null; expected_profit: number; submit: number; candidates: number; margin_pct: number; cash_locked: number; emd_unknown: number; with_more_cash: { id: number; title: string; extra_cash: number; profit: number } | null }

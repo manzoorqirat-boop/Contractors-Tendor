@@ -74,7 +74,7 @@ class Principal:
 # ---- what each kind of request needs ---------------------------------------------------------------------------------
 
 _ADMIN_AREAS = re.compile(r"^/api/((users|audit|backup|settings|calendar|tokens|webhooks|sample-data|cleanup)(/|$)|sso/info$|portals/[^/]+/sample$)")
-_VAULT_FILE = re.compile(r"^/api/(vault/\d+/file|bids/\d+/pack|money(/export)?|bids/\d+/money)$")   # company papers and money figures are not for view-only accounts
+_VAULT_FILE = re.compile(r"^/api/(vault/\d+/file|bids/\d+/pack|money(/export)?|bids/\d+/money|plan)$")   # company papers and money figures are not for view-only accounts
 
 
 def required_role(method: str, path: str) -> str:
