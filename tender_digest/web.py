@@ -38,6 +38,7 @@ from .boq.match import ClaudeVerifier
 from .boq.service import BoqError, BoqService
 from .config import Portal, Settings, load_settings
 from .digest import format_inr
+from .market import MarketBook
 from .routes import register_all
 from .routes.context import Ctx
 from .runner import RunManager, Scheduler, local_now
@@ -404,6 +405,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
     bids = BidBook(store, vault_dir, sealer)
     letter_book = letters.Letters(store)
     money = money_module.MoneyBook(bids)
+    market = MarketBook(bids)
     boq = BoqService.open(env.state_path, lambda: ClaudeVerifier() if ai.configured() else None)
     manager = manager or RunManager(env, store, tz_name=config.tz_name, bids=bids)
     remote_cfg, remote_problem = None, ""
@@ -782,6 +784,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         limiter=limiter,
         logo_url=logo_url,
         manager=manager,
+        market=market,
         money=money,
         notify=notify,
         now=now,

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ..boq.service import BoqService
     from ..config import Settings
     from ..letters import Letters
+    from ..market import MarketBook
     from ..money import MoneyBook
     from ..runner import RunManager
     from ..store import SeenStore
@@ -50,6 +51,7 @@ class Ctx:
     limiter: Any
     logo_url: Callable[..., Any]
     manager: RunManager
+    market: MarketBook
     money: MoneyBook
     notify: Callable[..., Any]
     now: Callable[..., Any]

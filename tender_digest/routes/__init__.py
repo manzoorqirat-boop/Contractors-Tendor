@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from . import accounts, admin, auth, bids, bidtools, boq, branding, calendar, firstrun, ignore, integrations, manual, money, portals, privacy, results, sso, team, tenders
+from . import accounts, admin, auth, bids, bidtools, boq, branding, calendar, firstrun, ignore, integrations, manual, market, money, portals, privacy, results, sso, team, tenders
 from .context import Ctx
 
 ORDER = (
@@ -24,6 +24,7 @@ ORDER = (
     team,
     results,
     money,
+    market,
     accounts,
     firstrun,
     privacy,

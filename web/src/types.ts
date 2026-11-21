@@ -151,7 +151,12 @@ export interface Advice {
   mode: 'with_risks' | 'boq_only'; estimate: number; cost_low: number; cost_high: number; floor_pct: number; target_pct: number; recommended_pct: number;
   samples: number; confidence: 'none' | 'rough' | 'fair' | 'good'; basis: string; points: AdvicePoint[]; notes: string[]; coverage_pct: number;
   my_value: number | null; min_margin: number; target_margin: number;
+  quantiles?: Record<string, number>; own?: number; market?: number;
 }
+export interface MarketRow { id: number; source: string; department: string; work_type: string; location: string; estimate: number; price: number; bidders: number | null; awarded: string | null }
+export interface MarketSummary { imported: number; own: number; usable: number; dated: number; first: string | null; last: string | null; by_work_type: { label: string; n: number }[]; by_department: { label: string; n: number }[]; rows: MarketRow[] }
+export interface MarketImport { added: number; duplicates: number; rejected: { line: number; reason: string }[]; rejected_total: number; columns: Record<string, string>; hint?: string }
+export interface Backtest { tested: number; needed?: number; have?: number; inside_middle_half_pct?: number; inside_middle_80_pct?: number; median_error_pts?: number; plain_median_error_pts?: number; better_than_plain_pct?: number }
 export interface SimInput { l1_price: number | null; quoted_pct: number | null; exposure: Record<string, number>; include_review: boolean }
 
 export interface ManualListing { tender_id: string; reference: string; title: string; description: string; organisation: string; location: string; value: number | null; emd: number | null; published: string; closing: string; opening: string; portal_name: string; form_of_contract: string }

@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 
 from .. import ai, appsettings, sealing
+from .. import pricing as price_model
 from ..api_common import (
     BoqConfirm,
     BoqCost,
@@ -34,6 +35,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     boq_call = ctx.boq_call
     company_facts = ctx.company_facts
     keep_source = ctx.keep_source
+    market = ctx.market
     now = ctx.now
     portal_names = ctx.portal_names
     profile = ctx.profile
@@ -113,9 +115,10 @@ def register(app: FastAPI, ctx: Ctx) -> None:
             raise HTTPException(422, "The BOQ has no estimate to compare your quote with.")
         if coverage < 50:
             notes.append(f"Only {coverage:.0f}% of the BOQ value is priced from your catalogue; the rest is carried at the buyer's estimate.")
-        outcomes, basis = bids.l1_outcomes(bid.get("work_type"), bid.get("value"))
+        learned = price_model.estimate(market.model_rows(), bid.get("work_type"), bid.get("organisation"), bid.get("value"), now())
         try:
-            out = advisor.advise(low, high, est, outcomes, min_margin, target_margin, basis)
+            out = advisor.advise(low, high, est, learned["outcomes"], min_margin, target_margin, learned["basis"], samples=learned["samples"],
+                                 extra={"quantiles": learned["quantiles"], "own": learned["own"], "market": learned["market"], "levels": learned["levels"]})
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
         out.update({"mode": mode, "coverage_pct": coverage, "my_value": bid.get("my_value")})

@@ -9,6 +9,7 @@ import { useLoad, useServerNow } from '../hooks';
 import { BidProgress } from '../BidProgress';
 import { AssigneeSelect, MyWork, TeamTab } from '../Team';
 import { BiddersCard, CompetitorsCard } from '../Bidders';
+import { PriceHistoryCard } from '../PriceHistory';
 import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
 import { useKeepActiveVisible } from '../Tabs';
@@ -160,6 +161,7 @@ function Results() {
         <div className="kpi"><div className="label">{tr('Your price vs the winner')}</div><div className="num">{data.avg_gap_to_l1 === null ? '-' : `${data.avg_gap_to_l1 > 0 ? '+' : ''}${data.avg_gap_to_l1}%`}</div><div className="note">{data.gap_samples ? `average over ${plural(data.gap_samples, 'lost bid')}` : 'Add the winning price on lost bids'}</div></div>
       </div>
       {decided === 0 && <div className="card empty">Mark a bid <strong>{tr('Won')}</strong> or <strong>{tr('Lost')}</strong> and add the prices on its page. Your record builds up here, and shows on similar tenders.</div>}
+      <PriceHistoryCard />
       <CompetitorsCard />
       <GroupTable title={tr('By work type')} rows={data.by_work_type} />
       <GroupTable title={tr('By department')} rows={data.by_department} />

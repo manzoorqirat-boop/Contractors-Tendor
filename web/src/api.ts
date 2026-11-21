@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { Backtest, MarketImport, MarketSummary, CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -107,6 +107,10 @@ export const api = {
   removeLogo: () => call<{ ok: boolean; removed: boolean; logo_url: null }>('/api/settings/logo', { method: 'DELETE' }),
   portals: () => call<{ portals: PortalStatus[]; manual: PortalStatus[] }>('/api/portals'),
   portalHealth: () => call<{ items: PortalHealth[]; problems: PortalHealth[] }>('/api/portal-health'),
+  marketResults: () => call<MarketSummary>('/api/market-results?limit=20'),
+  marketImport: (text: string) => call<MarketImport>('/api/market-results/import', { method: 'POST', body: JSON.stringify({ text }) }),
+  marketClear: (source: 'import' | 'manual') => call<{ removed: number }>(`/api/market-results?source=${source}`, { method: 'DELETE' }),
+  marketBacktest: () => call<Backtest>('/api/market-results/backtest'),
   portalCoverage: () => call<CoverageReport>('/api/portals/coverage'),
   testPortalCoverage: (key: string) => call<{ key: string; verdict: string }>(`/api/portals/${encodeURIComponent(key)}/coverage`, { method: 'POST' }),
   addPortal: (p: NewPortal) => call<PortalStatus>('/api/portals', { method: 'POST', body: JSON.stringify(p) }),
