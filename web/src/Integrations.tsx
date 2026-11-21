@@ -182,8 +182,31 @@ function SsoCard() {
   );
 }
 
+/** Whether the WhatsApp assistant is set up, what is missing and the address Meta needs. The secrets themselves are never shown. */
+function WhatsAppCard() {
+  const { data: s, error } = useLoad(() => api.whatsappStatus(), []);
+  return (
+    <section className="card">
+      <h2>WhatsApp assistant</h2>
+      <p className="sub">Ask from your phone: what closes soon, your bids and their dates, new tenders, a search, and (for bidders and administrators) the cash locked in EMDs. It only reads; it never changes anything. Only the numbers you list can use it.</p>
+      {error && <div className="alert bad">{error}</div>}
+      {s && (s.enabled ? (
+        <>
+          <p><span className="badge ok">Set up</span> {s.numbers.length} number{s.numbers.length === 1 ? '' : 's'} allowed: {s.numbers.map((n) => `…${n.ending} (${n.role})`).join(', ')}</p>
+          <p className="small">Webhook address for Meta: <code>{s.webhook_url}</code>{!s.app_url_set && ' (set APP_URL so this shows your full address)'}</p>
+        </>
+      ) : (
+        <>
+          <p><span className="badge plain">Not set up</span> Missing on the server: {s.missing.map((m) => <code key={m} style={{ marginRight: 6 }}>{m}</code>)}</p>
+          <p className="muted small">See the README, “WhatsApp assistant”, for the steps with Meta. Set these as environment variables and restart.</p>
+        </>
+      ))}
+    </section>
+  );
+}
+
 export function IntegrationsPanel() {
-  return <div className="set-grid"><SsoCard /><TokensCard /><WebhooksCard /></div>;
+  return <div className="set-grid"><SsoCard /><TokensCard /><WebhooksCard /><WhatsAppCard /></div>;
 }
 
 /** How long data is kept, and whether files and secrets are encrypted. Retention saves on its own button. */

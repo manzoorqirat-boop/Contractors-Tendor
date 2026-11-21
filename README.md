@@ -327,6 +327,31 @@ With SSO, people sign in with the company's own account (Google Workspace, Micro
 
 How it is checked: authorization-code flow with PKCE, the one-time state and nonce, the ID token's signature against the provider's published keys (RS256 or ES256 only; `none` and shared-secret algorithms are refused), and its issuer, audience and expiry. Only email addresses the provider marks as verified, at an allowed domain, get in. The owner login (`APP_USERNAME`/`APP_PASSWORD`) keeps working, so a provider outage or a wrong setting never locks everyone out. Tested against a fake provider (all the ways a token can be wrong) and in a real browser round trip; **not yet tried against Google, Microsoft or Okta themselves**.
 
+## WhatsApp assistant
+
+Ask the app a question from your phone and get the answer in the chat. Send **closing** (tenders closing in 3 days), **new** (found since yesterday), **bids** (your bids in progress), **deadlines** (what is coming up on your bids), **find drain nashik** (a search), **bid 2026_PWD_123** (how one bid stands) or **cash** (money locked in EMDs: bidders and administrators only). With the AI assistant on, a plain question ("any drain tenders near Nashik this week?") is turned into a search. It **only reads**: nothing a message says can change a bid, a setting or any data.
+
+It uses Meta's WhatsApp Business Cloud API. Meta calls `https://<your site>/api/whatsapp/webhook` for each message to your business number. The app accepts a call only if it is signed with your **app secret** (anything else is refused), answers only numbers you have **listed** (any other number gets no reply at all), ignores a message Meta resends, and drops a number that sends more than 20 messages in 10 minutes. Cash figures need a number listed as `bidder` or `admin`, like the same figures in the app. Settings > Integrations shows whether it is set up; the numbers appear only as their last four digits.
+
+**Set up**
+1. At developers.facebook.com create an app of type *Business* and add the **WhatsApp** product. Note the **Phone number ID** of your business number (Meta gives a test number to start with) and, under App settings > Basic, the **App secret**.
+2. Create a permanent access token (a *system user* with the whatsapp_business_messaging permission).
+3. Set these variables on the service and restart:
+
+   | Variable | Purpose |
+   |---|---|
+   | `WHATSAPP_VERIFY_TOKEN` | A phrase you choose; Meta sends it when you register the webhook. |
+   | `WHATSAPP_APP_SECRET` | The app secret. Secret. |
+   | `WHATSAPP_ACCESS_TOKEN` | The permanent token, for sending replies. Secret. |
+   | `WHATSAPP_PHONE_NUMBER_ID` | The business number's id. |
+   | `WHATSAPP_ALLOWED` | Who may ask, `country code first, no +`, with a role: `919876543210:bidder,919812345678:viewer`. A number with no role is a viewer. |
+   | `WHATSAPP_API_VERSION` | Optional, default `v21.0`. |
+
+4. In the Meta app, WhatsApp > Configuration: set the callback URL to `https://<your site>/api/whatsapp/webhook` and the verify token to yours, then subscribe to the **messages** field. Set `APP_URL` so Settings shows the full address.
+5. From a listed phone, send *help* to the business number.
+
+**Be aware.** This has been built to Meta's documented message formats and signature rules and tested with stand-ins (signed sample messages, a fake sender); it has **not been tested against a live WhatsApp account**, so try it with your own number before telling anyone it works. Replies are sent inside the 24 hours after the person's own message, which Meta allows as free-form text; the app never starts a conversation. Meta's own pricing and business-verification rules apply and can change. WhatsApp messages are not end-to-end private from Meta once they reach the business API, so the answers include tender titles and values but never papers from the Vault.
+
 ## Security
 
 - Everything except the login and a health check needs the password. Cookies are `HttpOnly`, `SameSite=Strict` and signed.

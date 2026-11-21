@@ -243,3 +243,5 @@ export interface Forecast {
   departments: { dept: string; expected: number; last_four_weeks: number; weeks_with_tenders: number }[];
   coming_round: { dept: string; title: string; last_year: string; value: number | null; expected_from: string }[];
 }
+
+export interface WhatsAppStatus { enabled: boolean; missing: string[]; webhook_url: string; app_url_set: boolean; numbers: { ending: string; role: string }[]; version: string }

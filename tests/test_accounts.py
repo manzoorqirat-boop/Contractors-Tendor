@@ -54,7 +54,7 @@ def test_every_route_has_a_deliberate_rule():
     world_app = web.create_app(web.AppConfig(PASSWORD, "k", cookie_secure=False, run_scheduler=False), settings(), SeenStore(":memory:"))
     for route in world_app.routes:
         path = getattr(route, "path", "")
-        if not path.startswith("/api/") or path in ("/api/login", "/api/logout", "/api/health", "/api/me", "/api/branding") or path.startswith("/api/account/"):
+        if not path.startswith("/api/") or path in ("/api/login", "/api/logout", "/api/health", "/api/me", "/api/branding", "/api/whatsapp/webhook") or path.startswith("/api/account/"):
             continue
         for method in getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}:
             role = required_role(method, path)
