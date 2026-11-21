@@ -12,6 +12,7 @@ import { BiddersCard, CompetitorsCard } from '../Bidders';
 import { PriceHistoryCard } from '../PriceHistory';
 import { DocumentEvidence } from '../Clauses';
 import { WinChanceCard } from '../WinChance';
+import { RivalsCard } from '../Rivals';
 import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
 import { useKeepActiveVisible } from '../Tabs';
@@ -321,6 +322,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       {tab === 'decide' && (
         <>
           <WinChanceCard bidId={bid.id} />
+          <RivalsCard bidId={bid.id} />
           <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
           {bid.brief && <section className="card" style={{ marginBottom: 14 }}><h2>{tr('Bid / no-bid brief')}</h2><BriefView b={bid.brief} /></section>}
           {!ai?.configured && !bid.eligibility && !bid.brief && <div className="card empty">Eligibility checks and bid / no-bid briefs need the AI assistant. Until it is on, use the checklist to record the conditions yourself.</div>}

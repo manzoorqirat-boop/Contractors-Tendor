@@ -72,7 +72,7 @@ export function PriceHistoryCard() {
         <details style={{ margin: '10px 0' }}>
           <summary>Import award results</summary>
           <p className="sub" style={{ marginTop: 8 }}>
-            Paste rows from a spreadsheet, or choose a CSV file. It needs a header row with at least the buyer's <strong>estimated cost</strong> and the <strong>awarded amount</strong> (or lowest bid); department, work type, number of bidders and award date are optional but make the advice better.
+            Paste rows from a spreadsheet, or choose a CSV file. It needs a header row with at least the buyer's <strong>estimated cost</strong> and the <strong>awarded amount</strong> (or lowest bid); department, work type, number of bidders and award date are optional but make the advice better; a column naming the winner (such as “Awarded to”) also builds the list of who usually wins.
             Amounts can be written 5,00,000, Rs. 5,00,000 or 2.5 crore; dates day first. A price under a third of the estimate or more than twice it is left out as a typing error. The same tender imported twice is kept once. Public award lists on the portals, or your own records, are good sources.
           </p>
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} placeholder={SAMPLE} aria-label="Award results to import" style={{ width: '100%', fontFamily: 'monospace', fontSize: 'var(--fs-xs)' }} />

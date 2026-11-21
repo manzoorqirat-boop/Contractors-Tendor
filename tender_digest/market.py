@@ -30,7 +30,8 @@ _HEADERS: dict[str, tuple[str, ...]] = {
     "estimate": ("estimated cost", "estimated value", "estimated amount", "estimate", "tender value", "tender estimate", "engineer estimate", "engineers estimate", "est cost", "est value", "pac", "cost put to tender", "value"),
     "price": ("awarded amount", "awarded value", "awarded price", "award value", "contract value", "contract amount", "accepted amount", "accepted value", "winning price", "winning bid",
               "winning amount", "l1 price", "l1 amount", "l1 value", "l1", "lowest bid", "lowest price", "quoted amount", "bid amount", "contract price", "work order value", "awarded to value", "amount"),
-    "department": ("department", "organisation", "organization", "organisation chain", "office", "division", "circle", "authority", "buyer", "agency", "dept"),
+    "department": ("department", "organisation", "organization", "organisation chain", "office", "division", "circle", "authority", "buyer", "dept"),
+    "winner": ("awarded to", "winner", "successful bidder", "l1 bidder", "l1 name", "name of contractor", "contractor name", "contractor", "awardee", "name of agency", "awarded agency", "agency", "bidder name"),
     "work_type": ("work type", "type of work", "category", "tender category", "product category", "type"),
     "location": ("location", "place", "district", "taluka", "state"),
     "bidders": ("bidders", "no of bidders", "number of bidders", "bids received", "no of bids", "offers received", "participants"),
@@ -140,7 +141,7 @@ def parse_table(text: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], 
         bidders = re.sub(r"[^\d]", "", cell("bidders"))
         awarded = parse_date(cell("date"))
         dept = cell("department")[:300]
-        good.append({"department": dept, "work_type": cell("work_type")[:80], "location": cell("location")[:80], "estimate": est, "price": price,
+        good.append({"department": dept, "work_type": cell("work_type")[:80], "location": cell("location")[:80], "estimate": est, "price": price, "winner": cell("winner")[:120],
                      "bidders": int(bidders) if bidders and int(bidders) < 1000 else None, "awarded": awarded, "ref": _ref(cell("tender_id")[:80], dept, est, price, awarded)})
     if len(rows) - 1 > MAX_ROWS:
         bad.append({"line": MAX_ROWS + 2, "reason": f"Only the first {MAX_ROWS} rows were read"})
@@ -158,6 +159,8 @@ class MarketBook:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, ref TEXT NOT NULL UNIQUE, department TEXT NOT NULL DEFAULT '', work_type TEXT NOT NULL DEFAULT '',
                   location TEXT NOT NULL DEFAULT '', estimate REAL NOT NULL, price REAL NOT NULL, bidders INTEGER, awarded TEXT, added TEXT NOT NULL);
                 """)
+            if "winner" not in {r["name"] for r in self.db.execute("PRAGMA table_info(market_results)")}:
+                self.db.execute("ALTER TABLE market_results ADD COLUMN winner TEXT NOT NULL DEFAULT ''")      # who won: added after the first release
             self.db.commit()
 
     def add_rows(self, rows: list[dict[str, Any]], source: str, now: datetime) -> dict[str, int]:
@@ -165,8 +168,8 @@ class MarketBook:
         with self.lock:
             for r in rows:
                 cur = self.db.execute(
-                    "INSERT OR IGNORE INTO market_results (source, ref, department, work_type, location, estimate, price, bidders, awarded, added) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (source, r["ref"], r["department"], r["work_type"], r["location"], r["estimate"], r["price"], r["bidders"], r["awarded"], now.isoformat(timespec="seconds")))
+                    "INSERT OR IGNORE INTO market_results (source, ref, department, work_type, location, estimate, price, bidders, awarded, added, winner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (source, r["ref"], r["department"], r["work_type"], r["location"], r["estimate"], r["price"], r["bidders"], r["awarded"], now.isoformat(timespec="seconds"), r.get("winner", "")))
                 if cur.rowcount:
                     added += 1
                 else:
@@ -210,6 +213,26 @@ class MarketBook:
             row = pricing.row_from(p["estimate"], p["price"], work_type=p["work_type"], organisation=p["department"], awarded=p["awarded"], source="market")
             if row:
                 out.append(row)
+        return out
+
+    def winner_rows(self) -> list[dict[str, Any]]:
+        """Who won, where, and at what price: from the bidder lists on your bids (the bidder ranked first) and from imported results that name the winner.
+        A tender you bid on and also imported is counted once."""
+        out: list[dict[str, Any]] = []
+        own_ids: set[str] = set()
+        with self.lock:
+            won = [dict(r) for r in self.db.execute(
+                "SELECT p.name, p.price, p.mine, b.tender_id, b.value, b.organisation, b.work_type, b.stage_changed, b.updated FROM bid_bidders p JOIN bids b ON b.id = p.bid_id WHERE p.rank = 1")]
+            pool = [dict(r) for r in self.db.execute("SELECT ref, winner, department, work_type, estimate, price, awarded FROM market_results WHERE winner <> ''")]
+        for w in won:
+            own_ids.add("id:" + re.sub(r"\s+", "", (w["tender_id"] or "").lower()))
+            out.append({"name": w["name"], "mine": bool(w["mine"]), "dept": pricing.department(w["organisation"]), "work_type": (w["work_type"] or "").strip(), "estimate": w["value"],
+                        "price": w["price"], "when": (w["stage_changed"] or w["updated"] or "")[:10], "source": "own"})
+        for p in pool:
+            if p["ref"] in own_ids:
+                continue
+            out.append({"name": p["winner"], "mine": False, "dept": pricing.department(p["department"]), "work_type": (p["work_type"] or "").strip(), "estimate": p["estimate"],
+                        "price": p["price"], "when": (p["awarded"] or "")[:10], "source": "market"})
         return out
 
     def summary(self) -> dict[str, Any]:

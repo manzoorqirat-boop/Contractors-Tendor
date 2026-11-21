@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 
-from .. import ai, winmodel
+from .. import ai, rivals, winmodel
 from ..api_common import (
     AwardBody,
     BiddersBody,
@@ -20,6 +20,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     bid_error = ctx.bid_error
     bid_or_404 = ctx.bid_or_404
     bids = ctx.bids
+    market = ctx.market
     now = ctx.now
     run_job = ctx.run_job
 
@@ -68,3 +69,9 @@ def register(app: FastAPI, ctx: Ctx) -> None:
             return {**winmodel.assess(rows), "applies": False}
         # this bid is not decided, so it is not in the training rows; its own features are what is asked about
         return {**winmodel.assess(rows, me), "applies": True}
+
+    @app.get("/api/bids/{bid_id}/rivals", dependencies=auth)
+    def bid_rivals(bid_id: int) -> dict:
+        """Who usually wins tenders like this one, from the winners on record (your bidder lists and imported results that name the winner), and how you fared against each."""
+        bid = bid_or_404(bid_id)
+        return rivals.who_wins(market.winner_rows(), bids.company_key, bid.get("work_type"), (bid.get("organisation") or "").split("||")[0], bids.head_to_head())

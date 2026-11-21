@@ -229,3 +229,6 @@ export interface CleanupPreview { days: number; closed: number; ignored_among_th
 export interface WinPart { feature: string; value: string; wins: number; of: number; shift: number }
 export interface WinTest { tested: number; reliable: boolean; brier_model?: number; brier_baseline?: number; have?: number; needed?: number; calibration?: { band: string; n: number; predicted_pct: number; actual_pct: number }[] }
 export interface WinChance { decided: number; won: number; need: number; state: 'too_few' | 'no_edge' | 'ready'; overall_pct: number | null; score_pct: number | null; parts: WinPart[]; test: WinTest | null; applies?: boolean }
+
+export interface RivalRow { key: string; name: string; mine: boolean; wins: number; share_pct: number; usual_vs_estimate: number | null; priced: number; last: string | null; met: number; ahead: number }
+export interface Rivals { total: number; basis: string; rows: RivalRow[]; top3_share_pct: number | null; own: number; market: number }

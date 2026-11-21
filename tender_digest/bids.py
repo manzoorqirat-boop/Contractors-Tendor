@@ -603,6 +603,35 @@ class BidBook:
         words = [w for w in s.split() if w not in {"m", "s", "ms", "pvt", "private", "ltd", "limited", "llp", "co", "company", "the", "and", "pl", "p"}]
         return " ".join(words)
 
+    def head_to_head(self) -> dict[str, dict[str, int]]:
+        """For each company that bid against you: {key: {met: tenders you both bid on, ahead: how many of those you finished ahead of them}}. Ranks decide; with no ranks the lower price does."""
+        with self.lock:
+            rows = [dict(r) for r in self.db.execute("SELECT bid_id, name, price, rank, mine FROM bid_bidders")]
+        by_bid: dict[int, builtins.list[dict]] = {}
+        for r in rows:
+            by_bid.setdefault(r["bid_id"], []).append(r)
+        out: dict[str, dict[str, int]] = {}
+        for rs in by_bid.values():
+            mine = next((r for r in rs if r["mine"]), None)
+            if not mine:
+                continue
+            for r in rs:
+                if r["mine"]:
+                    continue
+                k = self.company_key(r["name"])
+                if not k:
+                    continue
+                if mine["rank"] and r["rank"]:
+                    ahead = mine["rank"] < r["rank"]
+                elif mine["price"] and r["price"]:
+                    ahead = mine["price"] < r["price"]
+                else:
+                    continue
+                cell = out.setdefault(k, {"met": 0, "ahead": 0})
+                cell["met"] += 1
+                cell["ahead"] += 1 if ahead else 0
+        return out
+
     def competitors(self) -> builtins.list[dict]:
         """Every company that bid against you: how often, how often it won, and how far from the estimate it quotes."""
         with self.lock:
