@@ -18,7 +18,19 @@ export interface Tender {
   priority?: number | null; priority_note?: string | null;
 }
 export interface Brief { recommendation: 'Bid' | 'Maybe' | 'No bid'; headline: string; reasons: string[]; risks: string[]; checks: string[] }
-export interface DocFacts { summary: string; requirements: string[]; financial: { label: string; value: string }[]; dates: { label: string; value: string }[]; documents: string[]; penalties: string[]; red_flags: string[] }
+export interface Clause { kind: string; label: string; value: string; quote: string; watch: string }
+/** A claim the AI made about a tender document, the words it quoted for it, and whether those words were found in the document (null: nothing to check against, e.g. a scan). */
+export interface Evidence { item: string; quote: string; verified: boolean | null }
+export interface DocFacts {
+  summary: string; requirements: string[]; financial: { label: string; value: string }[]; dates: { label: string; value: string }[]; documents: string[]; penalties: string[]; red_flags: string[];
+  evidence?: Evidence[]; clauses?: Clause[]; source_checked?: boolean;
+}
+export interface ClauseChange { kind: string; label: string; old: string; new: string; quote: string }
+export interface CorrChange { what: string; old: string; new: string; impact: 'price' | 'eligibility' | 'dates' | 'documents' | 'other'; action: string; quote: string; verified: boolean | null }
+export interface CorrigendumRead {
+  rules: ClauseChange[]; clauses: Clause[]; has_text: boolean; had_document: boolean; ai_error: string;
+  ai: { summary: string; closing: string; changes: CorrChange[]; source_checked: boolean } | null;
+}
 export interface Related { key: string; tender_id: string; title: string; closing: string | null; first_seen: string; value: number | null; similarity: number }
 export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[]; bid_id?: number | null; history?: string[]; manual?: boolean; has_source?: boolean }
 export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number; calls_today?: number; daily_limit?: number }
@@ -100,7 +112,7 @@ export interface EligibilityCheck { requirement: string; status: 'met' | 'gap' |
 export interface Eligibility { verdict: string; summary: string; checks: EligibilityCheck[]; checked?: string }
 export interface BidDetail extends Omit<BidSummary, 'has_doc'> {
   published: string | null; category: string; location: string; emd: number | null; notes: string | null; l1_bidder: string | null; result_note: string | null; search_url: string;
-  signoff?: Signoff | null; comment_count?: number;
+  signoff?: Signoff | null; comment_count?: number; clauses?: { clauses: Clause[]; source_checked: boolean; at: string } | null;
   doc: DocFacts | null; doc_checked?: { by: string; at: string } | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null; manual?: boolean; has_source?: boolean; portal_checked?: string | null;
   items: BidItem[]; changes: BidChange[]; unseen: number; history: string[];
 }
@@ -151,7 +163,12 @@ export interface Advice {
   mode: 'with_risks' | 'boq_only'; estimate: number; cost_low: number; cost_high: number; floor_pct: number; target_pct: number; recommended_pct: number;
   samples: number; confidence: 'none' | 'rough' | 'fair' | 'good'; basis: string; points: AdvicePoint[]; notes: string[]; coverage_pct: number;
   my_value: number | null; min_margin: number; target_margin: number;
+  quantiles?: Record<string, number>; own?: number; market?: number;
 }
+export interface MarketRow { id: number; source: string; department: string; work_type: string; location: string; estimate: number; price: number; bidders: number | null; awarded: string | null }
+export interface MarketSummary { imported: number; own: number; usable: number; dated: number; first: string | null; last: string | null; by_work_type: { label: string; n: number }[]; by_department: { label: string; n: number }[]; rows: MarketRow[] }
+export interface MarketImport { added: number; duplicates: number; rejected: { line: number; reason: string }[]; rejected_total: number; columns: Record<string, string>; hint?: string }
+export interface Backtest { tested: number; needed?: number; have?: number; inside_middle_half_pct?: number; inside_middle_80_pct?: number; median_error_pts?: number; plain_median_error_pts?: number; better_than_plain_pct?: number }
 export interface SimInput { l1_price: number | null; quoted_pct: number | null; exposure: Record<string, number>; include_review: boolean }
 
 export interface ManualListing { tender_id: string; reference: string; title: string; description: string; organisation: string; location: string; value: number | null; emd: number | null; published: string; closing: string; opening: string; portal_name: string; form_of_contract: string }
@@ -208,3 +225,30 @@ export interface MoneySummary {
 export interface PortalChoice { id: string; name: string; state: string; base_url: string; group: string; added: boolean; note: string }
 export interface MutedDepartment { dept: string; at: string; by: string | null; tenders: number }
 export interface CleanupPreview { days: number; closed: number; ignored_among_them: number; placeholders: number; kept_because_starred_or_bid: number; oldest: { tender_id: string; title: string; closing: string | null }[]; tenders_now: number }
+
+export interface WinPart { feature: string; value: string; wins: number; of: number; shift: number }
+export interface WinTest { tested: number; reliable: boolean; brier_model?: number; brier_baseline?: number; have?: number; needed?: number; calibration?: { band: string; n: number; predicted_pct: number; actual_pct: number }[] }
+export interface WinChance { decided: number; won: number; need: number; state: 'too_few' | 'no_edge' | 'ready'; overall_pct: number | null; score_pct: number | null; parts: WinPart[]; test: WinTest | null; applies?: boolean }
+
+export interface RivalRow { key: string; name: string; mine: boolean; wins: number; share_pct: number; usual_vs_estimate: number | null; priced: number; last: string | null; met: number; ahead: number }
+export interface Rivals { total: number; basis: string; rows: RivalRow[]; top3_share_pct: number | null; own: number; market: number }
+
+export interface PlanRow { id: number; title: string; tender_id: string | null; value: number | null; emd: number; emd_known: boolean; closing: string | null; p: number; p_source: string; profit: number; decision: 'submit' | 'skip'; reason: string }
+export interface Plan { rows: PlanRow[]; emd_used: number; available: number | null; left: number | null; expected_profit: number; submit: number; candidates: number; margin_pct: number; cash_locked: number; emd_unknown: number; with_more_cash: { id: number; title: string; extra_cash: number; profit: number } | null }
+
+export interface ForecastTotal { expected: number; low: number | null; high: number | null; range_from: string; per_week: number }
+export interface Forecast {
+  history_days: number; weeks_observed: number; enough: boolean; season_used: boolean; recent_four_weeks: number | null; total: ForecastTotal | null;
+  backtest: { tested: number; reliable: boolean; mae?: number; naive_mae?: number; needed?: number } | null;
+  departments: { dept: string; expected: number; last_four_weeks: number; weeks_with_tenders: number }[];
+  coming_round: { dept: string; title: string; last_year: string; value: number | null; expected_from: string }[];
+}
+
+export interface WhatsAppStatus { enabled: boolean; missing: string[]; webhook_url: string; app_url_set: boolean; numbers: { ending: string; role: string }[]; version: string }
+
+export interface PortalDiagnosis {
+  key: string; name: string; verdict: string; page_kind?: string;
+  departments: { exact_layout: number; by_content: number };
+  tenders: { exact_layout: number; by_content: number; sample: { tender_id: string; title: string; closing: string | null; organisation: string }[] };
+  tables: { id: string; class: string; rows: number; columns: number }[];
+}

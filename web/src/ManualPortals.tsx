@@ -5,7 +5,7 @@ import { fmtDate } from './format';
 import { useLoad } from './hooks';
 import { Only } from './session';
 import { useConfirm } from './confirm';
-import type { PortalStatus } from './types';
+import type { PortalDiagnosis, PortalStatus } from './types';
 import { tr } from './i18n';
 
 const tone = (k: PortalStatus['kind']) => (k === 'ok' ? 'ok' : k === 'unknown' ? 'plain' : 'warn');
@@ -66,6 +66,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
   const list = useLoad(() => api.portals(), []);
   const [form, setForm] = useState({ name: '', state: '', base_url: '' });
   const [busy, setBusy] = useState<string | null>(null);
+  const [diag, setDiag] = useState<PortalDiagnosis | null>(null);
   const [msg, setMsg] = useState<Msg>(null);
   const portals = list.data?.portals ?? [];
   const manual = list.data?.manual ?? [];
@@ -99,6 +100,11 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
     } finally {
       setBusy(null);
     }
+  }
+
+  async function diagnose(key: string) {
+    setBusy(key); setMsg(null); setDiag(null);
+    try { setDiag(await api.diagnosePortal(key)); } catch (err) { setMsg({ tone: 'bad', text: (err as Error).message }); } finally { setBusy(null); }
   }
 
   async function remove(p: PortalStatus) {
@@ -162,12 +168,13 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
               {portals.map((p) => (
                 <tr key={p.key}>
                   <td>{p.name}{p.custom && <span className="badge plain" style={{ marginLeft: 6 }}>Added by you</span>}</td>
-                  <td><span className={`badge ${tone(p.kind)}`} title={p.detail || undefined}>{p.label}</span></td>
+                  <td><span className={`badge ${tone(p.kind)}`} title={p.detail || undefined}>{p.label}</span>{p.detail?.startsWith('Layout changed') && <span className="badge warn" style={{ marginLeft: 6 }} title={p.detail}>Layout changed: read by content</span>}</td>
                   <td>{healthLabel(p.health) ? <span className={`badge ${p.health === 'ok' ? 'ok' : 'bad'}`} title={p.health_text || undefined}>{healthLabel(p.health)}</span> : '-'}</td>
                   <td className="num">{p.kind === 'ok' ? p.departments : '-'}</td>
                   <td>{p.checked ? fmtDate(p.checked, true) : '-'}</td>
                   <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
                     <button type="button" className="btn small" onClick={() => check([p.key])} disabled={disabled}>{busy === p.key ? tr('Checking…') : 'Check'}</button>
+                    {' '}<button type="button" className="btn small" onClick={() => diagnose(p.key)} disabled={disabled} title="Shows what the reader sees on this portal's pages right now">Diagnose</button>
                     {p.custom && <> <button type="button" className="btn small" onClick={() => remove(p)} disabled={disabled}>Remove</button></>}
                   </td>
                 </tr>
@@ -178,6 +185,22 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
       </section>
 
       <CoverageProof onDone={() => { list.reload(); onChange(); }} />
+
+      {diag && (
+        <section className="card" style={{ marginBottom: 14 }}>
+          <h2>What the reader sees on {diag.name}</h2>
+          <p role="status"><strong>{diag.verdict}</strong></p>
+          <p className="small">Departments: {diag.departments.exact_layout} read by the exact layout, {diag.departments.by_content} by their contents. Tenders on its busiest department's list: {diag.tenders.exact_layout} by the exact layout, {diag.tenders.by_content} by column contents.</p>
+          {diag.tenders.sample.length > 0 && (
+            <ScrollX label="Sample of what was read">
+              <table className="tbl"><thead><tr><th>Tender ID</th><th>Title</th><th>Closes</th></tr></thead>
+                <tbody>{diag.tenders.sample.map((t) => <tr key={t.tender_id}><td>{t.tender_id}</td><td>{t.title}</td><td>{t.closing ? fmtDate(t.closing, true) : '-'}</td></tr>)}</tbody></table>
+            </ScrollX>
+          )}
+          {diag.tables.length > 0 && <p className="muted small">Tables on the page: {diag.tables.map((t) => `${t.id || t.class || 'unnamed'} (${t.rows} rows, ${t.columns} columns)`).join('; ')}.</p>}
+          <button type="button" className="btn small" onClick={() => setDiag(null)}>Close</button>
+        </section>
+      )}
 
       <PortalCatalogue onDone={() => { list.reload(); onChange(); }} />
 

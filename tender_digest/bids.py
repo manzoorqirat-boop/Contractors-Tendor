@@ -297,7 +297,7 @@ class BidBook:
                 """
             )
             have = {r["name"] for r in self.db.execute("PRAGMA table_info(bids)")}
-            for col in ("portal_facts", "portal_checked", "doc_checked", "signoff"):
+            for col in ("portal_facts", "portal_checked", "doc_checked", "signoff", "clauses"):
                 if col not in have:
                     self.db.execute(f"ALTER TABLE bids ADD COLUMN {col} TEXT")  # added after the first release
             self.db.commit()
@@ -320,7 +320,7 @@ class BidBook:
         if r is None:
             return None
         d = dict(r)
-        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked", "signoff"):
+        for f in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked", "signoff", "clauses"):
             if f in d:
                 try:
                     d[f] = json.loads(d[f]) if d[f] else None
@@ -399,7 +399,7 @@ class BidBook:
         return self.get(bid_id) or bid
 
     def set_json(self, bid_id: int, field: str, value: Any, now: datetime) -> None:
-        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked", "signoff"):
+        if field not in ("doc", "brief", "eligibility", "drafts", "corrigenda", "portal_facts", "doc_checked", "signoff", "clauses"):
             raise ValueError(field)
         with self.lock:
             self.db.execute(f"UPDATE bids SET {field} = ?, updated = ? WHERE id = ?", (json.dumps(value) if value is not None else None, _iso(now), bid_id))
@@ -602,6 +602,35 @@ class BidBook:
         s = re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower().replace("&", " and "))
         words = [w for w in s.split() if w not in {"m", "s", "ms", "pvt", "private", "ltd", "limited", "llp", "co", "company", "the", "and", "pl", "p"}]
         return " ".join(words)
+
+    def head_to_head(self) -> dict[str, dict[str, int]]:
+        """For each company that bid against you: {key: {met: tenders you both bid on, ahead: how many of those you finished ahead of them}}. Ranks decide; with no ranks the lower price does."""
+        with self.lock:
+            rows = [dict(r) for r in self.db.execute("SELECT bid_id, name, price, rank, mine FROM bid_bidders")]
+        by_bid: dict[int, builtins.list[dict]] = {}
+        for r in rows:
+            by_bid.setdefault(r["bid_id"], []).append(r)
+        out: dict[str, dict[str, int]] = {}
+        for rs in by_bid.values():
+            mine = next((r for r in rs if r["mine"]), None)
+            if not mine:
+                continue
+            for r in rs:
+                if r["mine"]:
+                    continue
+                k = self.company_key(r["name"])
+                if not k:
+                    continue
+                if mine["rank"] and r["rank"]:
+                    ahead = mine["rank"] < r["rank"]
+                elif mine["price"] and r["price"]:
+                    ahead = mine["price"] < r["price"]
+                else:
+                    continue
+                cell = out.setdefault(k, {"met": 0, "ahead": 0})
+                cell["met"] += 1
+                cell["ahead"] += 1 if ahead else 0
+        return out
 
     def competitors(self) -> builtins.list[dict]:
         """Every company that bid against you: how often, how often it won, and how far from the estimate it quotes."""
@@ -931,6 +960,12 @@ class BidBook:
             "by_department": group("department", lambda r: _dept(r["organisation"])),
             "by_size": group("size", lambda r: _band(r["value"])),
         }
+
+    def model_rows(self) -> builtins.list[dict]:
+        """Every bid with what the win model needs, including how well the AI said it fitted (when that tender is still known)."""
+        with self.lock:
+            return [dict(r) for r in self.db.execute(
+                "SELECT b.id, b.key, b.stage, b.work_type, b.organisation, b.value, b.portal, b.my_value, b.stage_changed, b.updated, s.fit AS fit FROM bids b LEFT JOIN seen s ON s.key = b.key")]
 
     def l1_outcomes(self, work_type: str | None, value: float | None) -> tuple[builtins.list[float], str]:
         with self.lock:

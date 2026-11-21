@@ -4,6 +4,7 @@ import { fromParams } from './filters';
 import { fmtDate, inr } from './format';
 import { useToast } from './ui';
 import type { Nav } from './App';
+import { DocumentEvidence } from './Clauses';
 import type { AiStatus, Brief, DocFacts, Filters, TenderDetail } from './types';
 import { tr } from './i18n';
 
@@ -71,6 +72,7 @@ function DocView({ doc }: { doc: DocFacts }) {
       <List title="Documents to submit" items={doc.documents} />
       <List title="Penalties" items={doc.penalties} />
       {doc.red_flags.length > 0 && <div className="alert warn" style={{ marginTop: 8 }}><strong>Watch out</strong><ul style={{ margin: '4px 0 0 18px', padding: 0 }}>{doc.red_flags.map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
+      <DocumentEvidence doc={doc} found={null} />
     </div>
   );
 }

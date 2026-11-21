@@ -67,6 +67,59 @@ On a bid's page, below the checklist:
 - **Bill of quantities**: load your **item catalogue** once (CSV exported from your ERP: items and rates, optionally composite activity rates, a schedule of rates such as DSR, and a location cost index). Then upload the tender's BOQ (`.xlsx`, `.xlsm`, `.xls`, `.csv` or a `.pdf` with a table). Each line is matched to your catalogue by unit, schedule code and wording, with Claude checking technical specs (concrete grade, pipe class and so on) when `ANTHROPIC_API_KEY` is set. Lines marked **Check** need your confirmation; confirming teaches the app, so the same wording matches instantly next time. The page shows your cost for the lines it could price, how much of the BOQ value that covers, and the break-even quote. Anything it cannot price is carried at the buyer's estimate and says so.
 - **Risk and margin**: Claude reads the NIT and special conditions for 12 hidden cost drivers (escalation, approved makes, retention, site lab, statutory deductions and so on) and the simulator adds them to your BOQ cost as a range, with a margin check against an expected L1 price. The percentages are planning allowances, not rules.
 
+### Price advisor and price history
+
+The **Price advisor** on a costed bid turns your cost range into a quote: for each possible quote it shows the profit left and the chance of winning, which is the share of similar past results where the lowest bidder (L1) priced at or above it. A result is one number: L1's price as a percentage above or below the buyer's estimate.
+
+What it learns from decides how good it is, so results from several places are pooled (**Bids > Results > Price history**):
+
+- your own won and lost bids (with the winning price recorded), automatically;
+- **award results you import**: paste rows from a spreadsheet or choose a CSV with at least the buyer's estimated cost and the awarded amount (department, work type, number of bidders, award date and tender ID are optional but improve the advice). Column names are matched loosely, amounts can be written `5,00,000`, `Rs. 5,00,000` or `2.5 crore`, dates are day first. A price under a third of the estimate, or over twice it, is left out as a typing error; the same tender imported twice is kept once; a tender you bid on yourself is not counted twice. Public award lists on the portals, or your own records, are good sources: the app does not fetch them itself.
+
+The estimate uses the most specific group with enough results (same department and work type, then department, size, work type, then everything) and **borrows from wider groups** when a group is thin: a group with 2 results barely moves the answer, one with 40 mostly decides it. Newer results count more (half-life two years). It is a small, explainable statistical model on purpose: with a few dozen results a neural network would only memorise noise.
+
+**It tests itself.** With 16 or more dated results, each result is predicted from the earlier ones only, and the card shows how often the real L1 fell in the predicted middle half (about 50% is right) and middle 80% (about 80% is right), and how far its middle guess was off against simply averaging everything. Treat the advice with the confidence that test supports. It is only as good as the results behind it: with fewer than 15 similar results the panel says it is a rough guide, and with fewer than 3 it shows no win chance. It does not know about things outside the numbers (a competitor who needs the work, a rate escalation clause), so it supports the decision and never makes it.
+
+### What to expect: tender volume and tenders that come round again
+
+On the Dashboard, **What to expect** says how many new civil tenders are likely in the next four weeks, and which tenders come round again about this time each year.
+
+**Why it needs its own memory.** Tenders themselves are pruned after 45 days by default, so a year of tenders does not exist to learn from. The app therefore keeps a permanent tiny record: how many new tenders were found each day per department, and a short line for every tender (kept about two years). Both fill from the day this version first runs (and are seeded from the tenders then held), so **a new installation has nothing to forecast for about six weeks, and cannot allow for the seasons for a year**; the card says so rather than guessing.
+
+**Volume.** The next four weeks are the recent weekly level (the last eight observed weeks, newest weighted most) times four, adjusted for the time of year when there is a year of history (this time last year against that year's average, believed only halfway and capped). Weeks when the app was not collecting (no successful run on at least four of the seven days) are left out, never counted as "no tenders". The range comes from how the method missed in the past. **It tests itself**: each four-week window is predicted from the weeks before it and compared with just repeating the last four weeks; the forecast is presented as reliable only when it is at least 3% better, otherwise the card says to treat it as no better than "the same as lately". On simulated histories it proves itself for steady markets (about two times in three) and rarely for steadily growing ones, which it does not model.
+
+**Coming round again.** Tenders published in the next ~75 days of last year's calendar (annual repair and maintenance works, yearly contracts) that have no look-alike from the same department in the last 120 days, matched on department and the words of the title. It needs a year of history, and it is a prompt to watch, not a promise.
+
+### Which bids to submit
+
+On the Bids page (pipeline view), **Which bids to submit** answers a cash question: every bid you submit ties up its EMD until the result, so which of the open bids deserve the free cash you have? Enter the free cash you can put into EMDs (`5,00,000` or `5 lakh`) and your margin. For each open bid (Interested or Preparing, not yet closed) it works out the expected profit, **chance of winning × the estimate × your margin**, and picks the set with the most total expected profit within the cash. This is solved exactly (a knapsack over the EMD amounts), not by a rule of thumb: for example two small EMDs that together earn more are chosen over one large one. Every bid left out says why, and the page says how much more cash would add the best one that was left out.
+
+The chance of winning comes from your win model when it has earned a score, else your overall win rate (after 10 decided bids), else an assumed 20%; each row says which. It is a rough guide: the estimate stands in for the contract value, the margin is the same for every bid, each EMD is assumed to come back, the cash is one pool, and a bid with no EMD on record is counted as needing none (and flagged). It cannot know your capacity, your relationships or strategy. For administrators and bidders only (it shows cash figures).
+
+### Who usually wins here
+
+On a bid's Decide tab, **Who usually wins here** lists the companies that have won tenders like this one (same department and kind of work, widening to the department, the kind of work, then everything when there are fewer than five): their wins and share, the price they usually win at against the estimate (the middle of their winning prices, so one odd price does not bend it), when they last won, and how you have fared against them in your own bids (tenders you both bid on, and how often you finished ahead; ranks decide, or the lower price when there are none). Company names are matched across spellings (M/s Rao Infra Pvt. Ltd. and RAO INFRA PRIVATE LIMITED are one).
+
+It is built from two sources: the bidder lists on your own bids (the bidder ranked first won), and award results you import that name the winner (a column such as *Awarded to*, *Winner*, *Successful bidder* or *Name of contractor* in the Price history import). A tender you bid on and also imported is counted once. Fewer than three winners on record shows no pattern. When 60% or more of the awards went to three firms the page says so, and says what it can and cannot mean: it reports who won, never why.
+
+### Win chance
+
+On a bid's Decide tab (and in Bids > Results) the app can show the chance of winning, learned from **your own won and lost bids**. It is a small, explainable model on purpose: each feature of a bid (work type, department, size, portal, how well the AI said it fitted you, how you priced against the estimate) has a win rate among your past bids, pulled towards your overall win rate in proportion to how few bids it rests on, then combined and damped so overlapping features are not counted twice. The page lists what moved the number ("Department PWD: you won 38 of 43 such bids, which raises it").
+
+**A score is shown only when it has been earned.** It needs 40 decided bids. Then, for each past bid in date order, the model predicts from the bids before it, and the score appears only if those predictions beat simply guessing your overall win rate (Brier score at most 95% of the baseline's). If they do not, the page says your history does not yet show what makes you win and shows no number. On simulated histories with a real difference between departments, the model earns its score about 40% of the time with 40 bids, 55% with 60 and 65% with 100; on histories where nothing matters it wrongly earns one about 12%, 4% and 1% of the time. So a shown score is probably real but not guaranteed, and a missing one means "cannot tell yet", not "no pattern".
+
+It cannot know who else is bidding or what the department wants this year, and it only sees the bids you chose to make. Use it as a hint, never as the decision.
+
+### Reading tender documents you can check
+
+A wrong EMD or completion period costs money, so the document tools are built so that every claim can be checked in a second:
+
+- **Conditions found in the text** (Bid > Checklist > *Find conditions in the tender text*, no AI and no API key needed): fixed rules find the earnest money, bid validity, completion period, defect liability period, performance security, retention, liquidated damages (rate and cap), similar-work and turnover requirements, mobilisation advance, and whether price variation is allowed. Each is shown with **the sentence it came from**. A condition the text does not state is not listed (nothing is guessed), and a fixed-price contract is flagged as a risk. Paste the text or choose a PDF; a scanned PDF has no text layer, and the page says so.
+- **The AI reading is checked against the document.** When the AI assistant reads a tender document it must quote the words behind each requirement, penalty and red flag. The app then looks for each quote in the document's own text (read locally from a PDF's text layer) and marks it *found in the document* or *not found word for word: check the document*. A quote that is not really there is the sign of a paraphrase or a mistake. A scanned PDF cannot be checked and is marked *not checked*, never *verified*.
+- **Corrigenda** (Bid > Decide > *Record a corrigendum* > *Read it for me*): paste the corrigendum or choose its PDF. The fixed rules list the conditions that differ from the tender's (earlier found with *Find conditions*) or are new, with their sentences; with the AI assistant on it also lists every change with its impact (price, who can bid, dates, documents), what to do, and the new closing date, each change with a checked quote. *Use this as the note* fills in the record form; nothing is recorded or moved until a person presses Record.
+
+The quote check is only as strong as the text it checks against; it proves the words exist in the document, not that the AI understood them. It catches invented and paraphrased quotes, not a correct quote read wrongly.
+
 The BOQ data is stored in `boq.db` next to the main database (set `BOQ_DB_PATH` to change it). **PDF BOQs** are read by rules (the first 80 pages; repeated headers on later pages are dropped) and always flagged for checking; a scan or an unusual layout goes to Claude when `ANTHROPIC_API_KEY` is set, otherwise the app asks for the Excel file. **Lump-sum lines** and items outside the catalogue can't be priced from rates, so each line has an **Enter cost** box: your figure for that line is used in the cost, coverage and break-even.
 
 **Fetch from portal** on a bid also brings in the BOQ and the risks, when the portal gives them without a login: it finds the BOQ file among the tender's documents (a spreadsheet, or a document named BOQ, Bill of Quantities or Price Bid), loads and matches it, and has Claude read the tender notice for risks (once; the notice is kept so you can read it again later without uploading). A BOQ you already loaded is never replaced by a fetch. If the portal asks for a login, OTP or captcha, the app says so and stops: it never tries to get past them. Fetching is per bid and on request, with a pause between requests, not a bulk crawl of every tender.
@@ -123,6 +176,18 @@ A portal can fail without any error: the site moves, refuses this server, or cha
 | **Not read lately** | The daily run has not read it for 3 days. |
 
 One failed read is only noted, since portals have bad days. A portal that never worked and needs a captcha, login or OTP is on the *check by hand* list, not here. Problems show as a red notice on the Dashboard, in the **Is it working?** column of Settings > Portals, in the daily email (and a day with a problem is never sent as "quiet"), and as the webhook events **`portal.unhealthy`** and **`portal.recovered`**, sent once per change (checked hourly), not every hour. `GET /api/portal-health` gives the same. The thresholds are constants at the top of `tender_digest/health.py`.
+
+### When a portal changes its page: reading by content
+
+Portals are redesigned without notice. A reader that expects "the table with this id, tenders in columns 1 to 5" then finds nothing, and the portal looks quiet. Most changes are small (a column added or moved, a different date format, a renamed table), and the data is all still there, so when the exact layout finds nothing the reader now works out what each column **is** from what it contains:
+
+- a **date column** is one whose cells parse as dates (in the usual Indian formats); of the date columns, a header such as "Closing Date" decides which is which, otherwise the earliest dates are the publish dates, then closing, then opening;
+- the **title column** is the one that carries the bracketed `[title] [reference] [tender id]` text, or a tender-ID-looking code; the **organisation** is the longest remaining text;
+- a **department list** is a table of rows that each carry a link and a number.
+
+It does not guess tenders into existence: a row needs real dates and a tender ID, and a table with none gives nothing. It also catches the quiet failure where the exact layout still "works" but reads the wrong columns: when most rows close before they were published, the columns are swapped, and the by-content reading is used instead. When it is used, the run notes it (**Layout changed: read by content** in Settings > Portals, with what it did), the portal stays healthy, and it keeps being read. **Settings > Portals > Diagnose** (administrators) looks at the portal's pages right now and says what the reader can and cannot make of them: the tables found, the tenders read by each method, a sample, and a verdict in words, so that a page the fallback cannot read can be reported with a sample (*Download a sample*) and corrected.
+
+This is deliberately not "an AI rewrites the reader": generated code is never run. It handles layout changes of the kinds above, not a portal that moves to a different technology, hides lists behind scripts, or adds a captcha; for those the health check still flags the portal and Diagnose explains what is on the page. Tested against the real saved portal page and altered copies of it (renamed table, columns added or swapped, other date formats, titles without brackets, nested tables), not against live portals.
 
 ### Coverage proof: which portals this installation can really read
 
@@ -273,6 +338,31 @@ With SSO, people sign in with the company's own account (Google Workspace, Micro
 3. The first sign-in of a person creates their account with `SSO_DEFAULT_ROLE`; an existing account with the same email address is linked instead of duplicated. An administrator changes roles in Settings > People, and switching a person off keeps them out even though the provider still signs them in. SSO accounts have no local password.
 
 How it is checked: authorization-code flow with PKCE, the one-time state and nonce, the ID token's signature against the provider's published keys (RS256 or ES256 only; `none` and shared-secret algorithms are refused), and its issuer, audience and expiry. Only email addresses the provider marks as verified, at an allowed domain, get in. The owner login (`APP_USERNAME`/`APP_PASSWORD`) keeps working, so a provider outage or a wrong setting never locks everyone out. Tested against a fake provider (all the ways a token can be wrong) and in a real browser round trip; **not yet tried against Google, Microsoft or Okta themselves**.
+
+## WhatsApp assistant
+
+Ask the app a question from your phone and get the answer in the chat. Send **closing** (tenders closing in 3 days), **new** (found since yesterday), **bids** (your bids in progress), **deadlines** (what is coming up on your bids), **find drain nashik** (a search), **bid 2026_PWD_123** (how one bid stands) or **cash** (money locked in EMDs: bidders and administrators only). With the AI assistant on, a plain question ("any drain tenders near Nashik this week?") is turned into a search. It **only reads**: nothing a message says can change a bid, a setting or any data.
+
+It uses Meta's WhatsApp Business Cloud API. Meta calls `https://<your site>/api/whatsapp/webhook` for each message to your business number. The app accepts a call only if it is signed with your **app secret** (anything else is refused), answers only numbers you have **listed** (any other number gets no reply at all), ignores a message Meta resends, and drops a number that sends more than 20 messages in 10 minutes. Cash figures need a number listed as `bidder` or `admin`, like the same figures in the app. Settings > Integrations shows whether it is set up; the numbers appear only as their last four digits.
+
+**Set up**
+1. At developers.facebook.com create an app of type *Business* and add the **WhatsApp** product. Note the **Phone number ID** of your business number (Meta gives a test number to start with) and, under App settings > Basic, the **App secret**.
+2. Create a permanent access token (a *system user* with the whatsapp_business_messaging permission).
+3. Set these variables on the service and restart:
+
+   | Variable | Purpose |
+   |---|---|
+   | `WHATSAPP_VERIFY_TOKEN` | A phrase you choose; Meta sends it when you register the webhook. |
+   | `WHATSAPP_APP_SECRET` | The app secret. Secret. |
+   | `WHATSAPP_ACCESS_TOKEN` | The permanent token, for sending replies. Secret. |
+   | `WHATSAPP_PHONE_NUMBER_ID` | The business number's id. |
+   | `WHATSAPP_ALLOWED` | Who may ask, `country code first, no +`, with a role: `919876543210:bidder,919812345678:viewer`. A number with no role is a viewer. |
+   | `WHATSAPP_API_VERSION` | Optional, default `v21.0`. |
+
+4. In the Meta app, WhatsApp > Configuration: set the callback URL to `https://<your site>/api/whatsapp/webhook` and the verify token to yours, then subscribe to the **messages** field. Set `APP_URL` so Settings shows the full address.
+5. From a listed phone, send *help* to the business number.
+
+**Be aware.** This has been built to Meta's documented message formats and signature rules and tested with stand-ins (signed sample messages, a fake sender); it has **not been tested against a live WhatsApp account**, so try it with your own number before telling anyone it works. Replies are sent inside the 24 hours after the person's own message, which Meta allows as free-form text; the app never starts a conversation. Meta's own pricing and business-verification rules apply and can change. WhatsApp messages are not end-to-end private from Meta once they reach the business API, so the answers include tender titles and values but never papers from the Vault.
 
 ## Security
 

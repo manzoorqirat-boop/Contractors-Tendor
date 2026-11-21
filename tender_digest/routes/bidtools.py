@@ -5,10 +5,11 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from .. import letters, pack
+from .. import ai, clauses, letters, pack, pdftext
 from ..api_common import (
     Corrigendum,
     LetterFill,
+    SourceBody,
     TemplateBody,
     TemplateRestore,
 )
@@ -21,14 +22,17 @@ from .context import Ctx
 def register(app: FastAPI, ctx: Ctx) -> None:
     """Adds this area's routes to the app. The code is the part of create_app that used to sit here, unchanged."""
     auth = ctx.auth
+    bid_as_tender = ctx.bid_as_tender
     bid_error = ctx.bid_error
     bid_full = ctx.bid_full
     bid_or_404 = ctx.bid_or_404
+    ai_call = ctx.ai_call
     bids = ctx.bids
     company_facts = ctx.company_facts
     letter_book = ctx.letter_book
     now = ctx.now
     portal_names = ctx.portal_names
+    run_job = ctx.run_job
     shape = ctx.shape
     store = ctx.store
 
@@ -138,3 +142,40 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         except BidError as e:
             raise bid_error(e) from None
         return bid_full(bid_or_404(bid_id))
+
+    def source_text(body: SourceBody) -> str:
+        text = body.text if body.text.strip() else pdftext.extract(body.pdf_base64)
+        if not text.strip() and not body.pdf_base64:
+            raise HTTPException(422, "Paste the text or choose a PDF first")
+        return text
+
+    @app.post("/api/bids/{bid_id}/clauses", dependencies=auth)
+    def bid_clauses(bid_id: int, body: SourceBody) -> dict:
+        """The conditions that decide a tender (earnest money, completion period, liquidated damages and so on), found by fixed rules, each with the sentence it came from.
+        No AI and no API key. They are saved with the bid, so a later corrigendum can be compared with them."""
+        bid_or_404(bid_id)
+        text = source_text(body)
+        found = clauses.find(text)
+        bids.set_json(bid_id, "clauses", {"clauses": found, "source_checked": len(text.strip()) >= 200, "at": now().isoformat(timespec="seconds")}, now())   # kept apart from the AI reading, so it never clears a person's "checked" mark on that
+        note = "" if text.strip() else "This PDF has no text layer (it is a scan), so nothing could be read from it here. Paste the text, or use the AI reading, which can read scans."
+        return {"clauses": found, "chars": len(text), "note": note}
+
+    @app.post("/api/bids/{bid_id}/corrigenda/read", dependencies=auth)
+    def bid_corrigendum_read(bid_id: int, body: SourceBody):
+        """Reads a corrigendum: what it changes. The rules compare its clauses with the tender's (no AI needed); with an API key the AI also lists every change with its impact
+        and a suggested action. Nothing is recorded: the page offers to record it."""
+        return run_job("bid-corrigendum", str(bid_id), lambda: do_corrigendum_read(bid_id, body))
+
+    def do_corrigendum_read(bid_id: int, body: SourceBody) -> dict:
+        bid = bid_or_404(bid_id)
+        text = source_text(body)
+        doc = bid.get("doc") or {}
+        found = clauses.find(text)
+        known = (bid.get("clauses") or {}).get("clauses") or doc.get("clauses") or []
+        out: dict = {"rules": clauses.changes(known, found), "clauses": found, "ai": None, "ai_error": "", "has_text": bool(text.strip()), "had_document": bool(known)}
+        if ai.configured():
+            try:
+                out["ai"] = ai_call(ai.read_corrigendum, bid_as_tender(bid), doc, body.text, body.pdf_base64)
+            except HTTPException as e:
+                out["ai_error"] = str(e.detail)
+        return out

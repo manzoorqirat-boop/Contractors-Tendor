@@ -1,5 +1,5 @@
 import { toParams } from './filters';
-import type { CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
+import type { PortalDiagnosis, WhatsAppStatus, Forecast, Plan, Rivals, WinChance, Clause, CorrigendumRead, Backtest, MarketImport, MarketSummary, CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public needCode = false) { super(message); }
@@ -107,6 +107,10 @@ export const api = {
   removeLogo: () => call<{ ok: boolean; removed: boolean; logo_url: null }>('/api/settings/logo', { method: 'DELETE' }),
   portals: () => call<{ portals: PortalStatus[]; manual: PortalStatus[] }>('/api/portals'),
   portalHealth: () => call<{ items: PortalHealth[]; problems: PortalHealth[] }>('/api/portal-health'),
+  marketResults: () => call<MarketSummary>('/api/market-results?limit=20'),
+  marketImport: (text: string) => call<MarketImport>('/api/market-results/import', { method: 'POST', body: JSON.stringify({ text }) }),
+  marketClear: (source: 'import' | 'manual') => call<{ removed: number }>(`/api/market-results?source=${source}`, { method: 'DELETE' }),
+  marketBacktest: () => call<Backtest>('/api/market-results/backtest'),
   portalCoverage: () => call<CoverageReport>('/api/portals/coverage'),
   testPortalCoverage: (key: string) => call<{ key: string; verdict: string }>(`/api/portals/${encodeURIComponent(key)}/coverage`, { method: 'POST' }),
   addPortal: (p: NewPortal) => call<PortalStatus>('/api/portals', { method: 'POST', body: JSON.stringify(p) }),
@@ -199,6 +203,15 @@ export const api = {
   deleteTemplate: (id: number) => call<{ removed: number }>(`/api/letter-templates/${id}`, { method: 'DELETE' }),
   fillLetter: (bidId: number, template_id: number) => call<FilledLetter>(`/api/bids/${bidId}/letter`, { method: 'POST', body: JSON.stringify({ template_id }) }),
   compareTenders: (keys: string[]) => call<{ tenders: CompareTender[] }>(`/api/tenders/compare?${keys.map((k) => `keys=${encodeURIComponent(k)}`).join('&')}`),
+  findClauses: (bidId: number, text: string, pdf_base64: string) => call<{ clauses: Clause[]; chars: number; note: string }>(`/api/bids/${bidId}/clauses`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  readCorrigendum: (bidId: number, text: string, pdf_base64: string) => job<CorrigendumRead>(`/api/bids/${bidId}/corrigenda/read`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
+  diagnosePortal: (key: string) => call<PortalDiagnosis>(`/api/portals/${encodeURIComponent(key)}/diagnose`),
+  whatsappStatus: () => call<WhatsAppStatus>('/api/whatsapp/status'),
+  forecast: () => call<Forecast>('/api/forecast'),
+  plan: (budget: number | null, margin: number) => call<Plan>(`/api/plan?margin=${margin}${budget === null ? '' : `&budget=${budget}`}`),
+  rivals: (bidId: number) => call<Rivals>(`/api/bids/${bidId}/rivals`),
+  winChance: (bidId: number) => call<WinChance>(`/api/bids/${bidId}/win-chance`),
+  winModel: () => call<WinChance>('/api/win-model'),
   recordCorrigendum: (bidId: number, note: string, closing: string) => call<BidDetail>(`/api/bids/${bidId}/corrigenda`, { method: 'POST', body: JSON.stringify({ note, closing: closing || null }) }),
   testEmail: () => call<{ sent_to: number }>('/api/settings/test-email', { method: 'POST' }),
 };

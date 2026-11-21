@@ -210,6 +210,9 @@ class SeenStore:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, at TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'run',
                   kind TEXT NOT NULL, departments INTEGER NOT NULL DEFAULT 0, tenders INTEGER NOT NULL DEFAULT 0);
                 CREATE INDEX IF NOT EXISTS portal_history_key ON portal_history (key, id);
+                CREATE TABLE IF NOT EXISTS flow (day TEXT NOT NULL, portal TEXT NOT NULL, dept TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, portal, dept));
+                CREATE TABLE IF NOT EXISTS memory (key TEXT PRIMARY KEY, day TEXT NOT NULL, portal TEXT NOT NULL, dept TEXT NOT NULL, title TEXT NOT NULL, value REAL);
+                CREATE INDEX IF NOT EXISTS memory_day ON memory (day);
                 CREATE TABLE IF NOT EXISTS brand_logo (id INTEGER PRIMARY KEY CHECK (id = 1), mime TEXT NOT NULL, data BLOB NOT NULL, updated TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS portal_coverage (key TEXT PRIMARY KEY, checked TEXT NOT NULL, result TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS portal_health (key TEXT PRIMARY KEY, state TEXT NOT NULL, since TEXT NOT NULL);
@@ -229,6 +232,7 @@ class SeenStore:
                     added = True
             if added:
                 self._backfill()
+            self._backfill_history()
             self.db.execute("CREATE INDEX IF NOT EXISTS seen_civil_closing ON seen (civil, closing)")
             self.db.execute("CREATE INDEX IF NOT EXISTS seen_portal ON seen (portal)")
             self.db.execute("CREATE INDEX IF NOT EXISTS seen_first_seen ON seen (first_seen)")
@@ -297,6 +301,8 @@ class SeenStore:
 
     def keep(self, t: Tender, now: datetime) -> None:
         with self.lock:
+            was = self.db.execute("SELECT civil FROM seen WHERE key = ?", (t.key,)).fetchone()
+            first_time = was is None or not was["civil"]
             self.db.execute(
                 "INSERT INTO seen (key, first_seen, civil, closing, payload, portal, tender_id, published, value, emd, category, location, organisation, title, description) "
                 "VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -306,7 +312,48 @@ class SeenStore:
                 (t.key, _iso(now), _iso(t.closing), _to_json(t), t.portal, t.tender_id, _iso(t.published), t.value, t.emd,
                  t.category, t.location, t.organisation, t.title, t.description),
             )
+            if first_time:
+                self._remember(t, now)
             self.db.commit()
+
+    # ---- long memory: how many tenders arrive, and what was tendered, kept long after the tenders themselves are pruned ----------------------
+
+    DEPT_SQL = "trim(substr(COALESCE(organisation, ''), 1, instr(COALESCE(organisation, '') || '||', '||') - 1))"
+    MEMORY_DAYS = 800
+
+    def _backfill_history(self) -> None:
+        """The first time the long memory exists, fills it from the tenders still held (about the last 45 days), so a forecast does not start from nothing."""
+        if self.db.execute("SELECT 1 FROM flow LIMIT 1").fetchone() or self.db.execute("SELECT 1 FROM memory LIMIT 1").fetchone():
+            return
+        self.db.execute(f"INSERT OR IGNORE INTO flow (day, portal, dept, n) SELECT substr(first_seen, 1, 10), COALESCE(portal, ''), substr({self.DEPT_SQL}, 1, 120), COUNT(*) "
+                        "FROM seen WHERE civil = 1 GROUP BY 1, 2, 3")
+        self.db.execute(f"INSERT OR IGNORE INTO memory (key, day, portal, dept, title, value) SELECT key, substr(first_seen, 1, 10), COALESCE(portal, ''), substr({self.DEPT_SQL}, 1, 120), "
+                        "substr(COALESCE(NULLIF(description, ''), title, ''), 1, 200), value FROM seen WHERE civil = 1")
+
+    def _remember(self, t: Tender, now: datetime) -> None:
+        dept = (t.organisation or "").split("||")[0].strip()[:120]
+        day = now.date().isoformat()
+        self.db.execute("INSERT INTO flow (day, portal, dept, n) VALUES (?, ?, ?, 1) ON CONFLICT(day, portal, dept) DO UPDATE SET n = n + 1", (day, t.portal or "", dept))
+        self.db.execute("INSERT OR IGNORE INTO memory (key, day, portal, dept, title, value) VALUES (?, ?, ?, ?, ?, ?)", (t.key, day, t.portal or "", dept, (t.description or t.title or "")[:200], t.value))
+
+    def flow_rows(self, since_day: str) -> list[dict[str, Any]]:
+        """[{day, dept, n}]: new civil tenders found each day per department (all portals together) since `since_day`."""
+        with self.lock:
+            return [dict(r) for r in self.db.execute("SELECT day, dept, SUM(n) AS n FROM flow WHERE day >= ? AND portal NOT IN ('sample', 'manual') GROUP BY day, dept", (since_day,))]
+
+    def memory_rows(self, from_day: str, to_day: str) -> list[dict[str, Any]]:
+        with self.lock:
+            return [dict(r) for r in self.db.execute("SELECT key, day, portal, dept, title, value FROM memory WHERE day >= ? AND day <= ? AND portal NOT IN ('sample', 'manual')", (from_day, to_day))]
+
+    def first_flow_day(self) -> str | None:
+        with self.lock:
+            r = self.db.execute("SELECT MIN(day) AS d FROM flow WHERE portal NOT IN ('sample', 'manual')").fetchone()
+            return r["d"] if r and r["d"] else None
+
+    def run_days(self, since_day: str) -> set[str]:
+        """The days on which a run finished well: a day with none is a day the app was not collecting, which must not count as "no tenders"."""
+        with self.lock:
+            return {r["d"] for r in self.db.execute("SELECT DISTINCT substr(started, 1, 10) AS d FROM runs WHERE status = 'ok' AND substr(started, 1, 10) >= ?", (since_day,))}
 
     def tender_object(self, key: str) -> Tender | None:
         with self.lock:
@@ -366,6 +413,7 @@ class SeenStore:
             self.db.execute("DELETE FROM seen WHERE first_seen < ? AND (closing IS NULL OR closing < ?) AND key NOT IN (SELECT key FROM starred)",
                             (_iso(now - timedelta(days=keep_days)), _iso(now)))
             self.db.execute("DELETE FROM hidden WHERE key NOT IN (SELECT key FROM seen)")
+            self.db.execute("DELETE FROM memory WHERE day < ?", ((now - timedelta(days=self.MEMORY_DAYS)).date().isoformat(),))
             self.db.commit()
 
     # ---- tenders you are not interested in ------------------------------------------------------------------------

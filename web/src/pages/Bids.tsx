@@ -9,6 +9,11 @@ import { useLoad, useServerNow } from '../hooks';
 import { BidProgress } from '../BidProgress';
 import { AssigneeSelect, MyWork, TeamTab } from '../Team';
 import { BiddersCard, CompetitorsCard } from '../Bidders';
+import { PriceHistoryCard } from '../PriceHistory';
+import { DocumentEvidence } from '../Clauses';
+import { WinChanceCard } from '../WinChance';
+import { RivalsCard } from '../Rivals';
+import { PlanCard } from '../Plan';
 import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
 import { useKeepActiveVisible } from '../Tabs';
@@ -16,7 +21,7 @@ import { Skeleton, useToast } from '../ui';
 import { Only, ReadOnly, useSession } from '../session';
 import { MoneyTab } from '../Money';
 import { useConfirm } from '../confirm';
-import type { AppConfig, BidAlert, BidDetail, BidItem, BidStats, BidSummary, MatchStatus, Stage, StatGroup, VaultDoc } from '../types';
+import type { AppConfig, BidAlert, Clause, BidDetail, BidItem, BidStats, BidSummary, MatchStatus, Stage, StatGroup, VaultDoc } from '../types';
 import { tr } from '../i18n';
 
 type WsTab = 'decide' | 'checklist' | 'price' | 'money' | 'letters' | 'result' | 'team';
@@ -71,6 +76,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
       {mode === 'results' ? <Results /> : (
         <>
           <MyWork onOpen={onOpen} />
+          <PlanCard />
           {(alerts.data?.alerts.length ?? 0) > 0 && (
             <section className="card" style={{ marginBottom: 14 }}>
               <h2>{tr('Coming up')}</h2>
@@ -160,6 +166,8 @@ function Results() {
         <div className="kpi"><div className="label">{tr('Your price vs the winner')}</div><div className="num">{data.avg_gap_to_l1 === null ? '-' : `${data.avg_gap_to_l1 > 0 ? '+' : ''}${data.avg_gap_to_l1}%`}</div><div className="note">{data.gap_samples ? `average over ${plural(data.gap_samples, 'lost bid')}` : 'Add the winning price on lost bids'}</div></div>
       </div>
       {decided === 0 && <div className="card empty">Mark a bid <strong>{tr('Won')}</strong> or <strong>{tr('Lost')}</strong> and add the prices on its page. Your record builds up here, and shows on similar tenders.</div>}
+      <WinChanceCard />
+      <PriceHistoryCard />
       <CompetitorsCard />
       <GroupTable title={tr('By work type')} rows={data.by_work_type} />
       <GroupTable title={tr('By department')} rows={data.by_department} />
@@ -315,6 +323,8 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       {tab === 'money' && can('bidder') && <MoneyTab bidId={bid.id} />}
       {tab === 'decide' && (
         <>
+          <WinChanceCard bidId={bid.id} />
+          <RivalsCard bidId={bid.id} />
           <EligibilityCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />
           {bid.brief && <section className="card" style={{ marginBottom: 14 }}><h2>{tr('Bid / no-bid brief')}</h2><BriefView b={bid.brief} /></section>}
           {!ai?.configured && !bid.eligibility && !bid.brief && <div className="card empty">Eligibility checks and bid / no-bid briefs need the AI assistant. Until it is on, use the checklist to record the conditions yourself.</div>}
@@ -391,6 +401,7 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
   const [text, setText] = useState('');
   const [kind, setKind] = useState('task');
   const [showDoc, setShowDoc] = useState(false);
+  const [found, setFound] = useState<Clause[] | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [paste, setPaste] = useState('');
   const [busy, setBusy] = useState(false);
@@ -434,6 +445,15 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
       onChange();
     } catch (e) { setNote((e as Error).message); } finally { setFetching(false); }
   }
+  async function findClauses() {
+    setBusy(true);
+    try {
+      const r = await api.findClauses(bid.id, file ? '' : paste, file ? await readBase64(file) : '');
+      setFound(r.clauses);
+      toast(r.clauses.length ? `Found ${plural(r.clauses.length, 'condition')}` : (r.note || 'No conditions found in that text'));
+      onChange();
+    } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
+  }
   async function readDoc() {
     setBusy(true);
     try {
@@ -451,7 +471,7 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
           {!bid.manual && <button className="btn small primary" onClick={fetchPortal} disabled={fetching}>{fetching ? tr('Fetching…') : tr('Fetch from portal')}</button>}
           <button className="btn small" onClick={fromDoc}>{tr('Add standard steps')}</button>
           <Only role="bidder"><a className="btn small" href={api.packUrl(bid.id)} download title="One zip of the Vault papers this checklist needs, in order, with an index of what is missing">{tr('Download bid pack')}</a></Only>
-          {aiOn && <button className="btn small" onClick={() => setShowDoc((v) => !v)} aria-expanded={showDoc}>{bid.doc ? tr('Read another document') : tr('Read tender document')}</button>}
+          <button className="btn small" onClick={() => setShowDoc((v) => !v)} aria-expanded={showDoc}>{aiOn ? (bid.doc ? tr('Read another document') : tr('Read tender document')) : tr('Find conditions in the tender text')}</button>
         </div>
       </div>
       <div className="progress" style={{ marginBottom: 12 }} aria-hidden><span style={{ width: `${pct}%` }} /></div>
@@ -466,9 +486,13 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
         <div className="ai-doc">
           <label className="field">{tr('Upload the tender PDF (up to 10 MB)')}<input type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
           <label className="field">{tr('Or paste the text')}<textarea value={paste} onChange={(e) => setPaste(e.target.value)} disabled={!!file} spellCheck={false} /></label>
-          <button className="btn primary" onClick={readDoc} disabled={busy || (!file && !paste.trim())}>{busy ? tr('Reading document…') : tr('Read and add to checklist')}</button>
+          <div className="head-actions">
+            {aiOn && <button className="btn primary" onClick={readDoc} disabled={busy || (!file && !paste.trim())}>{busy ? tr('Reading document…') : tr('Read and add to checklist')}</button>}
+            <button className={aiOn ? 'btn' : 'btn primary'} onClick={findClauses} disabled={busy || (!file && !paste.trim())} title="Fixed rules, no AI: each condition is quoted from the text">{tr('Find conditions (no AI)')}</button>
+          </div>
         </div>
       )}
+      <DocumentEvidence doc={bid.doc ?? null} found={found ?? bid.clauses?.clauses ?? null} />
       {groups.map(([k, title]) => {
         const rows = items.filter((i) => i.kind === k);
         if (!rows.length) return null;

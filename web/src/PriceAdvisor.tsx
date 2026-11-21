@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
-import { inr, plural } from './format';
+import { inr } from './format';
 import { Skeleton, useToast } from './ui';
 import type { Advice } from './types';
 
@@ -102,7 +102,9 @@ export function PriceAdvisor({ bidId, onUse }: { bidId: number; onUse: (price: n
       {adv.my_value ? <p className="muted small" style={{ marginTop: 8 }}>Your recorded quoted price is {inr(adv.my_value, false)}.</p> : null}
 
       <p className="muted small" style={{ marginTop: 10 }}>
-        {adv.samples >= 3 ? <>Win chance is the share of {plural(adv.samples, 'past result')} ({adv.basis}) where the lowest bidder priced at or above this quote: {CONF[adv.confidence]}.</> : 'No win chance yet: there are fewer than 3 recorded results.'}
+        {adv.samples >= 3
+          ? <>Based on {adv.basis}: {CONF[adv.confidence]}. {adv.quantiles?.p50 !== undefined && <>Lowest bidders on similar tenders usually priced between <strong>{sgn(adv.quantiles.p25)}</strong> and <strong>{sgn(adv.quantiles.p75)}</strong> against the estimate (the middle half; the middle is {sgn(adv.quantiles.p50)}). </>}Win chance is the share of those where the lowest bidder priced at or above this quote; groups with few results borrow from wider ones. Add more results on the Bids page, Results view, under Price history.</>
+          : 'No win chance yet: there are fewer than 3 recorded results. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.'}
       </p>
       {adv.notes.length > 0 && <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>{adv.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
     </section>

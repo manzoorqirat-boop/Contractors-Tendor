@@ -278,6 +278,11 @@ class Corrigendum(BaseModel):
     closing: str | None = Field(default=None, max_length=20)
 
 
+class SourceBody(BaseModel):
+    text: str = ""
+    pdf_base64: str = ""
+
+
 class DocChecked(BaseModel):
     checked: bool
 

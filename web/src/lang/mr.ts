@@ -477,4 +477,6 @@ export const MR: Record<string, string> = {
   "With closing date": "बंद होण्याची तारीख असलेल्या",
   "Tested": "तपासले",
   "Switched off": "बंद",
+  "Find conditions in the tender text": "निविदा मजकुरातील अटी शोधा",
+  "Find conditions (no AI)": "अटी शोधा (AI शिवाय)",
 };

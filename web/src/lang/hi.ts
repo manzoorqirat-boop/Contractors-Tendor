@@ -477,4 +477,6 @@ export const HI: Record<string, string> = {
   "With closing date": "समापन तिथि सहित",
   "Tested": "जाँचा गया",
   "Switched off": "बंद",
+  "Find conditions in the tender text": "निविदा के पाठ में शर्तें खोजें",
+  "Find conditions (no AI)": "शर्तें खोजें (बिना AI)",
 };

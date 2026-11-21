@@ -31,7 +31,9 @@ def confidence(n: int) -> str:
 
 
 def advise(cost_low: float, cost_high: float, estimate: float, outcomes: list[float], min_margin_pct: float = 3.0,
-           target_margin_pct: float = 8.0, basis: str = "") -> dict[str, Any]:
+           target_margin_pct: float = 8.0, basis: str = "", samples: int | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """`samples` is how many real results stand behind `outcomes` when the outcomes are a smoothed or blended picture of them (then there are more
+    outcomes than results); by default each outcome is one result. `extra` is added to the answer as it is."""
     if not (0 < cost_low <= cost_high):
         raise ValueError("Costs must be above zero, and the high cost cannot be below the low cost.")
     if estimate <= 0:
@@ -39,6 +41,8 @@ def advise(cost_low: float, cost_high: float, estimate: float, outcomes: list[fl
     if not (0 <= min_margin_pct < target_margin_pct < 50):
         raise ValueError("Margins must satisfy 0 <= minimum < target < 50 (per cent of the price).")
     outcomes = sorted(o for o in outcomes if o == o and -90 < o < 200)
+    if samples is not None and samples < MIN_SAMPLES:
+        outcomes = []
     cost_mid = (cost_low + cost_high) / 2
 
     def pct_of(price: float) -> float:
@@ -62,7 +66,7 @@ def advise(cost_low: float, cost_high: float, estimate: float, outcomes: list[fl
                        "win": win, "expected": round(win / 100 * (price - cost_mid), 2) if win is not None else None})
         q += step
 
-    n = len(outcomes)
+    n = len(outcomes) if samples is None else (samples if outcomes else 0)
     safe = [p for p in points if p["pct"] >= floor_pct - 1e-9]
     if n >= MIN_SAMPLES and safe:
         best_point = max(safe, key=lambda p: (p["expected"] or 0, p["pct"]))
@@ -89,4 +93,4 @@ def advise(cost_low: float, cost_high: float, estimate: float, outcomes: list[fl
     return {"estimate": round(estimate, 2), "cost_low": round(cost_low, 2), "cost_high": round(cost_high, 2),
             "floor_pct": round(floor_pct, 2), "target_pct": round(target_pct, 2), "recommended_pct": recommended,
             "samples": n, "confidence": confidence(n), "basis": basis, "points": points, "notes": notes,
-            "min_margin": min_margin_pct, "target_margin": target_margin_pct}
+            "min_margin": min_margin_pct, "target_margin": target_margin_pct, **(extra or {})}
