@@ -145,7 +145,7 @@ def site(*, mail=True, prove=True, encryption_key=None, monkeypatch=None, health
                    state_path=":memory:", request_delay=0)
     app = web.create_app(web.AppConfig(PASSWORD, "s3cret", cookie_secure=False, run_scheduler=False, username="admin"), env, store, RunManager(env, store, background=False))
     client = TestClient(app)
-    now = datetime(2026, 11, 17, 9, 0)
+    now = datetime.now()                                  # the app judges "not read for 3 days" by the real clock, so a fixed date would go stale
     if prove:
         ts = [Tender("maha", f"T{i}", "Road", "", "PWD", datetime(2026, 11, 10), datetime(2026, 11, 30), None, detail_path="/d") for i in range(5)]
 
