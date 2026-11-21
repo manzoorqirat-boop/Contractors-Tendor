@@ -18,7 +18,19 @@ export interface Tender {
   priority?: number | null; priority_note?: string | null;
 }
 export interface Brief { recommendation: 'Bid' | 'Maybe' | 'No bid'; headline: string; reasons: string[]; risks: string[]; checks: string[] }
-export interface DocFacts { summary: string; requirements: string[]; financial: { label: string; value: string }[]; dates: { label: string; value: string }[]; documents: string[]; penalties: string[]; red_flags: string[] }
+export interface Clause { kind: string; label: string; value: string; quote: string; watch: string }
+/** A claim the AI made about a tender document, the words it quoted for it, and whether those words were found in the document (null: nothing to check against, e.g. a scan). */
+export interface Evidence { item: string; quote: string; verified: boolean | null }
+export interface DocFacts {
+  summary: string; requirements: string[]; financial: { label: string; value: string }[]; dates: { label: string; value: string }[]; documents: string[]; penalties: string[]; red_flags: string[];
+  evidence?: Evidence[]; clauses?: Clause[]; source_checked?: boolean;
+}
+export interface ClauseChange { kind: string; label: string; old: string; new: string; quote: string }
+export interface CorrChange { what: string; old: string; new: string; impact: 'price' | 'eligibility' | 'dates' | 'documents' | 'other'; action: string; quote: string; verified: boolean | null }
+export interface CorrigendumRead {
+  rules: ClauseChange[]; clauses: Clause[]; has_text: boolean; had_document: boolean; ai_error: string;
+  ai: { summary: string; closing: string; changes: CorrChange[]; source_checked: boolean } | null;
+}
 export interface Related { key: string; tender_id: string; title: string; closing: string | null; first_seen: string; value: number | null; similarity: number }
 export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[]; bid_id?: number | null; history?: string[]; manual?: boolean; has_source?: boolean }
 export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number; calls_today?: number; daily_limit?: number }
@@ -100,7 +112,7 @@ export interface EligibilityCheck { requirement: string; status: 'met' | 'gap' |
 export interface Eligibility { verdict: string; summary: string; checks: EligibilityCheck[]; checked?: string }
 export interface BidDetail extends Omit<BidSummary, 'has_doc'> {
   published: string | null; category: string; location: string; emd: number | null; notes: string | null; l1_bidder: string | null; result_note: string | null; search_url: string;
-  signoff?: Signoff | null; comment_count?: number;
+  signoff?: Signoff | null; comment_count?: number; clauses?: { clauses: Clause[]; source_checked: boolean; at: string } | null;
   doc: DocFacts | null; doc_checked?: { by: string; at: string } | null; brief: Brief | null; eligibility: Eligibility | null; drafts: Record<string, string> | null; portal_facts: { label: string; value: string }[] | null; manual?: boolean; has_source?: boolean; portal_checked?: string | null;
   items: BidItem[]; changes: BidChange[]; unseen: number; history: string[];
 }

@@ -10,7 +10,10 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from typing import Any
+
+from . import clauses, pdftext
 
 log = logging.getLogger("tender_digest.ai")
 DEFAULT_MODEL = "claude-sonnet-5-5"   # reading and writing for one tender at a time
@@ -234,7 +237,9 @@ DOC_SYSTEM = (
     "Return ONLY a JSON object with: summary (2 sentences), requirements (list of eligibility and experience conditions), "
     "financial (list of {label, value} for turnover, EMD, bid security, performance guarantee, retention, payment terms, etc.), "
     "dates (list of {label, value}), documents (list of documents the bidder must submit), penalties (list), "
-    "red_flags (list of unusual or risky conditions, each with a short reason). Keep every item under 25 words."
+    "red_flags (list of unusual or risky conditions, each with a short reason), "
+    "evidence (list of {item, quote}: for each requirement, penalty and red flag, the item exactly as you wrote it above and the exact words from the document that support it, "
+    "copied verbatim, under 200 characters; leave an item out of evidence when you cannot quote it). Keep every other item under 25 words."
 )
 MAX_TEXT = 120_000
 MAX_PDF_BYTES = 10 * 1024 * 1024
@@ -245,8 +250,11 @@ def clean_doc(raw: Any) -> dict:
         raise AIError("Claude's answer was not in the expected form. Try again.")
     strs = lambda v: [str(x)[:300] for x in v][:30] if isinstance(v, list) else []  # noqa: E731
     pairs = lambda v: [{"label": str(x.get("label", ""))[:80], "value": str(x.get("value", ""))[:200]} for x in v if isinstance(x, dict)][:30] if isinstance(v, list) else []  # noqa: E731
+    ev = raw.get("evidence")
+    evidence = [{"item": str(e.get("item", ""))[:300], "quote": str(e.get("quote", ""))[:300]} for e in ev if isinstance(e, dict) and str(e.get("quote", "")).strip()][:40] if isinstance(ev, list) else []
     return {"summary": str(raw.get("summary") or "")[:600], "requirements": strs(raw.get("requirements")), "financial": pairs(raw.get("financial")),
-            "dates": pairs(raw.get("dates")), "documents": strs(raw.get("documents")), "penalties": strs(raw.get("penalties")), "red_flags": strs(raw.get("red_flags"))}
+            "dates": pairs(raw.get("dates")), "documents": strs(raw.get("documents")), "penalties": strs(raw.get("penalties")), "red_flags": strs(raw.get("red_flags")),
+            "evidence": evidence}
 
 
 def read_document(tender: dict, text: str = "", pdf_base64: str = "") -> dict:
@@ -265,7 +273,17 @@ def read_document(tender: dict, text: str = "", pdf_base64: str = "") -> dict:
         if not text.strip():
             raise AIError("Paste the tender text or choose a PDF first.")
         content = f"Tender listing for context:\n{_facts(tender, 600)}\n\n<document>\n{fence(text)}\n</document>\n\nExtract the key facts from this document."
-    return clean_doc(_json(_call(DOC_SYSTEM, content, max_tokens=6000)))
+    doc = clean_doc(_json(_call(DOC_SYSTEM, content, max_tokens=6000)))
+    return check_against_source(doc, text or pdftext.extract(pdf_base64))
+
+
+def check_against_source(doc: dict, source_text: str) -> dict:
+    """Adds what the document's own words say, so the AI's reading can be checked: each quoted piece of evidence is marked as found in the text or not, and the clauses
+    the fixed rules find are listed with their sentences. With no text to check against (a scanned PDF) the evidence is marked unchecked, never as verified."""
+    doc["evidence"] = clauses.ground(doc.get("evidence") or [], source_text)
+    doc["clauses"] = clauses.find(source_text)
+    doc["source_checked"] = len((source_text or "").strip()) >= 200
+    return doc
 
 
 # ---- a tender added by hand: the listing fields, read from the notice ---------------------------------------------------
@@ -402,6 +420,49 @@ def _source_content_plain(text: str, pdf_base64: str, tail: str) -> Any:
     if not text.strip():
         raise AIError("Paste the tender text or choose a PDF first.")
     return f"<document>\n{fence(text)}\n</document>\n\n{tail}"
+
+
+# ---- a corrigendum: what it changed ----------------------------------------------------------------------------------------
+
+CORR_SYSTEM = (
+    "You read a corrigendum (amendment) to an Indian government tender for a civil contractor. " + DATA_RULE + " "
+    "You are given what is already known about the tender and the corrigendum itself. List only what the corrigendum actually changes, adds or withdraws; never guess. "
+    "Return ONLY a JSON object: summary (one sentence a busy person can act on), closing (the new bid submission closing date and time as ISO 'YYYY-MM-DDTHH:MM' "
+    "if the corrigendum states one, else an empty string), "
+    "changes (list of {what, old, new, impact, action, quote}: what changed in a few words, the old and new values (old empty when it is new or unknown), "
+    "impact exactly one of 'price' (BOQ, rates, quantities, payment, security amounts), 'eligibility' (who may bid), 'dates', 'documents' (what must be submitted) or 'other', "
+    "action = what the bidder should do, under 20 words, quote = the exact words from the corrigendum that say so, verbatim, under 200 characters)."
+)
+IMPACTS = ("price", "eligibility", "dates", "documents", "other")
+
+
+def clean_corrigendum(raw: Any) -> dict:
+    if not isinstance(raw, dict):
+        raise AIError("Claude's answer was not in the expected form. Try again.")
+    closing = str(raw.get("closing") or "").strip()
+    try:
+        closing = datetime.fromisoformat(closing).isoformat(timespec="minutes") if closing else ""
+    except ValueError:
+        closing = ""
+    changes = []
+    for c in raw.get("changes", []) if isinstance(raw.get("changes"), list) else []:
+        if not isinstance(c, dict) or not str(c.get("what") or "").strip():
+            continue
+        changes.append({"what": str(c["what"])[:200], "old": str(c.get("old") or "")[:200], "new": str(c.get("new") or "")[:200],
+                        "impact": c.get("impact") if c.get("impact") in IMPACTS else "other", "action": str(c.get("action") or "")[:200], "quote": str(c.get("quote") or "")[:300]})
+    return {"summary": str(raw.get("summary") or "")[:400], "closing": closing, "changes": changes[:25]}
+
+
+def read_corrigendum(tender: dict, doc: dict | None, text: str = "", pdf_base64: str = "") -> dict:
+    known = json.dumps({k: (doc or {}).get(k) for k in ("requirements", "financial", "dates", "documents", "penalties")}, ensure_ascii=False)[:6000]
+    tail = f"Tender listing:\n{_facts(tender, 600)}\n\nWhat is already known from the tender document:\n{known}\n\nList what this corrigendum changes."
+    out = clean_corrigendum(_json(_call(CORR_SYSTEM, _source_content_plain(text, pdf_base64, tail), max_tokens=4000)))
+    source = text or pdftext.extract(pdf_base64)
+    grounded = clauses.ground([{"item": c["what"], "quote": c["quote"]} for c in out["changes"]], source)
+    for c, g in zip(out["changes"], grounded, strict=True):
+        c["verified"] = g["verified"]
+    out["source_checked"] = len((source or "").strip()) >= 200
+    return out
 
 
 # ---- bid / no-bid brief -------------------------------------------------------------------------------------------

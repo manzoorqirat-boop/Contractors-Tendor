@@ -48,7 +48,7 @@ CSP = "default-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'n
 # Request size limits. Uploads travel as base64 inside JSON (a 10 MB file is about 13.4 MB), so those routes get more room; everything else is small.
 MAX_UPLOAD_BODY = 16 * 1024 * 1024
 MAX_JSON_BODY = 1024 * 1024
-UPLOAD_PATH_RE = re.compile(r"^/api/(vault|boq/catalogue|tenders/(document|manual(/read)?)|bids/\d+/(document|boq|risks|award))$")
+UPLOAD_PATH_RE = re.compile(r"^/api/(vault|boq/catalogue|tenders/(document|manual(/read)?)|bids/\d+/(document|boq|risks|award|clauses|corrigenda/read))$")
 
 
 
