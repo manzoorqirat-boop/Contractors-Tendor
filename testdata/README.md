@@ -6,6 +6,7 @@ Fake data for trying the app without a live portal run. **Everything is fictiona
 |---|---|---|
 | `content.py` | All the test content as plain data (tenders, vault papers, company profile and facts) | nothing |
 | `make_pdfs.py` | Builds the tender PDFs, vault paper PDFs, `vault_index.csv`, company files and two edge-case files into `testdata/output/` | `pip install reportlab` |
+| `seed_intelligence.py` | Loads fake *history* (80 decided bids with winners, 120 imported awards, 14 months of daily counts, open bids with EMDs, portal trouble) so the win chance, who-usually-wins, bid planner, forecast, price history and portal health can be tried at once | the repo's own requirements |
 | `seed_demo_data.py` | Loads fake tenders, bids, vault entries, profile and facts into a database | the repo's own requirements |
 
 The Docker image copies only `tender_digest/` and `web/`, so this folder never goes into the Railway build and changes nothing in the live app.

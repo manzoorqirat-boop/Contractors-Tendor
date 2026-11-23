@@ -197,7 +197,8 @@ function WhatsAppCard() {
         </>
       ) : (
         <>
-          <p><span className="badge plain">Not set up</span> Missing on the server: {s.missing.map((m) => <code key={m} style={{ marginRight: 6 }}>{m}</code>)}</p>
+          <p><span className="badge plain">Not set up</span> Missing on the server:</p>
+          <ul className="small" style={{ margin: '4px 0 8px 18px', padding: 0 }}>{s.missing.map((m) => <li key={m}><code>{m}</code></li>)}</ul>
           <p className="muted small">See the README, “WhatsApp assistant”, for the steps with Meta. Set these as environment variables and restart.</p>
         </>
       ))}
