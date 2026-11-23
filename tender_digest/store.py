@@ -4,11 +4,14 @@ Keep this file on a persistent volume (see the README), or every restart begins 
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import json
+import os
 import sqlite3
 import threading
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -187,7 +190,18 @@ class SeenStore:
         self.db.row_factory = sqlite3.Row
         self.db.create_function("tsmatch", 2, smartsearch.match, deterministic=True)  # the search in the tender list
         self.lock = threading.RLock()
-        self._memo_at = -1                    # `db.total_changes` when the remembered answers below were worked out
+        # Reading does not have to queue behind writing. In WAL mode a second connection can read the last saved state while the first is busy writing, so the
+        # heavy reads (the tender list, the dashboard figures, the filter lists) each use a connection of their own and never wait for `self.lock`. Where WAL is not in
+        # use (an in-memory database, a file system that refused it) every read goes through the shared connection, as it always did.
+        self._path = path
+        self._readers_ok = self.journal_mode == "wal" and os.environ.get("DB_READERS", "1").strip().lower() not in ("0", "false", "no", "off")   # DB_READERS=0: back to one connection
+        self._local = threading.local()
+        self._opened: list[sqlite3.Connection] = []
+        self._opened_lock = threading.Lock()
+        self._probe: sqlite3.Connection | None = None
+        self._probe_lock = threading.Lock()
+        self._memo_lock = threading.Lock()
+        self._memo_at: Any = None             # what `_signal()` said when the remembered answers below were worked out
         self._memo_vals: dict[Any, Any] = {}
         with self.lock:
             self.db.executescript(
@@ -468,15 +482,15 @@ class SeenStore:
         """What the company's own choices say: tenders starred or bid on count for, tenders hidden or dropped count against, a hidden department counts strongly against."""
         m = learn.Model()
         cols = "portal, organisation, category, location, work_type, title, description"
-        with self.lock:
-            for r in self.db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND key IN (SELECT key FROM starred)"):
+        with self.reading() as db:
+            for r in db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND key IN (SELECT key FROM starred)"):
                 m.add(dict(r), +1)
-            for r in self.db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND key IN (SELECT key FROM hidden)"):
+            for r in db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND key IN (SELECT key FROM hidden)"):
                 m.add(dict(r), -1)
-            for r in self.db.execute("SELECT dept FROM muted_departments"):
+            for r in db.execute("SELECT dept FROM muted_departments"):
                 m.add_department(r["dept"], -1)
-            if self._has_bids():
-                for r in self.db.execute("SELECT portal, organisation, category, location, work_type, title, description, stage FROM bids"):
+            if self._has_bids(db):
+                for r in db.execute("SELECT portal, organisation, category, location, work_type, title, description, stage FROM bids"):
                     d = dict(r)
                     stage = d.pop("stage")
                     if stage == "dropped":
@@ -484,7 +498,7 @@ class SeenStore:
                     else:
                         m.add(d, +1, {"interested": 1.0, "preparing": 1.5, "submitted": 2.0, "opened": 2.0, "lost": 1.5, "won": 3.0}.get(stage, 1.0))
             if m.ready:   # what nearly every tender has is no reason to rank one above another: judged on the most recent 5,000
-                m.common = learn.common_features(dict(r) for r in self.db.execute(
+                m.common = learn.common_features(dict(r) for r in db.execute(
                     f"SELECT {cols} FROM seen WHERE civil = 1 ORDER BY first_seen DESC LIMIT 5000"))
         return m
 
@@ -493,9 +507,9 @@ class SeenStore:
         because the urgency part changes as time passes. Returns how many tenders were scored."""
         model = self.learning_model() if learning else None
         cols = "key, closing, value, fit, portal, organisation, category, location, work_type, title, description, priority, priority_note"
-        with self.lock:
-            starred = {r[0] for r in self.db.execute("SELECT key FROM starred")}
-            rows = [dict(r) for r in self.db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND (closing IS NULL OR closing >= ?)", (now.isoformat(),))]
+        with self.reading() as db:
+            starred = {r[0] for r in db.execute("SELECT key FROM starred")}
+            rows = [dict(r) for r in db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND (closing IS NULL OR closing >= ?)", (now.isoformat(),))]
         updates = []
         for r in rows:                       # the scoring is the slow part and needs no database, so it runs without holding the lock that every request shares
             score, note = learn.priority(r, now, model, size_min, size_max, r["key"] in starred)
@@ -513,9 +527,9 @@ class SeenStore:
 
     # ---- clean-up: what could go, shown before anything does -----------------------------------------------------
 
-    def _has_bids(self) -> bool:
+    def _has_bids(self, db: sqlite3.Connection | None = None) -> bool:
         """The bids table belongs to the bid workspace, which opens after this store: until it exists there is nothing to protect."""
-        return self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bids'").fetchone() is not None
+        return (db or self.db).execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bids'").fetchone() is not None
 
     @property
     def _REMOVABLE(self) -> str:
@@ -686,9 +700,9 @@ class SeenStore:
             order = SORTS.get("smart" if sort == "relevance" else sort, SORTS["closing"])
             # Unknown values and dates sort last whichever way round.
             order = f"({order.split()[0]} IS NULL), {order}"
-        with self.lock:
-            total = self.db.execute(f"SELECT COUNT(*) FROM seen WHERE {where}", args).fetchone()[0]
-            rows = self.db.execute(
+        with self.reading() as db:
+            total = db.execute(f"SELECT COUNT(*) FROM seen WHERE {where}", args).fetchone()[0]
+            rows = db.execute(
                 f"SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, work_type, fit, fit_reason, ai_civil, "
                 f"priority, priority_note, (key IN (SELECT key FROM starred)) AS starred FROM seen{join} WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
                 [*join_args, *args, limit, offset],
@@ -699,8 +713,8 @@ class SeenStore:
         return out, total
 
     def get_tender(self, key: str) -> dict | None:
-        with self.lock:
-            r = self.db.execute(
+        with self.reading() as db:
+            r = db.execute(
                 "SELECT key, portal, tender_id, first_seen, emailed, closing, published, value, emd, category, location, organisation, title, description, payload, work_type, fit, fit_reason, ai_civil, summary, brief, doc, priority, priority_note, "
                 "(key IN (SELECT key FROM starred)) AS starred FROM seen WHERE key = ? AND civil = 1", (key,)).fetchone()
         if not r:
@@ -724,24 +738,65 @@ class SeenStore:
         self._vocab = (n, t, vocab)
         return vocab
 
+    def _open_reader(self) -> sqlite3.Connection:
+        db = sqlite3.connect(self._path, check_same_thread=False)    # used by one thread; check_same_thread is off only so close() may run from another
+        db.row_factory = sqlite3.Row
+        db.create_function("tsmatch", 2, smartsearch.match, deterministic=True)
+        db.execute("PRAGMA busy_timeout=5000")
+        db.execute("PRAGMA query_only=ON")                           # a reader can never change anything, whatever the code does
+        with self._opened_lock:
+            self._opened.append(db)
+        return db
+
+    @contextlib.contextmanager
+    def reading(self) -> Iterator[sqlite3.Connection]:
+        """A connection for read-only work. Everything read inside one `with` block comes from one saved state (a snapshot), so figures that belong together
+        agree. It sees what has been committed, so a writer must commit before a reader can see its change (every save here does)."""
+        if not self._readers_ok:
+            with self.lock:
+                yield self.db
+            return
+        db = getattr(self._local, "db", None)
+        if db is None:
+            db = self._local.db = self._open_reader()
+        db.execute("BEGIN")
+        try:
+            yield db
+        finally:
+            db.rollback()                                            # ends the read; nothing was written
+
+    def _signal(self) -> Any:
+        """Changes whenever something is saved. Remembered answers are good only while it has not changed. Read *before* working an answer out, so a save that
+        lands in the middle makes the answer stale on the next look instead of being missed."""
+        if not self._readers_ok:
+            return self.db.total_changes
+        with self._probe_lock:
+            if self._probe is None:
+                self._probe = sqlite3.connect(self._path, check_same_thread=False)
+            return self._probe.execute("PRAGMA data_version").fetchone()[0]    # moves on each time another connection (the writer) commits
+
     def _remembered(self, key: Any, compute: Any) -> Any:
-        """Answers that only change when the data does (the dashboard figures, the filter lists) are worked out once and handed out until anything is written.
-        Every write goes through this one connection, so its change counter is a complete signal. Callers get their own copy: they are free to add to it."""
-        with self.lock:
-            changes = self.db.total_changes
-            if changes != self._memo_at:
+        """Answers that only change when the data does (the dashboard figures, the filter lists) are worked out once and handed out until anything is saved.
+        Callers get their own copy: they are free to add to it. Working an answer out does not hold any lock, so readers do not wait for each other."""
+        signal = self._signal()
+        with self._memo_lock:
+            if signal != self._memo_at:
                 self._memo_vals.clear()
-                self._memo_at = changes
-            if key not in self._memo_vals:
+                self._memo_at = signal
+            if key in self._memo_vals:
+                return copy.deepcopy(self._memo_vals[key])
+        value = compute()
+        with self._memo_lock:
+            if self._memo_at == signal:                              # nothing was saved while it was worked out
                 if len(self._memo_vals) >= 32:
                     self._memo_vals.pop(next(iter(self._memo_vals)))
-                self._memo_vals[key] = compute()
-            return copy.deepcopy(self._memo_vals[key])
+                self._memo_vals[key] = value
+        return copy.deepcopy(value)
 
     def categories(self) -> list[str]:
         def compute() -> list[str]:
-            with self.lock:
-                return [r[0] for r in self.db.execute("SELECT DISTINCT category FROM seen WHERE civil=1 AND category <> '' ORDER BY category")]
+            with self.reading() as db:
+                return [r[0] for r in db.execute("SELECT DISTINCT category FROM seen WHERE civil=1 AND category <> '' ORDER BY category")]
         return self._remembered(("categories",), compute)
 
     def facets(self, now: datetime, limit: int = 60) -> dict[str, list[dict]]:
@@ -751,9 +806,9 @@ class SeenStore:
     def _facets(self, now: datetime, limit: int) -> dict[str, list[dict]]:
         where, args = self._where(now, {"status": "open"})
         out: dict[str, list[dict]] = {}
-        with self.lock:
+        with self.reading() as db:
             for name, expr in (("portal", "portal"), ("category", "category"), ("department", DEPT_SQL), ("location", "location"), ("work_type", "work_type")):
-                rows = self.db.execute(
+                rows = db.execute(
                     f"SELECT {expr} AS value, COUNT(*) AS count FROM seen WHERE {where} AND {expr} IS NOT NULL AND {expr} <> '' "
                     f"GROUP BY 1 ORDER BY count DESC, value LIMIT ?", [*args, limit]).fetchall()
                 out[name] = [dict(r) for r in rows]
@@ -876,12 +931,9 @@ class SeenStore:
         def W(**override: Any) -> tuple[str, list[Any]]:
             return self._where(now, {**base, "soon_days": soon_days, **override})
 
-        def one(sql: str, args: list) -> Any:
-            return self.db.execute(sql, args).fetchone()[0]
-
         ow, oa = W(status="open")
         aw, aa = W(status="all")
-        with self.lock:
+        with self.reading() as db:
             # The nine headline figures in one pass over the table instead of nine passes. Each is "count (or sum) the rows that match this condition".
             conds = {
                 "open": (ow, oa, "1"),
@@ -899,13 +951,13 @@ class SeenStore:
                 params += cargs
             cols.append(f"COALESCE(AVG(CASE WHEN {ow} THEN value END), 0) AS avg_value")
             params += oa
-            kpi = dict(self.db.execute(f"SELECT {', '.join(cols)} FROM seen", params).fetchone())
+            kpi = dict(db.execute(f"SELECT {', '.join(cols)} FROM seen", params).fetchone())
             kpi = {k: kpi[k] for k in ("open", "new_today", "new_yesterday", "closing_soon", "closing_week", "open_value", "avg_value", "starred", "total_kept")}
-            by_portal = [dict(r) for r in self.db.execute(
+            by_portal = [dict(r) for r in db.execute(
                 f"SELECT portal, COUNT(*) AS count, COALESCE(SUM(value),0) AS value FROM seen WHERE {ow} GROUP BY portal ORDER BY count DESC", oa)]
-            by_category = [dict(r) for r in self.db.execute(
+            by_category = [dict(r) for r in db.execute(
                 f"SELECT {CATEGORY_SQL} AS category, COUNT(*) AS count FROM seen WHERE {ow} GROUP BY 1 ORDER BY count DESC LIMIT 12", oa)]
-            bands = self.db.execute(
+            bands = db.execute(
                 f"SELECT SUM(value IS NULL) AS unknown, SUM(value < 1e5) AS b1, SUM(value >= 1e5 AND value < 1e6) AS b2, "
                 f"SUM(value >= 1e6 AND value < 1e7) AS b3, SUM(value >= 1e7 AND value < 1e8) AS b4, SUM(value >= 1e8) AS b5 FROM seen WHERE {ow}", oa).fetchone()
             by_value = [
@@ -913,14 +965,14 @@ class SeenStore:
                 {"band": "10 lakh to 1 crore", "count": bands["b3"] or 0}, {"band": "1 to 10 crore", "count": bands["b4"] or 0},
                 {"band": "Over 10 crore", "count": bands["b5"] or 0}, {"band": "Not stated", "count": bands["unknown"] or 0},
             ]
-            departments = [dict(r) for r in self.db.execute(
+            departments = [dict(r) for r in db.execute(
                 f"SELECT {DEPT_SQL} AS department, portal, COUNT(*) AS count, COALESCE(SUM(value),0) AS value FROM seen WHERE {ow} "
                 f"GROUP BY 1, 2 ORDER BY count DESC LIMIT 10", oa)]
             sw, sa = W(status="all", seen_from=_iso(day_start - timedelta(days=29)))
-            per_day = {r["day"]: r["count"] for r in self.db.execute(f"SELECT substr(first_seen,1,10) AS day, COUNT(*) AS count FROM seen WHERE {sw} GROUP BY 1", sa)}
+            per_day = {r["day"]: r["count"] for r in db.execute(f"SELECT substr(first_seen,1,10) AS day, COUNT(*) AS count FROM seen WHERE {sw} GROUP BY 1", sa)}
             cw, ca = W(status="open", closing_to=(_iso(day_start + timedelta(days=13)) or "")[:10])
-            closing_days = {r["day"]: r["count"] for r in self.db.execute(f"SELECT substr(closing,1,10) AS day, COUNT(*) AS count FROM seen WHERE {cw} AND closing IS NOT NULL GROUP BY 1", ca)}
-            biggest = [dict(r) for r in self.db.execute(
+            closing_days = {r["day"]: r["count"] for r in db.execute(f"SELECT substr(closing,1,10) AS day, COUNT(*) AS count FROM seen WHERE {cw} AND closing IS NOT NULL GROUP BY 1", ca)}
+            biggest = [dict(r) for r in db.execute(
                 f"SELECT key, portal, tender_id, closing, value, category, organisation, title, description FROM seen WHERE {ow} AND value IS NOT NULL ORDER BY value DESC LIMIT 5", oa)]
         days = [(day_start - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(29, -1, -1)]
         ahead = [(day_start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(0, 14)]
@@ -1269,5 +1321,16 @@ class SeenStore:
             self.db.commit()
 
     def close(self) -> None:
+        with self._opened_lock:
+            for db in self._opened:
+                with contextlib.suppress(sqlite3.Error):
+                    db.close()
+            self._opened.clear()
+        self._local = threading.local()
+        with self._probe_lock:
+            if self._probe is not None:
+                with contextlib.suppress(sqlite3.Error):
+                    self._probe.close()
+                self._probe = None
         with self.lock:
             self.db.close()
