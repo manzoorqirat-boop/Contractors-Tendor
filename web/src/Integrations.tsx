@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { fmtDate } from './format';
 import { tr } from './i18n';
@@ -206,8 +206,60 @@ function WhatsAppCard() {
   );
 }
 
+/** A preview of the WhatsApp assistant for administrators: type what a person would send and see the answer, as a chosen role. Nothing goes to WhatsApp. */
+function WhatsAppPreview() {
+  const toast = useToast();
+  const [role, setRole] = useState('viewer');
+  const [text, setText] = useState('');
+  const [chat, setChat] = useState<{ me: boolean; text: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const log = useRef<HTMLDivElement>(null);
+  useEffect(() => { log.current?.scrollTo({ top: log.current.scrollHeight }); }, [chat, busy]);
+  const send = async (said: string) => {
+    const t = said.trim();
+    if (!t || busy) return;
+    setText('');
+    setChat((c) => [...c, { me: true, text: t }]);
+    setBusy(true);
+    try {
+      const r = await api.whatsappTry(t, role);
+      setChat((c) => [...c, { me: false, text: r.reply }]);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not get an answer', 'bad');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card">
+      <h2>Try the assistant</h2>
+      <p className="sub">A preview of what people would get on WhatsApp, using your own tenders and bids. Nothing is sent to WhatsApp, and it works without any set-up. Pick who is asking, since cash figures are only for bidders and administrators.</p>
+      <div className="adv-controls">
+        <label>Asking as
+          <select value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="viewer">Viewer</option><option value="bidder">Bidder</option><option value="admin">Administrator</option>
+          </select>
+        </label>
+      </div>
+      <div className="chips-row">
+        {['help', 'closing', 'new', 'bids', 'deadlines', 'cash'].map((c) => <button key={c} type="button" className="chip" disabled={busy} onClick={() => send(c)}>{c}</button>)}
+      </div>
+      <div className="wa-chat" ref={log} tabIndex={0} role="log" aria-live="polite" aria-label="Assistant preview">
+        {chat.length === 0 && <p className="muted small">Tap a word above, or type a question such as “find drain nashik” or “which road tenders close this week?”.</p>}
+        {chat.map((m, i) => <div key={i} className={`wa-msg ${m.me ? 'me' : 'bot'}`}>{m.text}</div>)}
+        {busy && <div className="wa-msg bot muted">…</div>}
+      </div>
+      <form className="wa-form" onSubmit={(e) => { e.preventDefault(); send(text); }}>
+        <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a message" aria-label="Message to the assistant" maxLength={500} />
+        <button type="submit" className="btn" disabled={busy || !text.trim()}>Send</button>
+        {chat.length > 0 && <button type="button" className="btn ghost" onClick={() => setChat([])}>Clear</button>}
+      </form>
+    </section>
+  );
+}
+
 export function IntegrationsPanel() {
-  return <div className="set-grid"><SsoCard /><TokensCard /><WebhooksCard /><WhatsAppCard /></div>;
+  return <div className="set-grid"><SsoCard /><TokensCard /><WebhooksCard /><WhatsAppCard /><WhatsAppPreview /></div>;
 }
 
 /** How long data is kept, and whether files and secrets are encrypted. Retention saves on its own button. */

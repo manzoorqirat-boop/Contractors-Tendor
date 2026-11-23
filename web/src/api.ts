@@ -206,6 +206,7 @@ export const api = {
   findClauses: (bidId: number, text: string, pdf_base64: string) => call<{ clauses: Clause[]; chars: number; note: string }>(`/api/bids/${bidId}/clauses`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
   readCorrigendum: (bidId: number, text: string, pdf_base64: string) => job<CorrigendumRead>(`/api/bids/${bidId}/corrigenda/read`, { method: 'POST', body: JSON.stringify({ text, pdf_base64 }) }),
   diagnosePortal: (key: string) => call<PortalDiagnosis>(`/api/portals/${encodeURIComponent(key)}/diagnose`),
+  whatsappTry: (text: string, role: string) => call<{ reply: string; role: string }>('/api/whatsapp/try', { method: 'POST', body: JSON.stringify({ text, role }) }),
   whatsappStatus: () => call<WhatsAppStatus>('/api/whatsapp/status'),
   forecast: () => call<Forecast>('/api/forecast'),
   plan: (budget: number | null, margin: number) => call<Plan>(`/api/plan?margin=${margin}${budget === null ? '' : `&budget=${budget}`}`),

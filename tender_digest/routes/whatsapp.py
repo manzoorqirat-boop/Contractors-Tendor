@@ -8,12 +8,19 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel, Field
 
 from .. import ai, whatsapp
+from ..accounts import ROLES
 from ..api_common import clean_ask
 from .context import Ctx
 
 log = logging.getLogger("tender_digest.whatsapp")
+
+
+class TryBody(BaseModel):
+    text: str = Field("", max_length=500)
+    role: str = "viewer"
 
 
 def register(app: FastAPI, ctx: Ctx) -> None:
@@ -82,3 +89,14 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         base = config.app_url or ""
         return {"enabled": cfg.enabled, "missing": cfg.missing(), "webhook_url": f"{base}/api/whatsapp/webhook" if base else "/api/whatsapp/webhook", "app_url_set": bool(base),
                 "numbers": [{"ending": n[-4:], "role": r} for n, r in cfg.allowed.items()], "version": cfg.version}
+
+    @app.post("/api/whatsapp/try", dependencies=auth)
+    def whatsapp_try(body: TryBody) -> dict:
+        """A preview for administrators: the same answers the WhatsApp assistant gives, as if the sender had this role, with nothing sent to Meta. Works without any WhatsApp set-up."""
+        role = body.role if body.role in ROLES else "viewer"
+        try:
+            reply = assistant.reply(body.text, role)
+        except Exception:
+            log.exception("assistant preview failed")
+            reply = "Something went wrong on my side. Try again in a moment."
+        return {"reply": reply, "role": role}

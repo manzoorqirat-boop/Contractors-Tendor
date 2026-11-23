@@ -328,3 +328,27 @@ def test_the_status_page_shows_what_is_set_up_without_revealing_the_secrets_or_t
     assert s["numbers"] == [{"ending": "3210", "role": "bidder"}, {"ending": "5678", "role": "viewer"}]
     text = json.dumps(s)
     assert SECRET not in text and "tok" not in text.replace("token", "") and "919876543210" not in text
+
+
+def test_the_preview_answers_like_the_assistant_without_any_whatsapp_setup_and_sends_nothing(hook, monkeypatch):
+    c = hook.client
+    assert c.post("/api/whatsapp/try", json={"text": "help"}).status_code == 401
+    c.post("/api/login", json={"password": PASSWORD})
+    got = c.post("/api/whatsapp/try", json={"text": "closing", "role": "viewer"}).json()
+    assert got["role"] == "viewer" and "Closing very soon" in got["reply"]
+    assert "TendAI assistant" in c.post("/api/whatsapp/try", json={"text": "help"}).json()["reply"]
+    assert "for bidders and administrators" in c.post("/api/whatsapp/try", json={"text": "cash", "role": "viewer"}).json()["reply"]
+    assert "Cash locked" in c.post("/api/whatsapp/try", json={"text": "cash", "role": "bidder"}).json()["reply"]
+    assert c.post("/api/whatsapp/try", json={"text": "help", "role": "owner"}).json()["role"] == "viewer"      # an unknown role is treated as the least
+    assert c.post("/api/whatsapp/try", json={"text": "x" * 501}).status_code == 422
+    assert hook.sent.calls == []                                                                              # nothing went to Meta
+
+
+def test_the_preview_is_for_administrators_only(hook):
+    c = hook.client
+    c.post("/api/login", json={"password": PASSWORD})
+    c.post("/api/users", json={"username": "bob", "name": "Bob", "role": "bidder", "password": "a-long-password-1"})
+    bob = TestClient(hook.app)
+    r = bob.post("/api/login", json={"username": "bob", "password": "a-long-password-1"})
+    assert r.status_code == 200
+    assert bob.post("/api/whatsapp/try", json={"text": "help"}).status_code == 403
