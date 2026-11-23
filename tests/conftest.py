@@ -31,3 +31,27 @@ def close_every_database(monkeypatch):
             conn.close()
         except sqlite3.Error:
             pass
+
+
+@pytest.fixture(autouse=True)
+def stores_in_files_when_asked(monkeypatch, tmp_path):
+    """The tests make their stores in memory, which never uses the separate read connections (they need a real file in WAL mode). With
+    TENDAI_TEST_FILE_DB=1 every in-memory store is made a file instead, so the whole suite runs the way the running app does:
+
+        TENDAI_TEST_FILE_DB=1 python -m pytest -q
+    """
+    import itertools
+    import os
+
+    if os.environ.get("TENDAI_TEST_FILE_DB") != "1":
+        yield
+        return
+    from tender_digest.store import SeenStore
+
+    real_init, counter = SeenStore.__init__, itertools.count()
+
+    def init(self, path):
+        real_init(self, str(tmp_path / f"store-{next(counter)}.db") if path == ":memory:" else path)
+
+    monkeypatch.setattr(SeenStore, "__init__", init)
+    yield
