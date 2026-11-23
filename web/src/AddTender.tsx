@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from './api';
+import { api, ApiError } from './api';
 import { readBase64, useAiStatus } from './ai';
 import { dateSay, inr, parseMoney } from './format';
 import { Drawer, Skeleton, useToast } from './ui';
@@ -63,12 +63,20 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
   const [tried, setTried] = useState(false);       // Save was pressed: show every problem, not just those of fields already visited
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const errs = validate(form, !!editKey);
-  const err = (k: string) => (tried || touched[k] ? errs[k] ?? '' : '');
+  const [serverIssue, setServerIssue] = useState<{ field: string; message: string } | null>(null);   // what the server refused, shown beside its box
+  const err = (k: string) => (serverIssue && serverIssue.field === k ? serverIssue.message : tried || touched[k] ? errs[k] ?? '' : '');
   const touch = (k: string) => setTouched((t) => (t[k] ? t : { ...t, [k]: true }));
   /** Props that tie an input to its message for screen readers. */
   const a11y = (k: string) => ({ 'aria-invalid': !!err(k) || undefined, 'aria-describedby': err(k) ? `err-${k}` : undefined, onBlur: () => touch(k) });
   const Msg = ({ k }: { k: string }) => (err(k) ? <span className="field-err" id={`err-${k}`}>{err(k)}</span> : null);
-  const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
+  const set = (patch: Partial<Form>) => { setServerIssue(null); setForm((f) => ({ ...f, ...patch })); };
+  /** A refusal about one box goes beside that box (and the cursor moves there); anything else goes in the message area. */
+  const fail = (e: unknown) => {
+    if (e instanceof ApiError && e.field && document.querySelector(`[data-field="${e.field}"]`)) {
+      setServerIssue({ field: e.field, message: e.message }); setStep('form');
+      setTimeout(() => document.querySelector<HTMLElement>(`[data-field="${e.field}"]`)?.focus(), 0);
+    } else setError((e as Error).message);
+  };
 
   useEffect(() => {
     if (!editKey) return;
@@ -117,7 +125,7 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
       const r = await api.manualCreate({ ...common, tender_id: form.tender_id, reference: form.reference, portal_name: form.portal_name, value: money(form.value), emd: money(form.emd),
         text: file ? '' : paste, pdf_base64: file ? await readBase64(file) : '', read_document: readDoc && aiOn });
       setResult(r); setStep('done'); window.dispatchEvent(new Event('tenders-changed'));
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { fail(e); } finally { setBusy(false); }
   }
 
   async function remove() {
@@ -163,9 +171,9 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
           )}
           <label className="field">Tender ID <span className="req">(required)</span><input data-field="tender_id" value={form.tender_id} onChange={(e) => set({ tender_id: e.target.value })} {...a11y('tender_id')} onBlur={(e) => { touch('tender_id'); checkId(e.target.value); }} maxLength={80} disabled={!!editKey} placeholder="As written on the notice" /><Msg k="tender_id" /></label>
           <label className="field">Work description <span className="req">(required, or a short name below)</span><textarea data-field="description" value={form.description} onChange={(e) => set({ description: e.target.value })} {...a11y('description')} maxLength={500} rows={3} /><Msg k="description" /></label>
-          <label className="field">Short name (optional)<input value={form.title} onChange={(e) => set({ title: e.target.value })} maxLength={300} /></label>
-          <label className="field">Department / office<input value={form.organisation} onChange={(e) => set({ organisation: e.target.value })} maxLength={300} /></label>
-          <label className="field">Place of work<input value={form.location} onChange={(e) => set({ location: e.target.value })} maxLength={120} /></label>
+          <label className="field">Short name (optional)<input data-field="title" value={form.title} onChange={(e) => set({ title: e.target.value })} {...a11y('title')} maxLength={300} /><Msg k="title" /></label>
+          <label className="field">Department / office<input data-field="organisation" value={form.organisation} onChange={(e) => set({ organisation: e.target.value })} {...a11y('organisation')} maxLength={300} /><Msg k="organisation" /></label>
+          <label className="field">Place of work<input data-field="location" value={form.location} onChange={(e) => set({ location: e.target.value })} {...a11y('location')} maxLength={120} /><Msg k="location" /></label>
           <div className="ws-grid">
             <label className="field-inline">Estimated value (₹){form.value && money(form.value) ? <span className="muted small"> {inr(money(form.value))}</span> : null}<input data-field="value" inputMode="decimal" value={form.value} onChange={(e) => set({ value: e.target.value })} {...a11y('value')} /><Msg k="value" /></label>
             <label className="field-inline">EMD (₹)<input data-field="emd" inputMode="decimal" value={form.emd} onChange={(e) => set({ emd: e.target.value })} {...a11y('emd')} /><Msg k="emd" /></label>

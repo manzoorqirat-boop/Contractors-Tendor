@@ -370,11 +370,11 @@ It uses Meta's WhatsApp Business Cloud API. Meta calls `https://<your site>/api/
 ## If something goes wrong on a page
 
 - **A page that cannot be drawn** shows *Something went wrong on this page* with **Reload the page** and **Go to the Dashboard**, instead of a blank screen. Nothing is changed by it; the details are under *Technical details*.
-- **No connection**: a bar across the top says *You are offline* until it returns. A request that gets no answer for 3 minutes is given up with a message saying so, instead of loading forever.
-- **A form the server refuses** names the field and the problem (for example *text: Field required*), not just "some values are not valid".
-- **Text that is too long** for a field is refused with the limit and your length (notes 4,000 characters, a checklist line 300, a hand-added tender's title 300 and description 1,000), never quietly cut. Dates on a bid must have a believable year (2000 to 2100).
-- **A misspelt setting** is refused (*Not a setting that can be changed here*) instead of being saved as nothing.
-- **Leaving Settings with unsaved changes** asks first.
+- **No connection**: a bar across the top says *You are offline* until it returns. A request that gets no answer for 3 minutes is given up with a message saying so, instead of loading forever. A page that failed to load shows **Try again**, and tries by itself when the browser says the connection is back.
+- **A form the server refuses** shows the problem **beside the box it is about** (on a bid's dates, prices, notes, owner and winner, a checklist line, a payment, and Add a tender, where the cursor also moves to the box) and says it in words, for example *The amount must be more than zero*. The API answers `{"detail": message, "field": box}`; `field` is left out when the message is not about one box.
+- **Text that is too long** for a field is refused with the limit and your length (notes 4,000 characters, a checklist line 300, a hand-added tender's title 300 and description 1,000, a Vault name 120, a corrigendum or sign-off note 500, a company fact's name 60 and value 160, a payment's note 300), never quietly cut. Text that comes from a portal or the AI is still trimmed. Dates on a bid must have a believable year (2000 to 2100).
+- **A name a form does not have** is refused instead of being saved as nothing: a misspelt setting (*Not a setting that can be changed here*), and extra names on a bid, a payment, a Vault document, a portal or the company profile.
+- **Leaving Settings with unsaved changes** asks first, whether you use the menu, a keyboard shortcut or the browser's Back button.
 - **Marking a bid won or lost without your quoted price** reminds you to add it, because the price and win-chance history learn from it.
 
 ## Security

@@ -5,7 +5,7 @@ import { useLoad } from './hooks';
 import { tr } from './i18n';
 import { Only } from './session';
 import { useConfirm } from './confirm';
-import { useToast } from './ui';
+import { ErrorNote, useToast } from './ui';
 import type { Backtest, MarketImport } from './types';
 
 const SAMPLE = 'Tender ID,Department,Work type,Estimated cost,Awarded amount,No. of bidders,Award date\n2026_PWD_101,PWD Nashik,Roads & highways,"50,00,000","46,00,000",6,05-11-2026\n2026_WR_204,Water Resources,Irrigation,2.5 crore,2.6 crore,3,10-10-2026\n';
@@ -61,7 +61,7 @@ export function PriceHistoryCard() {
     <section className="card" style={{ marginBottom: 14 }}>
       <h2>{tr('Price history')}</h2>
       <p className="sub">{tr('What the lowest bidder actually quoted on tenders that have been awarded, against each estimate. The price advisor learns from it: the more similar results it has, the better its win chances. Your own won and lost bids count by themselves; you can add more from a spreadsheet of award results.')}</p>
-      {data.error && <div className="alert bad">{data.error}</div>}
+      <ErrorNote error={data.error} onRetry={data.reload} />
       {s && (
         <p>
           <strong>{s.usable === 1 ? tr('{n} result in use', { n: 1 }) : tr('{n} results in use', { n: s.usable })}</strong>{tr(': {own} from your own bids, {imported} imported', { own: s.own, imported: s.imported })}{s.first && s.last ? tr(', awarded {from} to {to}', { from: fmtDate(s.first), to: fmtDate(s.last) }) : ''}.

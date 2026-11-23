@@ -4,7 +4,7 @@ import { fmtDate } from './format';
 import { tr } from './i18n';
 import { useLoad } from './hooks';
 import { ScrollX } from './ScrollX';
-import { Skeleton, useToast } from './ui';
+import { ErrorNote, Skeleton, useToast } from './ui';
 import { useConfirm } from './confirm';
 import type { Webhook } from './types';
 
@@ -184,12 +184,12 @@ function SsoCard() {
 
 /** Whether the WhatsApp assistant is set up, what is missing and the address Meta needs. The secrets themselves are never shown. */
 function WhatsAppCard() {
-  const { data: s, error } = useLoad(() => api.whatsappStatus(), []);
+  const { data: s, error, reload } = useLoad(() => api.whatsappStatus(), []);
   return (
     <section className="card">
       <h2>{tr('WhatsApp assistant')}</h2>
       <p className="sub">{tr('Ask from your phone: what closes soon, your bids and their dates, new tenders, a search, and (for bidders and administrators) the cash locked in EMDs. It only reads; it never changes anything. Only the numbers you list can use it.')}</p>
-      {error && <div className="alert bad">{error}</div>}
+      <ErrorNote error={error} onRetry={reload} />
       {s && s.problems.length > 0 && <div className="alert warn" role="status"><strong>{tr('Check the list of allowed numbers')}</strong><ul className="small" style={{ margin: '4px 0 0 18px', padding: 0 }}>{s.problems.map((p) => <li key={p}>{p}</li>)}</ul></div>}
       {s && (s.enabled ? (
         <>

@@ -3,7 +3,7 @@ import { api } from './api';
 import { readBase64 } from './ai';
 import { inr, parseMoney, plural } from './format';
 import { useLoad } from './hooks';
-import { useToast } from './ui';
+import { ErrorNote, useToast } from './ui';
 import { useConfirm } from './confirm';
 import { useSession } from './session';
 import type { BoqCandidate, BoqLine, BoqStatus, CatalogueItem, Simulation } from './types';
@@ -80,7 +80,7 @@ export function BoqCard({ bidId }: { bidId: number }) {
         </div>
       </div>
 
-      {view.error && <div className="alert bad">{view.error}</div>}
+      <ErrorNote error={view.error} onRetry={view.reload} />
       {noCatalogue && <div className="alert warn">Your item catalogue is empty, so nothing can be matched yet. Load your item list once in the <a href="#/vault">Vault</a>, then come back here.</div>}
 
       <div className="ai-doc">
@@ -296,7 +296,7 @@ export function RiskCard({ bidId, aiOn, hasSource = false }: { bidId: number; ai
     <section className="card" style={{ marginBottom: 14 }}>
       <h2>Risk and margin</h2>
       <p className="sub">Finds the hidden costs in the tender conditions and adds them to your BOQ cost. The percentages are planning allowances to challenge, not rules.</p>
-      {risks.error && <div className="alert bad">{risks.error}</div>}
+      <ErrorNote error={risks.error} onRetry={risks.reload} />
       {aiOn ? (
         <div className="ai-doc">
           <label className="field" style={{ margin: 0 }}>Tender document (PDF, up to 10 MB)<input type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>

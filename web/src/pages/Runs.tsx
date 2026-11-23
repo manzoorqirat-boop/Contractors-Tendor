@@ -1,4 +1,5 @@
 import { ScrollX } from '../ScrollX';
+import { ErrorNote } from '../ui';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { duration, fmtDate } from '../format';
@@ -67,7 +68,7 @@ export function RunsPage({ config }: { config: AppConfig }) {
       <section className="card" style={{ marginTop: 14 }}>
         <h2>History</h2>
         <p className="sub">The last 30 runs. Select one for its log.</p>
-        {history.error && <div className="alert bad">{history.error}</div>}
+        <ErrorNote error={history.error} onRetry={history.reload} />
         {history.data && history.data.runs.length === 0 && <div className="empty">No runs yet.</div>}
         <ScrollX label="Run history">
           <table className="tbl">

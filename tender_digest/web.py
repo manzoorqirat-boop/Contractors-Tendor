@@ -29,7 +29,7 @@ from . import access, accounts, ai, appsettings, coverage, events, health, lette
 from . import mailer as mailer
 from . import money as money_module
 from .accounts import Accounts, Principal
-from .api_common import COOKIE, log, token_claims
+from .api_common import COOKIE, FieldHTTPException, log, token_claims
 from .api_common import make_token as make_token
 from .api_common import storage_ok as storage_ok
 from .backup import Backups
@@ -456,9 +456,17 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
         audit_pruned["day"] = day
         people.prune_audit(now, appsettings.current(env, store.get_settings())["audit_days"])
 
+    def send_webhooks() -> None:
+        try:
+            hooks.deliver(now())
+        except Exception:
+            log.exception("sending webhooks failed")
+
+    hook_sender = Background(send_webhooks) if config.run_scheduler else None    # on its own thread, so a receiver that is slow never holds up reminders or backups
+
     def housekeeping(now: datetime) -> None:
         """Run by the scheduler every half minute: the daily backup, then any deadline reminders that are due. One failing never stops the other."""
-        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hooks.deliver(now), lambda: prune_audit_daily(now), lambda: refresh_priorities_hourly(now), lambda: check_portal_health_hourly(now)):
+        for job in (lambda: backups.housekeeping(now), lambda: manager.send_reminders(now, config.app_url), lambda: hook_sender.ask() if hook_sender else hooks.deliver(now), lambda: prune_audit_daily(now), lambda: refresh_priorities_hourly(now), lambda: check_portal_health_hourly(now)):
             try:
                 job()
             except Exception:
@@ -563,6 +571,14 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
                 log.exception("closing the %s database failed", name)
 
     app = FastAPI(title="TendAI by QMSofts", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+
+    @app.exception_handler(FieldHTTPException)
+    async def refusal_with_field(request: Request, e: FieldHTTPException) -> JSONResponse:
+        """The usual {"detail": message}, plus {"field": name} when the message is about one box, so the page can show it beside that box."""
+        body: dict[str, Any] = {"detail": e.detail}
+        if e.field:
+            body["field"] = e.field
+        return JSONResponse(body, status_code=e.status_code, headers=getattr(e, "headers", None))
 
     @app.middleware("http")
     async def protect(request: Request, call_next):
@@ -743,7 +759,7 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
             "portal_name": portal_names.get(bid.get("portal") or "", bid.get("portal"))}
 
     def bid_error(e: BidError) -> HTTPException:
-        return HTTPException(422, str(e))
+        return FieldHTTPException(422, str(e), e.field)
 
     def bid_full(bid: dict) -> dict:
         items = bids.with_matches(bid, now())

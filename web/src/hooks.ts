@@ -21,6 +21,14 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): Loaded<T> {
   }, [...deps, tick]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
+  // A load that failed (most likely for want of a connection) is tried again by itself when the browser says the connection is back.
+  const failed = useRef(false);
+  failed.current = error !== null;
+  useEffect(() => {
+    const again = () => { if (failed.current) reload(); };
+    window.addEventListener('online', again);
+    return () => window.removeEventListener('online', again);
+  }, [reload]);
   return { data, error, loading, reload };
 }
 

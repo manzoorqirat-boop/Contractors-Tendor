@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from .. import market as market_module
 from .. import pricing
+from ..api_common import FieldHTTPException
 from .context import Ctx
 
 
@@ -56,7 +57,10 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         if body.awarded and not awarded:
             raise HTTPException(422, "The date could not be read. Use day-month-year, for example 14-11-2026")
         ref = market_module._ref(body.tender_id.strip()[:80], body.department, body.estimate, body.price, awarded)
-        row = {"department": body.department.strip()[:300], "work_type": body.work_type.strip()[:80], "location": body.location.strip()[:80], "estimate": body.estimate,
+        for text, limit, what, field in ((body.department, 300, "The department", "department"), (body.work_type, 80, "The work type", "work_type"), (body.location, 80, "The location", "location")):
+            if len(text.strip()) > limit:
+                raise FieldHTTPException(422, f"{what} can be at most {limit} characters, and this is {len(text.strip())}. Shorten it and try again", field)
+        row = {"department": body.department.strip(), "work_type": body.work_type.strip(), "location": body.location.strip(), "estimate": body.estimate,
                "price": body.price, "bidders": body.bidders if body.bidders and 0 < body.bidders < 1000 else None, "awarded": awarded, "ref": ref}
         counts = market.add_rows([row], "manual", now())
         return counts

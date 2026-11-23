@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { api } from './api';
+import { api, ApiError } from './api';
 import { useConfirm } from './confirm';
 import { fmtDate, inr, parseMoney } from './format';
 import { useLoad } from './hooks';
 import { Only, useSession } from './session';
-import { Skeleton, useToast } from './ui';
+import { ErrorNote, FieldIssueCtx, FieldMsg, Skeleton, useToast, type FieldIssue } from './ui';
 import type { BidMoney, MoneyFlag, MoneyItem, MoneySummary } from './types';
 import { tr } from './i18n';
 
@@ -44,47 +44,48 @@ function Flags({ flags }: { flags: MoneyFlag[] }) {
 }
 
 /** Record or change one payment. */
-function PaymentForm({ initial, onSave, onCancel, busy }: { initial: Form; onSave: (f: Form) => void; onCancel: () => void; busy: boolean }) {
+function PaymentForm({ initial, onSave, onCancel, busy, issue }: { initial: Form; onSave: (f: Form) => void; onCancel: () => void; busy: boolean; issue: FieldIssue }) {
   const [f, setF] = useState(initial);
   const set = (k: keyof Form, v: string) => setF((x) => ({ ...x, [k]: v }));
   return (
+    <FieldIssueCtx.Provider value={issue}>
     <div className="card" style={{ margin: '10px 0', background: 'var(--bg-soft, transparent)' }} onKeyDown={(e) => { if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT' && !busy) { e.preventDefault(); onSave(f); } }}>
       <div className="set-grid">
         <label className="field">{tr('What it is for')}
-          <select value={f.kind} onChange={(e) => set('kind', e.target.value)}>{KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <select value={f.kind} onChange={(e) => set('kind', e.target.value)}>{KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select><FieldMsg name="kind" />
         </label>
         <label className="field">{tr('Amount (₹)')}
-          <input value={f.amount} onChange={(e) => set('amount', e.target.value)} inputMode="decimal" placeholder="50,000" required />
+          <input value={f.amount} onChange={(e) => set('amount', e.target.value)} inputMode="decimal" placeholder="50,000" required aria-invalid={issue?.field === 'amount' ? true : undefined} /><FieldMsg name="amount" />
         </label>
         <label className="field">{tr('How it was paid')}
-          <select value={f.instrument} onChange={(e) => set('instrument', e.target.value)}>{INSTRUMENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <select value={f.instrument} onChange={(e) => set('instrument', e.target.value)}>{INSTRUMENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select><FieldMsg name="instrument" />
         </label>
         <label className="field">{tr('Status')}
           <select value={f.status} onChange={(e) => set('status', e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
         </label>
         <label className="field">{tr('Reference (draft, guarantee or receipt number)')}
-          <input value={f.reference} onChange={(e) => set('reference', e.target.value)} maxLength={60} />
+          <input value={f.reference} onChange={(e) => set('reference', e.target.value)} maxLength={60} /><FieldMsg name="reference" />
         </label>
         <label className="field">{tr('Bank')}
-          <input value={f.bank} onChange={(e) => set('bank', e.target.value)} maxLength={60} />
+          <input value={f.bank} onChange={(e) => set('bank', e.target.value)} maxLength={60} /><FieldMsg name="bank" />
         </label>
         <label className="field">{tr('Paid on')}
-          <input type="date" value={f.paid_on} onChange={(e) => set('paid_on', e.target.value)} />
+          <input type="date" value={f.paid_on} onChange={(e) => set('paid_on', e.target.value)} /><FieldMsg name="paid_on" />
         </label>
         {HAS_VALIDITY.includes(f.instrument) && (
           <label className="field">{tr('Valid until')}
             <span className="hint">{tr('When the guarantee, draft or deposit runs out. You are reminded 30 days before.')}</span>
-            <input type="date" value={f.valid_until} onChange={(e) => set('valid_until', e.target.value)} />
+            <input type="date" value={f.valid_until} onChange={(e) => set('valid_until', e.target.value)} /><FieldMsg name="valid_until" />
           </label>
         )}
         {COMES_BACK.includes(f.kind) && (
           <label className="field">{tr('Refund expected by')}
             <span className="hint">{tr('You are reminded when this date passes and the money is still held.')}</span>
-            <input type="date" value={f.refund_due} onChange={(e) => set('refund_due', e.target.value)} />
+            <input type="date" value={f.refund_due} onChange={(e) => set('refund_due', e.target.value)} /><FieldMsg name="refund_due" />
           </label>
         )}
         <label className="field">{tr('Note')}
-          <input value={f.note} onChange={(e) => set('note', e.target.value)} maxLength={300} />
+          <input value={f.note} onChange={(e) => set('note', e.target.value)} maxLength={300} /><FieldMsg name="note" />
         </label>
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -92,6 +93,7 @@ function PaymentForm({ initial, onSave, onCancel, busy }: { initial: Form; onSav
         <button type="button" className="btn" onClick={onCancel} disabled={busy}>{tr('Cancel')}</button>
       </div>
     </div>
+    </FieldIssueCtx.Provider>
   );
 }
 
@@ -103,11 +105,14 @@ export function MoneyTab({ bidId, onChanged }: { bidId: number; onChanged?: () =
   const [editing, setEditing] = useState<number | 'new' | null>(null);
   const [seed, setSeed] = useState<Partial<Form>>({});
   const [busy, setBusy] = useState(false);
+  const [issue, setIssue] = useState<FieldIssue>(null);
   const d = data.data;
 
   async function run(fn: () => Promise<unknown>, done: string) {
     setBusy(true);
-    try { await fn(); data.reload(); setEditing(null); toast(done); onChanged?.(); } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
+    try { await fn(); data.reload(); setEditing(null); setIssue(null); toast(done); onChanged?.(); }
+    catch (e) { if (e instanceof ApiError && e.field) setIssue({ field: e.field, message: e.message }); else toast((e as Error).message, 'bad'); }
+    finally { setBusy(false); }
   }
   const payload = (f: Form) => {
     const amount = parseMoney(f.amount);
@@ -128,7 +133,7 @@ export function MoneyTab({ bidId, onChanged }: { bidId: number; onChanged?: () =
         </div>
         <Only role="bidder"><button type="button" className="btn primary" onClick={() => { setSeed({}); setEditing('new'); }} disabled={editing !== null}>{tr('Add a payment')}</button></Only>
       </div>
-      {data.error && <div className="alert bad">{data.error}</div>}
+      <ErrorNote error={data.error} onRetry={data.reload} />
       {data.loading && !d && <Skeleton h={60} />}
       {d && (
         <>
@@ -139,12 +144,12 @@ export function MoneyTab({ bidId, onChanged }: { bidId: number; onChanged?: () =
               <Only role="bidder"><button type="button" className="btn small" onClick={() => { setSeed({ kind: 'emd', amount: String(d.suggestion!.amount), status: 'planned' }); setEditing('new'); }}>{tr('Record the EMD')}</button></Only>
             </div>
           )}
-          {editing === 'new' && <PaymentForm initial={blank(seed)} busy={busy} onCancel={() => setEditing(null)} onSave={(f) => run(() => api.addMoney(bidId, payload(f)), tr('Payment saved'))} />}
+          {editing === 'new' && <PaymentForm issue={issue} initial={blank(seed)} busy={busy} onCancel={() => { setEditing(null); setIssue(null); }} onSave={(f) => run(() => api.addMoney(bidId, payload(f)), tr('Payment saved'))} />}
           {d.items.length === 0 && editing === null && !d.suggestion && <p className="muted">{tr('Nothing recorded yet.')}</p>}
           {d.items.map((i) => (
             <div key={i.id} style={{ borderTop: '1px solid var(--border)', padding: '10px 0' }}>
               {editing === i.id ? (
-                <PaymentForm initial={fromItem(i)} busy={busy} onCancel={() => setEditing(null)} onSave={(f) => run(() => api.changeMoney(bidId, i.id, payload(f)), tr('Payment saved'))} />
+                <PaymentForm issue={issue} initial={fromItem(i)} busy={busy} onCancel={() => setEditing(null)} onSave={(f) => run(() => api.changeMoney(bidId, i.id, payload(f)), tr('Payment saved'))} />
               ) : (
                 <>
                   <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap' }}>

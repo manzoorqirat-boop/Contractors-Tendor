@@ -239,8 +239,9 @@ To try these quickly, run both seed scripts (section 0).
 |---|---|---|---|
 | A page that fails to draw shows a way out | Any page | Hard to cause by hand. In a developer console, an API answer that is the wrong shape for a card does it. | "Something went wrong on this page" with Reload and Go to the Dashboard buttons, not a blank page |
 | Offline bar | Any page | Turn the computer's Wi-Fi off while the page is open | A bar across the top says "You are offline" and goes away when the connection returns |
-| Unsaved Settings | Settings | Change the recipients, then click Dashboard in the menu | "Leave Settings without saving?" with Stay here / Leave without saving |
-| Which field is wrong | Any form | Add a bid checklist line of more than 300 characters | The message gives the limit and your length |
+| Unsaved Settings | Settings | Change the recipients, then click Dashboard in the menu, or press the browser's Back button | "Leave Settings without saving?" with Stay here / Leave without saving; Stay keeps you on Settings with your edit |
+| Try again | Any page that loads data | Turn off Wi-Fi, open the Dashboard, turn it back on | A message with **Try again**; it also loads by itself when the connection returns |
+| Which field is wrong | A bid's dates, prices, notes, a payment, Add a tender | On a bid, type a closing date in the year 1900; on a payment, an amount of 0 | The message appears right under that box, in words, and under no other box |
 | Too-long text refused | Bid notes, checklist lines, Add a tender by hand | Type more than 4,000 characters of notes | A message naming the limit, and nothing cut |
 | Believable dates | A bid's dates | Enter a closing date in the year 1900 | "That date does not look right. Check the year" |
 | Won/lost price reminder | Bids | Move a bid with no quoted price to Won | A message asking you to add the quoted price on the Result tab |

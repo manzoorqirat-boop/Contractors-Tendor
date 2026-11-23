@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from .bids import _DATE, BidBook, BidError, _when
+from .bids import _DATE, BidBook, BidError, _when, fit_text
 
 # kind -> (label, comes back to you?)
 KINDS: dict[str, tuple[str, bool]] = {
@@ -46,38 +46,38 @@ def clean(raw: Any, today: date, partial: bool = False) -> dict[str, Any]:
     for k, v in raw.items():
         rule = _FIELDS.get(k)
         if rule is None:
-            raise BidError(f"'{k}' cannot be set")
+            raise BidError(f"'{k}' cannot be set", str(k))
         if rule == "kind":
             if v not in KINDS:
-                raise BidError("Choose what the payment is for")
+                raise BidError("Choose what the payment is for", k)
             out[k] = v
         elif rule == "instrument":
             if v not in INSTRUMENTS:
-                raise BidError("Choose how it was paid")
+                raise BidError("Choose how it was paid", k)
             out[k] = v
         elif rule == "status":
             if v not in STATUSES:
-                raise BidError("Unknown status")
+                raise BidError("Unknown status", k)
             out[k] = v
         elif rule == "amount":
             try:
                 n = float(v)
             except (TypeError, ValueError):
-                raise BidError("The amount must be a number") from None
+                raise BidError("The amount must be a number", k) from None
             if isinstance(v, bool) or not 0 < n < MAX_AMOUNT:
-                raise BidError("The amount must be more than zero")
+                raise BidError("The amount must be more than zero", k)
             out[k] = round(n, 2)
         elif rule == "date":
             v = str(v).strip() if v is not None else ""
             if v and (not _DATE.match(v) or _when(v) is None):
-                raise BidError("Dates look like 2026-11-20, and must be real dates")
+                raise BidError("Dates look like 2026-11-20, and must be real dates", k)
             out[k] = v[:10] or None
         else:
-            out[k] = str(v if v is not None else "").strip()[: int(rule)]
+            out[k] = fit_text(v, int(rule), "The " + k.replace("_", " "), k)
     if not partial:
         for need, message in (("kind", "Choose what the payment is for"), ("amount", "Enter the amount")):
             if need not in out:
-                raise BidError(message)
+                raise BidError(message, need)
         out.setdefault("instrument", "online")
         out.setdefault("status", "planned")
     return out

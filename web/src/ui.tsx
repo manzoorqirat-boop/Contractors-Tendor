@@ -163,3 +163,20 @@ export function OfflineBanner() {
   if (online) return null;
   return <div className="offline-bar" role="status">{tr('You are offline. Changes cannot be saved until the connection returns.')}</div>;
 }
+
+// ---- a message beside the box it is about ---------------------------------------------------------------------------
+export type FieldIssue = { field: string; message: string } | null;
+export const FieldIssueCtx = createContext<FieldIssue>(null);
+
+/** Shows the server's complaint beside the box it is about (`name` is the box's name in the request), and nothing when it is about another box. */
+export function FieldMsg({ name, issue }: { name: string; issue?: FieldIssue }) {
+  const shared = useContext(FieldIssueCtx);
+  const i = issue === undefined ? shared : issue;
+  return i && i.field === name ? <span className="field-err" role="alert">{i.message}</span> : null;
+}
+
+/** A failed load with a way to try again. */
+export function ErrorNote({ error, onRetry, tone = 'bad' }: { error: string | null | undefined; onRetry?: () => void; tone?: 'bad' | 'warn' }) {
+  if (!error) return null;
+  return <div className={`alert ${tone}`} role="alert">{error}{onRetry && <> <button type="button" className="link-btn" onClick={onRetry}>{tr('Try again')}</button></>}</div>;
+}

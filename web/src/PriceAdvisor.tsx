@@ -107,7 +107,7 @@ export function PriceAdvisor({ bidId, onUse }: { bidId: number; onUse: (price: n
       <p className="muted small" style={{ marginTop: 10 }}>
         {adv.samples >= 3
           ? <>{tr('Based on {basis}: {confidence}.', { basis: adv.basis, confidence: CONF[adv.confidence] })} {adv.quantiles?.p50 !== undefined && <>{tr('Lowest bidders on similar tenders usually priced between {low} and {high} against the estimate (the middle half; the middle is {mid}).', { low: sgn(adv.quantiles.p25), high: sgn(adv.quantiles.p75), mid: sgn(adv.quantiles.p50) })} </>}{tr('Win chance is the share of those where the lowest bidder priced at or above this quote; groups with few results borrow from wider ones. Add more results on the Bids page, Results view, under Price history.')}</>
-          : tr('No win chance yet: there are fewer than 3 recorded results. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.')}
+          : (adv.samples === 1 ? tr('No win chance yet: you have {n} recorded result and 3 are needed. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.', { n: 1 }) : tr('No win chance yet: you have {n} recorded results and 3 are needed. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.', { n: adv.samples }))}
       </p>
       {adv.notes.length > 0 && <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>{adv.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
     </section>

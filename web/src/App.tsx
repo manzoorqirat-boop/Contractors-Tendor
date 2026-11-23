@@ -10,7 +10,7 @@ import { InstallButton, OfflineBar } from './pwa';
 import { LanguageSwitch } from './LanguageSwitch';
 import { AccentPicker } from './AccentPicker';
 import { loadBranding, Logo } from './Brand';
-import { ToastProvider, Drawer, OfflineBanner } from './ui';
+import { Drawer, ErrorNote, OfflineBanner, ToastProvider } from './ui';
 import { ConfirmProvider, useConfirm } from './confirm';
 import { unsaved } from './unsaved';
 import { SessionProvider, useSession } from './session';
@@ -123,12 +123,26 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
   // The address bar always describes the current view, so a refresh, a bookmark or a shared link returns to it.
   useEffect(() => {
     const url = `#/${tab}${tab === 'bids' && bidId ? `/${bidId}` : ''}${(() => { const q = toParams(filters, display).toString(); return q ? `?${q}` : ''; })()}`;
+    lastUrl.current = url;
     if (url === location.hash) return;
     if (push.current) { history.pushState(null, '', url); push.current = false; } else history.replaceState(null, '', url);
   }, [tab, bidId, filters, display]);
 
+  // The browser's Back and Forward buttons: leaving Settings with unsaved changes asks first, as the menu does. If the answer is "stay", the address goes back to Settings.
+  const tabNow = useRef(tab);
+  tabNow.current = tab;
+  const confirmNow = useRef<ReturnType<typeof useConfirm> | null>(null);
+  const lastUrl = useRef(location.hash);
   useEffect(() => {
-    const onPop = () => { const s = parseHash(); setTab(s.tab); setBidId(s.bidId); setFiltersState(s.filters); setDisplayState(s.display); };
+    const onPop = async () => {
+      const s = parseHash();
+      if (tabNow.current === 'settings' && s.tab !== 'settings' && unsaved.get() && confirmNow.current
+        && !(await confirmNow.current({ title: tr('Leave Settings without saving?'), body: tr('You have changes that are not saved. If you leave now they will be lost.'), confirmLabel: tr('Leave without saving'), cancelLabel: tr('Stay here'), danger: true }))) {
+        history.pushState(null, '', lastUrl.current);
+        return;
+      }
+      setTab(s.tab); setBidId(s.bidId); setFiltersState(s.filters); setDisplayState(s.display);
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -136,6 +150,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
   const setFilters = useCallback((f: Filters) => { setFiltersState(f); setDisplayState((d) => (d.page === 1 ? d : { ...d, page: 1 })); }, []);
   const setDisplay = useCallback((d: Partial<Display>) => setDisplayState((cur) => ({ ...cur, ...d })), []);
   const confirm = useConfirm();
+  confirmNow.current = confirm;
   const go = useCallback(async (t: Tab, f?: Filters, d?: Partial<Display>) => {
     if (tab === 'settings' && t !== 'settings' && unsaved.get()
       && !(await confirm({ title: tr('Leave Settings without saving?'), body: tr('You have changes that are not saved. If you leave now they will be lost.'), confirmLabel: tr('Leave without saving'), cancelLabel: tr('Stay here'), danger: true }))) return;
@@ -224,7 +239,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
       </aside>
       <div className="content">
       <OfflineBar />
-      {config.error && <div className="alert bad">{config.error}</div>}
+      <ErrorNote error={config.error} onRetry={config.reload} />
       {config.data?.storage_warning && <div className="alert bad" role="alert"><strong>{tr('Your data is not safe.')}</strong> {config.data.storage_warning}</div>}
       {config.data?.ai_enabled && (tab === 'dashboard' || tab === 'explore' || tab === 'tenders') && <div className="askwrap"><AskBar nav={nav} /></div>}
       <main id="main" tabIndex={-1}>

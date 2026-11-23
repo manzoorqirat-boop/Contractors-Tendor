@@ -1,4 +1,5 @@
 import { ScrollX } from './ScrollX';
+import { ErrorNote } from './ui';
 import { useState } from 'react';
 import { api } from './api';
 import { fmtDate } from './format';
@@ -135,7 +136,7 @@ export function PortalsManager({ onChange }: { onChange: () => void }) {
             {busy === 'all' ? <><span className="spinner" /> Checking…</> : 'Check all portals now'}
           </button>
         </div>
-        {list.error && <div className="alert bad">{list.error}</div>}
+        <ErrorNote error={list.error} onRetry={list.reload} />
         {list.loading && !list.data && <span className="spinner" />}
         {list.data && manual.length === 0 && (
           <p className="sub" style={{ margin: 0 }}>
@@ -282,7 +283,7 @@ function CoverageProof({ onDone }: { onDone: () => void }) {
         </div>
       </div>
       {msg && <div className={`alert ${msg.tone}`} role="alert">{msg.text}</div>}
-      {rep.error && <div className="alert bad">{rep.error}</div>}
+      <ErrorNote error={rep.error} onRetry={rep.reload} />
       {s && <p style={{ margin: '0 0 8px' }}><strong>{tr('{n} of {total} portals are proven readable from this server.', { n: s.proven, total: s.portals })}</strong>{s.untested > 0 && ` ${tr('{n} not tested yet.', { n: s.untested })}`}</p>}
       {rows.length > 0 && (
         <ScrollX label="Coverage">
@@ -359,7 +360,7 @@ function PortalCatalogue({ onDone }: { onDone: () => void }) {
           {allTicked ? tr('Untick all') : tr('Tick all not yet added')}
         </button>
       </div>
-      {cat.error && <div className="alert bad">{cat.error}</div>}
+      <ErrorNote error={cat.error} onRetry={cat.reload} />
       {cat.loading && !cat.data && <span className="spinner" />}
       {result && <div className={`alert ${result.tone}`} role="status">{result.text}</div>}
       {groups.map((g) => (

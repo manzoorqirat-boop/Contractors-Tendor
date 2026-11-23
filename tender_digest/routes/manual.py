@@ -15,6 +15,7 @@ from ..api_common import (
     MAX_VIEWS,
     VIEW_KEYS,
     AskBody,
+    FieldHTTPException,
     ListingBody,
     ManualBody,
     ManualEdit,
@@ -44,6 +45,8 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     tender_for_ai = ctx.tender_for_ai
 
 
+    DATE_FIELDS = {"The publish date": "published", "The closing date": "closing", "The opening date": "opening"}
+
     def when_or_422(v: str | None, label: str) -> datetime | None:
         v = (v or "").strip()
         if not v:
@@ -51,9 +54,9 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         try:
             d = datetime.fromisoformat(v)
         except ValueError:
-            raise HTTPException(422, f"{label} should look like 2026-12-02 15:00") from None
+            raise FieldHTTPException(422, f"{label} should look like 2026-12-02 15:00", DATE_FIELDS.get(label)) from None
         if not 2000 <= d.year <= 2100:
-            raise HTTPException(422, f"{label} is not a believable date")
+            raise FieldHTTPException(422, f"{label} is not a believable date", DATE_FIELDS.get(label))
         if d.tzinfo is not None:  # "...Z" or "+00:00": convert to local time, do not just drop the offset
             d = d.astimezone(ZoneInfo(config.tz_name))
         return d.replace(tzinfo=None)
@@ -61,21 +64,21 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     def check_listing(published: datetime | None, closing: datetime | None, opening: datetime | None, value: float | None, emd: float | None) -> None:
         """Rules between the fields of a hand-added tender. Each message says what to change."""
         if published and closing and published > closing:
-            raise HTTPException(422, "The publish date is after the closing date. Check both dates")
+            raise FieldHTTPException(422, "The publish date is after the closing date. Check both dates", "published")
         if opening and closing and opening < closing:
-            raise HTTPException(422, "Bids cannot open before the tender closes. Check the opening and closing dates")
+            raise FieldHTTPException(422, "Bids cannot open before the tender closes. Check the opening and closing dates", "opening")
         if value is not None and emd is not None and emd > value:
-            raise HTTPException(422, "The EMD is larger than the tender value. Check both amounts")
+            raise FieldHTTPException(422, "The EMD is larger than the tender value. Check both amounts", "emd")
 
     def check_tender_id(tid: str) -> None:
         if re.search(r"[<>\x00-\x1f\x7f]", tid):
-            raise HTTPException(422, "The Tender ID cannot contain < or > or control characters. Copy it exactly as the portal shows it")
+            raise FieldHTTPException(422, "The Tender ID cannot contain < or > or control characters. Copy it exactly as the portal shows it", "tender_id")
 
     def clean_money(v: float | None, label: str) -> float | None:
         if v is None:
             return None
         if not 0 < v < 1e13:
-            raise HTTPException(422, f"{label} must be a positive amount in rupees")
+            raise FieldHTTPException(422, f"{label} must be a positive amount in rupees", "emd" if "EMD" in label else "value")
         return float(v)
 
     @app.post("/api/tenders/manual/read", dependencies=auth)
@@ -105,21 +108,21 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     def _manual_create(body: ManualBody) -> dict:
         tid = body.tender_id.strip()[:80]
         if not tid:
-            raise HTTPException(422, "The Tender ID is needed: it is how you find the tender on its portal")
+            raise FieldHTTPException(422, "The Tender ID is needed: it is how you find the tender on its portal", "tender_id")
         if not (body.title.strip() or body.description.strip()):
-            raise HTTPException(422, "Give the work a name or description")
+            raise FieldHTTPException(422, "Give the work a name or description", "description")
         closing = when_or_422(body.closing, "The closing date")
         if closing is None:
-            raise HTTPException(422, "The closing date is needed, so deadlines and reminders work")
+            raise FieldHTTPException(422, "The closing date is needed, so deadlines and reminders work", "closing")
         check_tender_id(tid)
         if closing <= now():
-            raise HTTPException(422, "The closing date has already passed. Bids can no longer be filed, so check the date")
+            raise FieldHTTPException(422, "The closing date has already passed. Bids can no longer be filed, so check the date", "closing")
         if store.find_by_tender_id(tid):
             raise HTTPException(409, "A tender with this ID is already in the app. Open it from the Tenders page instead of adding it again")
-        for text, limit, what in ((body.title, 300, "The title"), (body.description, 1000, "The description"), (body.reference, 120, "The reference"), (body.organisation, 300, "The department"),
-                                  (body.location, 120, "The location")):
+        for text, limit, what, field in ((body.title, 300, "The title", "title"), (body.description, 1000, "The description", "description"), (body.reference, 120, "The reference", "reference"),
+                                         (body.organisation, 300, "The department", "organisation"), (body.location, 120, "The location", "location"), (body.portal_name, 80, "The portal name", "portal_name")):
             if len(text.strip()) > limit:
-                raise HTTPException(422, f"{what} can be at most {limit} characters, and this is {len(text.strip())}. Shorten it and try again")
+                raise FieldHTTPException(422, f"{what} can be at most {limit} characters, and this is {len(text.strip())}. Shorten it and try again", field)
         desc = body.description.strip()
         published, opening = when_or_422(body.published, "The publish date"), when_or_422(body.opening, "The opening date")
         value, emd = clean_money(body.value, "The value"), clean_money(body.emd, "The EMD")
@@ -127,7 +130,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         t = Tender(portal="manual", tender_id=tid, title=(body.title.strip() or desc)[:300], reference=body.reference.strip()[:120], organisation=body.organisation.strip()[:300],
                    published=published, closing=closing, opening=opening,
                    description=desc or body.title.strip(), category="", value=value, location=body.location.strip()[:120],
-                   emd=emd, extra={"portal_name": body.portal_name.strip()[:80]})
+                   emd=emd, extra={"portal_name": body.portal_name.strip()})
         store.keep(t, now())
         store.mark_emailed([t.key])  # you added it yourself: it does not belong in "new since the last digest"
         keep_source(t.key, body.text, body.pdf_base64)
@@ -161,7 +164,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
             if v is not None:
                 limit = 1000 if f == "description" else 120 if f in ("reference", "location") else 300
                 if len(v.strip()) > limit:
-                    raise HTTPException(422, f"The {f} can be at most {limit} characters, and this is {len(v.strip())}. Shorten it and try again")
+                    raise FieldHTTPException(422, f"The {f} can be at most {limit} characters, and this is {len(v.strip())}. Shorten it and try again", f)
                 setattr(t, f, v.strip())
                 changed[f] = getattr(t, f)
         for f, label in (("published", "The publish date"), ("closing", "The closing date"), ("opening", "The opening date")):
@@ -169,7 +172,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
             if v is not None:
                 d = when_or_422(v, label)
                 if f == "closing" and d is None:
-                    raise HTTPException(422, "The closing date cannot be empty")
+                    raise FieldHTTPException(422, "The closing date cannot be empty", "closing")
                 setattr(t, f, d)
                 changed[f] = d.isoformat(timespec="seconds") if d else None
         for f, label, clear in (("value", "The value", body.clear_value), ("emd", "The EMD", body.clear_emd)):
@@ -180,9 +183,9 @@ def register(app: FastAPI, ctx: Ctx) -> None:
                 setattr(t, f, clean_money(getattr(body, f), label))
                 changed[f] = getattr(t, f)
         if not (t.title or t.description):
-            raise HTTPException(422, "Give the work a name or description")
+            raise FieldHTTPException(422, "Give the work a name or description", "description")
         if t.closing != old_closing and t.closing and t.closing <= now():
-            raise HTTPException(422, "The closing date has already passed. Bids can no longer be filed, so check the date")
+            raise FieldHTTPException(422, "The closing date has already passed. Bids can no longer be filed, so check the date", "closing")
         check_listing(t.published, t.closing, t.opening, t.value, t.emd)
         store.keep(t, now())
         bids.sync_listing(key, changed)

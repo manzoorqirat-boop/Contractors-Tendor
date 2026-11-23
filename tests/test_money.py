@@ -63,8 +63,12 @@ def test_bad_payments_are_refused_with_a_reason(raw, message):
         clean("not a dict", TODAY)
 
 
-def test_long_text_is_cut_not_refused():
-    got = clean({"kind": "emd", "amount": 1, "reference": "x" * 500, "note": "y" * 900}, TODAY)
+def test_long_text_is_refused_with_the_box_it_belongs_to_and_nothing_is_cut():
+    for field, limit in (("reference", 60), ("note", 300)):
+        with pytest.raises(BidError) as e:
+            clean({"kind": "emd", "amount": 1, field: "x" * (limit + 1)}, TODAY)
+        assert e.value.field == field and f"at most {limit}" in str(e.value)
+    got = clean({"kind": "emd", "amount": 1, "reference": "x" * 60, "note": "y" * 300}, TODAY)      # exactly the limit is fine
     assert len(got["reference"]) == 60 and len(got["note"]) == 300
 
 

@@ -14,9 +14,11 @@ from ..api_common import (
     BoqCost,
     BoqUpload,
     CatalogueBody,
+    FieldHTTPException,
     RiskBody,
     SimBody,
     VaultBody,
+    reject_unknown,
 )
 from ..bids import VAULT_KINDS, BidError
 from ..boq import advisor
@@ -154,7 +156,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         try:
             return bids.vault_update(doc_id, body)
         except BidError as e:
-            raise HTTPException(404 if "No such" in str(e) else 422, str(e)) from None
+            raise FieldHTTPException(404 if "No such" in str(e) else 422, str(e), e.field) from None
 
     @app.delete("/api/vault/{doc_id}", dependencies=auth)
     def vault_delete(doc_id: int) -> dict:
@@ -180,6 +182,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
 
     @app.put("/api/company-profile", dependencies=auth)
     def put_company_profile(body: dict[str, Any]) -> dict:
+        reject_unknown(body, {"company_profile"})
         try:
             cleaned = appsettings.clean({"company_profile": body.get("company_profile")}, list(portal_names))
         except appsettings.SettingsError as e:
@@ -194,7 +197,9 @@ def register(app: FastAPI, ctx: Ctx) -> None:
             raise HTTPException(422, "Facts must be a list of up to 40 items")
         facts = []
         for f in raw:
-            label, value = str((f or {}).get("label", "")).strip()[:60], str((f or {}).get("value", "")).strip()[:160]
+            label, value = str((f or {}).get("label", "")).strip(), str((f or {}).get("value", "")).strip()
+            if len(label) > 60 or len(value) > 160:
+                raise HTTPException(422, f"A fact's name can be at most 60 characters and its value 160 (\"{label[:30]}\" is {len(label)} and {len(value)}). Shorten it and try again")
             if label and value:
                 facts.append({"label": label, "value": value})
         store.put_settings({"company_facts": facts})
