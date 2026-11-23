@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { inr } from './format';
+import { tr } from './i18n';
 import { Skeleton, useToast } from './ui';
 import type { Advice } from './types';
 
 const sgn = (p: number) => `${p > 0 ? '+' : ''}${p.toFixed(1)}%`;
-const CONF: Record<Advice['confidence'], string> = { none: 'no history yet', rough: 'rough guide', fair: 'fair basis', good: 'good basis' };
+const CONF: Record<Advice['confidence'], string> = { none: tr('no history yet'), rough: tr('rough guide'), fair: tr('fair basis'), good: tr('good basis') };
 
 /** Where to quote: your cost range against how past lowest bidders priced similar tenders. */
 export function PriceAdvisor({ bidId, onUse }: { bidId: number; onUse: (price: number) => void }) {
@@ -29,14 +30,14 @@ export function PriceAdvisor({ bidId, onUse }: { bidId: number; onUse: (price: n
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [bidId]);
 
-  const head = <h2>Price advisor</h2>;
+  const head = <h2>{tr('Price advisor')}</h2>;
   if (busy && !adv) return <section className="card" style={{ marginBottom: 14 }}>{head}<Skeleton h={90} /></section>;
   if (!adv) {
     return (
       <section className="card" style={{ marginBottom: 14 }}>
         {head}
-        <p className="sub">{err || 'Needs a costed BOQ.'}</p>
-        <button className="btn small" onClick={() => load()}>Try again</button>
+        <p className="sub">{err || tr('Needs a costed BOQ.')}</p>
+        <button className="btn small" onClick={() => load()}>{tr('Try again')}</button>
       </section>
     );
   }
@@ -54,18 +55,20 @@ export function PriceAdvisor({ bidId, onUse }: { bidId: number; onUse: (price: n
     <section className="card" style={{ marginBottom: 14 }}>
       {head}
       <p className="sub">
-        Your cost {adv.mode === 'with_risks' ? <>is <strong>{inr(adv.cost_low, false)}</strong> to <strong>{inr(adv.cost_high, false)}</strong> once the risk allowances are added</> : <>is <strong>{inr(adv.cost_low, false)}</strong> before any risk allowances</>}, against a buyer's estimate of <strong>{inr(adv.estimate, false)}</strong>.
-        Break-even is {sgn(adv.floor_pct)} at the minimum margin, and {sgn(adv.target_pct)} at your target margin.
+        {adv.mode === 'with_risks'
+          ? tr('Your cost is {low} to {high} once the risk allowances are added, against a buyer\'s estimate of {estimate}.', { low: inr(adv.cost_low, false), high: inr(adv.cost_high, false), estimate: inr(adv.estimate, false) })
+          : tr('Your cost is {low} before any risk allowances, against a buyer\'s estimate of {estimate}.', { low: inr(adv.cost_low, false), estimate: inr(adv.estimate, false) })}
+        {' '}{tr('Break-even is {floor} at the minimum margin, and {target} at your target margin.', { floor: sgn(adv.floor_pct), target: sgn(adv.target_pct) })}
       </p>
 
       <div className="adv-controls">
-        <label>Minimum margin %<input type="number" min={0} max={40} step={0.5} value={minM} onChange={(e) => setMinM(e.target.value)} /></label>
-        <label>Target margin %<input type="number" min={1} max={45} step={0.5} value={tgtM} onChange={(e) => setTgtM(e.target.value)} /></label>
-        <button className="btn small" onClick={() => load()} disabled={busy}>{busy ? 'Updating…' : 'Update'}</button>
+        <label>{tr('Minimum margin %')}<input type="number" min={0} max={40} step={0.5} value={minM} onChange={(e) => setMinM(e.target.value)} /></label>
+        <label>{tr('Target margin %')}<input type="number" min={1} max={45} step={0.5} value={tgtM} onChange={(e) => setTgtM(e.target.value)} /></label>
+        <button className="btn small" onClick={() => load()} disabled={busy}>{busy ? tr('Updating…') : tr('Update')}</button>
       </div>
       {err && <div className="alert bad" role="alert">{err}</div>}
 
-      <svg className="adv-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Chance of winning at each quote, from the history of similar tenders">
+      <svg className="adv-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={tr('Chance of winning at each quote, from the history of similar tenders')}>
         <rect x={L} y={T} width={Math.max(0, X(Math.max(x0, Math.min(x1, adv.floor_pct))) - L)} height={H - T - B} fill="var(--bad-soft)" />
         {[0, 50, 100].map((w) => <g key={w}><line x1={L} x2={W - R} y1={Y(w)} y2={Y(w)} stroke="var(--grid)" /><text x={L - 6} y={Y(w) + 4} textAnchor="end">{w}%</text></g>)}
         {curve && <path d={curve} fill="none" stroke="var(--accent)" strokeWidth={2.5} />}
@@ -79,32 +82,32 @@ export function PriceAdvisor({ bidId, onUse }: { bidId: number; onUse: (price: n
         <text x={X(sel.pct)} y={H - 6} textAnchor="middle" style={{ fill: 'var(--text)', fontWeight: 700 }}>{sgn(sel.pct)}</text>
       </svg>
       <div className="adv-legend">
-        {curve && <span><i style={{ borderColor: 'var(--accent)' }} />Chance of winning</span>}
-        <span><i style={{ borderColor: 'var(--bad)', borderTopStyle: 'dashed' }} />Minimum margin</span>
-        <span><i style={{ borderColor: 'var(--ok)', borderTopStyle: 'dashed' }} />Target margin</span>
-        <span><i style={{ borderColor: 'var(--text)' }} />Selected quote</span>
-        <span>Shaded: loses money if every risk hits</span>
+        {curve && <span><i style={{ borderColor: 'var(--accent)' }} />{tr('Chance of winning')}</span>}
+        <span><i style={{ borderColor: 'var(--bad)', borderTopStyle: 'dashed' }} />{tr('Minimum margin')}</span>
+        <span><i style={{ borderColor: 'var(--ok)', borderTopStyle: 'dashed' }} />{tr('Target margin')}</span>
+        <span><i style={{ borderColor: 'var(--text)' }} />{tr('Selected quote')}</span>
+        <span>{tr('Shaded: loses money if every risk hits')}</span>
       </div>
 
-      <input className="adv-slider" type="range" min={0} max={pts.length - 1} value={idx} onChange={(e) => setIdx(Number(e.target.value))} aria-label="Quote against the estimate" aria-valuetext={`${sgn(sel.pct)} against the estimate`} />
+      <input className="adv-slider" type="range" min={0} max={pts.length - 1} value={idx} onChange={(e) => setIdx(Number(e.target.value))} aria-label={tr('Quote against the estimate')} aria-valuetext={tr('{pct} against the estimate', { pct: sgn(sel.pct) })} />
 
       <div className="adv-read">
-        <div><div className="k">Quote</div><div className="v">{sgn(sel.pct)}</div><div className="muted small">{inr(sel.price, false)}</div></div>
-        <div><div className="k">Profit if every risk hits</div><div className={`v ${losing ? 'bad' : ''}`}>{inr(sel.margin_worst, false)}</div><div className="muted small">{sel.margin_pct_worst.toFixed(1)}% of the price</div></div>
-        <div><div className="k">Profit if none hit</div><div className="v">{inr(sel.margin_best, false)}</div></div>
-        <div><div className="k">Chance of winning</div><div className="v">{sel.win === null ? '-' : `${sel.win.toFixed(0)}%`}</div><div className="muted small">{sel.expected === null ? 'No history yet' : `Expected profit ${inr(sel.expected, false)}`}</div></div>
+        <div><div className="k">{tr('Quote')}</div><div className="v">{sgn(sel.pct)}</div><div className="muted small">{inr(sel.price, false)}</div></div>
+        <div><div className="k">{tr('Profit if every risk hits')}</div><div className={`v ${losing ? 'bad' : ''}`}>{inr(sel.margin_worst, false)}</div><div className="muted small">{tr('{pct}% of the price', { pct: sel.margin_pct_worst.toFixed(1) })}</div></div>
+        <div><div className="k">{tr('Profit if none hit')}</div><div className="v">{inr(sel.margin_best, false)}</div></div>
+        <div><div className="k">{tr('Chance of winning')}</div><div className="v">{sel.win === null ? '-' : `${sel.win.toFixed(0)}%`}</div><div className="muted small">{sel.expected === null ? tr('No history yet') : tr('Expected profit {amount}', { amount: inr(sel.expected, false) })}</div></div>
       </div>
 
       <div className="head-actions">
-        <button className="btn small" onClick={() => setIdx(Math.max(0, pts.findIndex((p) => p.pct >= adv.recommended_pct - 1e-9)))}>Go to recommended ({sgn(adv.recommended_pct)})</button>
-        <button className="btn small primary" onClick={() => { onUse(Math.round(sel.price)); toast(`Quoted price set to ${inr(sel.price, false)}. Find it under Result.`); }}>Use this as my quoted price</button>
+        <button className="btn small" onClick={() => setIdx(Math.max(0, pts.findIndex((p) => p.pct >= adv.recommended_pct - 1e-9)))}>{tr('Go to recommended ({pct})', { pct: sgn(adv.recommended_pct) })}</button>
+        <button className="btn small primary" onClick={() => { onUse(Math.round(sel.price)); toast(tr('Quoted price set to {amount}. Find it under Result.', { amount: inr(sel.price, false) })); }}>{tr('Use this as my quoted price')}</button>
       </div>
-      {adv.my_value ? <p className="muted small" style={{ marginTop: 8 }}>Your recorded quoted price is {inr(adv.my_value, false)}.</p> : null}
+      {adv.my_value ? <p className="muted small" style={{ marginTop: 8 }}>{tr('Your recorded quoted price is {amount}.', { amount: inr(adv.my_value, false) })}</p> : null}
 
       <p className="muted small" style={{ marginTop: 10 }}>
         {adv.samples >= 3
-          ? <>Based on {adv.basis}: {CONF[adv.confidence]}. {adv.quantiles?.p50 !== undefined && <>Lowest bidders on similar tenders usually priced between <strong>{sgn(adv.quantiles.p25)}</strong> and <strong>{sgn(adv.quantiles.p75)}</strong> against the estimate (the middle half; the middle is {sgn(adv.quantiles.p50)}). </>}Win chance is the share of those where the lowest bidder priced at or above this quote; groups with few results borrow from wider ones. Add more results on the Bids page, Results view, under Price history.</>
-          : 'No win chance yet: there are fewer than 3 recorded results. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.'}
+          ? <>{tr('Based on {basis}: {confidence}.', { basis: adv.basis, confidence: CONF[adv.confidence] })} {adv.quantiles?.p50 !== undefined && <>{tr('Lowest bidders on similar tenders usually priced between {low} and {high} against the estimate (the middle half; the middle is {mid}).', { low: sgn(adv.quantiles.p25), high: sgn(adv.quantiles.p75), mid: sgn(adv.quantiles.p50) })} </>}{tr('Win chance is the share of those where the lowest bidder priced at or above this quote; groups with few results borrow from wider ones. Add more results on the Bids page, Results view, under Price history.')}</>
+          : tr('No win chance yet: there are fewer than 3 recorded results. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.')}
       </p>
       {adv.notes.length > 0 && <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>{adv.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
     </section>

@@ -512,7 +512,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
 .chips-row[aria-label='Show'] .chip.pick { display: inline-flex; align-items: center; gap: 8px; flex: none; border: 0; border-radius: 7px; background: transparent; padding: 6px 12px; font-weight: 550; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
 .chips-row[aria-label='Show'] .chip.pick:hover { color: var(--text); }
 .chips-row[aria-label='Show'] .chip.pick.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
-.chip-n { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--border); color: var(--muted); font-size: var(--fs-xs); font-weight: 650; text-align: center; font-variant-numeric: tabular-nums; }
+.chip-n { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--border); color: var(--text); font-size: var(--fs-xs); font-weight: 650; text-align: center; font-variant-numeric: tabular-nums; }
 .chips-row[aria-label='Show'] .chip.pick.on .chip-n { background: var(--accent); color: var(--accent-text); }
 .bid-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 14px; }
 .bidcard { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 18px 16px 22px; transition: border-color .15s, box-shadow .2s var(--ease), transform .2s var(--ease); }
@@ -787,3 +787,6 @@ code { overflow-wrap: anywhere; }                 /* a long setting name or web 
 .wa-msg.bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 3px; }
 .wa-form { display: flex; gap: 8px; flex-wrap: wrap; }
 .wa-form input { flex: 1 1 200px; min-width: 0; }
+
+/* Shown across the top while the browser has no connection */
+.offline-bar { position: sticky; top: 0; z-index: 60; padding: 8px 16px; text-align: center; font-size: var(--fs-sm); font-weight: 600; background: var(--warn-soft); color: var(--text); border-bottom: 1px solid var(--warn); }

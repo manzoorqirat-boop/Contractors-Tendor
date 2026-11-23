@@ -10,6 +10,7 @@ import { useToast } from '../ui';
 import { useConfirm } from '../confirm';
 import { ActivityPanel, UsersPanel } from '../Account';
 import { CleanupCard, DataPrivacyCard, IntegrationsPanel } from '../Integrations';
+import { unsaved } from '../unsaved';
 import { ACCENTS, setCompanyAccent } from '../theme';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
@@ -48,6 +49,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
   };
   useEffect(() => { if (data) load(data); }, [data]);
   const dirty = !!form && snap !== '' && norm({ recipients, extra, exclude, minValue, logoText, f: form }) !== snap;
+  useEffect(() => { unsaved.set(dirty); return () => unsaved.set(false); }, [dirty]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };

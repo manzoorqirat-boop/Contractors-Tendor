@@ -19,6 +19,7 @@ import requests
 
 from .bids import PREPARING, _when
 from .gepnic import is_public_host
+from .publicnet import public_session
 
 # Hours before a deadline at which a reminder is sent. The closing date gets one more, late, nudge.
 OFFSETS_HOURS: dict[str, tuple[int, ...]] = {"closing": (72, 24, 6), "emd": (72, 24), "prebid": (72, 24), "query": (72, 24), "opening": (24,)}
@@ -158,7 +159,7 @@ def post_webhook(url: str, text: str, items: list[dict[str, Any]] | None = None,
     payload = {"text": text, "source": "TendAI", "reminders": [{"bid_id": d["bid_id"], "kind": d["kind"], "label": d["label"], "when": d["when"].isoformat(timespec="minutes"),
                                                                 "title": d["title"], "tender_id": d["tender_id"]} for d in (items or [])]}
     try:
-        r = (session or requests).post(url, json=payload, timeout=timeout, allow_redirects=False)
+        r = (session or public_session()).post(url, json=payload, timeout=timeout, allow_redirects=False)
     except requests.RequestException as e:
         raise WebhookError(f"The webhook could not be reached: {str(e)[:120]}") from None
     if r.status_code >= 300:

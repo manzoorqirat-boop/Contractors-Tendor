@@ -163,7 +163,7 @@ function AddTender({ editKey, onClose }: { editKey?: string; onClose: () => void
           )}
           <label className="field">Tender ID <span className="req">(required)</span><input data-field="tender_id" value={form.tender_id} onChange={(e) => set({ tender_id: e.target.value })} {...a11y('tender_id')} onBlur={(e) => { touch('tender_id'); checkId(e.target.value); }} maxLength={80} disabled={!!editKey} placeholder="As written on the notice" /><Msg k="tender_id" /></label>
           <label className="field">Work description <span className="req">(required, or a short name below)</span><textarea data-field="description" value={form.description} onChange={(e) => set({ description: e.target.value })} {...a11y('description')} maxLength={500} rows={3} /><Msg k="description" /></label>
-          <label className="field">Short name (optional)<input value={form.title} onChange={(e) => set({ title: e.target.value })} maxLength={160} /></label>
+          <label className="field">Short name (optional)<input value={form.title} onChange={(e) => set({ title: e.target.value })} maxLength={300} /></label>
           <label className="field">Department / office<input value={form.organisation} onChange={(e) => set({ organisation: e.target.value })} maxLength={300} /></label>
           <label className="field">Place of work<input value={form.location} onChange={(e) => set({ location: e.target.value })} maxLength={120} /></label>
           <div className="ws-grid">

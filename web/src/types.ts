@@ -244,7 +244,7 @@ export interface Forecast {
   coming_round: { dept: string; title: string; last_year: string; value: number | null; expected_from: string }[];
 }
 
-export interface WhatsAppStatus { enabled: boolean; missing: string[]; webhook_url: string; app_url_set: boolean; numbers: { ending: string; role: string }[]; version: string }
+export interface WhatsAppStatus { enabled: boolean; missing: string[]; webhook_url: string; app_url_set: boolean; numbers: { ending: string; role: string }[]; version: string; problems: string[] }
 
 export interface PortalDiagnosis {
   key: string; name: string; verdict: string; page_kind?: string;

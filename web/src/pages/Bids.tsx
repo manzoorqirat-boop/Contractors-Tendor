@@ -57,7 +57,10 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
   const activeCount = data ? ACTIVE.reduce((n, s) => n + data.counts[s], 0) : 0;
 
   async function move(b: BidSummary, stage: Stage) {
-    try { await api.patchBid(b.id, { stage }); list.reload(); alerts.reload(); } catch (e) { toast((e as Error).message, 'bad'); }
+    try {
+      await api.patchBid(b.id, { stage }); list.reload(); alerts.reload();
+      if ((stage === 'won' || stage === 'lost') && !b.my_value) toast(tr('Saved. Add the price you quoted on the bid\'s Result tab, so the price and win-chance history can learn from it.'));
+    } catch (e) { toast((e as Error).message, 'bad'); }
   }
 
   return (
@@ -222,7 +225,11 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save(patch: Record<string, unknown>) {
-    try { setBid(await api.patchBid(id, patch)); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch (e) { toast((e as Error).message, 'bad'); }
+    try {
+      const next = await api.patchBid(id, patch);
+      setBid(next); setSaved(true); setTimeout(() => setSaved(false), 2000);
+      if ((patch.stage === 'won' || patch.stage === 'lost') && !next.my_value) toast(tr('Saved. Add the price you quoted on the bid\'s Result tab, so the price and win-chance history can learn from it.'));
+    } catch (e) { toast((e as Error).message, 'bad'); }
   }
   async function remove() {
     if (!(await confirm({ title: tr('Remove this bid?'), body: 'Its checklist, notes, drafts and results are deleted and this cannot be undone. The tender itself stays in the list.', confirmLabel: tr('Remove bid'), danger: true }))) return;

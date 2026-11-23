@@ -10,8 +10,9 @@ import { InstallButton, OfflineBar } from './pwa';
 import { LanguageSwitch } from './LanguageSwitch';
 import { AccentPicker } from './AccentPicker';
 import { loadBranding, Logo } from './Brand';
-import { ToastProvider, Drawer } from './ui';
-import { ConfirmProvider } from './confirm';
+import { ToastProvider, Drawer, OfflineBanner } from './ui';
+import { ConfirmProvider, useConfirm } from './confirm';
+import { unsaved } from './unsaved';
 import { SessionProvider, useSession } from './session';
 import { AccountPanel, ChangePassword } from './Account';
 import { ShortcutsHelp, useShortcuts } from './Shortcuts';
@@ -90,6 +91,7 @@ export function App() {
   return (
     <ToastProvider>
       <ConfirmProvider>
+        <OfflineBanner />
         {me === undefined && unreachable ? (
           <div className="login"><main className="login-card" style={{ maxWidth: 420, margin: 'auto' }}>
             <h1>{tr('You are offline')}</h1>
@@ -133,7 +135,10 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
 
   const setFilters = useCallback((f: Filters) => { setFiltersState(f); setDisplayState((d) => (d.page === 1 ? d : { ...d, page: 1 })); }, []);
   const setDisplay = useCallback((d: Partial<Display>) => setDisplayState((cur) => ({ ...cur, ...d })), []);
-  const go = useCallback((t: Tab, f?: Filters, d?: Partial<Display>) => {
+  const confirm = useConfirm();
+  const go = useCallback(async (t: Tab, f?: Filters, d?: Partial<Display>) => {
+    if (tab === 'settings' && t !== 'settings' && unsaved.get()
+      && !(await confirm({ title: tr('Leave Settings without saving?'), body: tr('You have changes that are not saved. If you leave now they will be lost.'), confirmLabel: tr('Leave without saving'), cancelLabel: tr('Stay here'), danger: true }))) return;
     push.current = true;
     setTab(t);
     setBidId(null);
@@ -166,7 +171,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreOpen(false); };
     document.addEventListener('mousedown', away); document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
-  }, [moreOpen]);
+  }, [moreOpen, tab, confirm]);
   /** Where a main-menu link points. A plain click changes the page in place; ctrl/cmd-click, middle-click and "open in new tab" use this address. */
   const hrefFor = (t: Tab) => { const q = t === 'explore' || t === 'tenders' ? toParams(filters).toString() : ''; return `#/${t}${q ? `?${q}` : ''}`; };
   const go1 = (e: React.MouseEvent, t: Tab, withFilters?: boolean) => {

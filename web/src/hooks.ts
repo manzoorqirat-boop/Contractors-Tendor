@@ -41,3 +41,15 @@ export function useDebounced<T>(value: T, ms = 350): T {
   useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
   return v;
 }
+
+/** Whether the browser thinks it has a connection. It can say "online" when the server is still unreachable, but "offline" is reliable. */
+export function useOnline(): boolean {
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  useEffect(() => {
+    const up = () => setOnline(true), down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+  }, []);
+  return online;
+}

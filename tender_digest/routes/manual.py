@@ -116,13 +116,17 @@ def register(app: FastAPI, ctx: Ctx) -> None:
             raise HTTPException(422, "The closing date has already passed. Bids can no longer be filed, so check the date")
         if store.find_by_tender_id(tid):
             raise HTTPException(409, "A tender with this ID is already in the app. Open it from the Tenders page instead of adding it again")
-        desc = body.description.strip()[:500]
+        for text, limit, what in ((body.title, 300, "The title"), (body.description, 1000, "The description"), (body.reference, 120, "The reference"), (body.organisation, 300, "The department"),
+                                  (body.location, 120, "The location")):
+            if len(text.strip()) > limit:
+                raise HTTPException(422, f"{what} can be at most {limit} characters, and this is {len(text.strip())}. Shorten it and try again")
+        desc = body.description.strip()
         published, opening = when_or_422(body.published, "The publish date"), when_or_422(body.opening, "The opening date")
         value, emd = clean_money(body.value, "The value"), clean_money(body.emd, "The EMD")
         check_listing(published, closing, opening, value, emd)
-        t = Tender(portal="manual", tender_id=tid, title=(body.title.strip() or desc)[:160], reference=body.reference.strip()[:120], organisation=body.organisation.strip()[:300],
+        t = Tender(portal="manual", tender_id=tid, title=(body.title.strip() or desc)[:300], reference=body.reference.strip()[:120], organisation=body.organisation.strip()[:300],
                    published=published, closing=closing, opening=opening,
-                   description=desc or body.title.strip()[:500], category="", value=value, location=body.location.strip()[:120],
+                   description=desc or body.title.strip(), category="", value=value, location=body.location.strip()[:120],
                    emd=emd, extra={"portal_name": body.portal_name.strip()[:80]})
         store.keep(t, now())
         store.mark_emailed([t.key])  # you added it yourself: it does not belong in "new since the last digest"
@@ -155,7 +159,10 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         for f in ("title", "description", "reference", "organisation", "location"):
             v = getattr(body, f)
             if v is not None:
-                setattr(t, f, v.strip()[:500 if f == "description" else 300])
+                limit = 1000 if f == "description" else 120 if f in ("reference", "location") else 300
+                if len(v.strip()) > limit:
+                    raise HTTPException(422, f"The {f} can be at most {limit} characters, and this is {len(v.strip())}. Shorten it and try again")
+                setattr(t, f, v.strip())
                 changed[f] = getattr(t, f)
         for f, label in (("published", "The publish date"), ("closing", "The closing date"), ("opening", "The opening date")):
             v = getattr(body, f)

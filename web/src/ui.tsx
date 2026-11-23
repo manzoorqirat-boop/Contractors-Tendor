@@ -1,4 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useOnline } from './hooks';
+import { tr } from './i18n';
 
 // ---- toasts ----------------------------------------------------------------------------------------------------
 type Toast = { id: number; text: string; tone: 'ok' | 'bad' };
@@ -153,4 +155,11 @@ export function Drawer({ title, onClose, children, wide }: { title: string; onCl
       </div>
     </div>
   );
+}
+
+/** Shown across the top while the browser has no connection, so a failed save is not a mystery. */
+export function OfflineBanner() {
+  const online = useOnline();
+  if (online) return null;
+  return <div className="offline-bar" role="status">{tr('You are offline. Changes cannot be saved until the connection returns.')}</div>;
 }

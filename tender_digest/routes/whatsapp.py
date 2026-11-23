@@ -34,6 +34,8 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     store = ctx.store
     cfg = whatsapp.Config.from_env()
     guard = whatsapp.Guard()
+    for problem in cfg.problems:
+        log.warning("WHATSAPP_ALLOWED: %s", problem)      # said once at start-up, so a typo is found in the server log as well as on the Settings page
 
     def ai_filters(question: str) -> dict[str, Any]:
         if not ai.configured():
@@ -88,7 +90,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         """For the Settings page: is it set up, what is missing, and the address to give Meta. Numbers are shown only as their last four digits."""
         base = config.app_url or ""
         return {"enabled": cfg.enabled, "missing": cfg.missing(), "webhook_url": f"{base}/api/whatsapp/webhook" if base else "/api/whatsapp/webhook", "app_url_set": bool(base),
-                "numbers": [{"ending": n[-4:], "role": r} for n, r in cfg.allowed.items()], "version": cfg.version}
+                "numbers": [{"ending": n[-4:], "role": r} for n, r in cfg.allowed.items()], "version": cfg.version, "problems": cfg.problems}
 
     @app.post("/api/whatsapp/try", dependencies=auth)
     def whatsapp_try(body: TryBody) -> dict:

@@ -49,22 +49,33 @@ class Config:
     phone_number_id: str = ""
     allowed: dict[str, str] = field(default_factory=dict)       # digits -> role
     version: str = "v21.0"
+    problems: list[str] = field(default_factory=list)           # entries of WHATSAPP_ALLOWED that were ignored or look wrong, said without showing the whole number
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
         e = os.environ if env is None else env
         allowed: dict[str, str] = {}
+        problems: list[str] = []
         for part in re.split(r"[,;\n]+", e.get("WHATSAPP_ALLOWED", "")):
-            if not part:
+            if not part.strip():
                 continue
             number, _, role = part.strip().partition(":")
             role = role.strip()
             digits = re.sub(r"\D", "", number)
-            if digits and (role or "viewer") in ROLES:
+            who = f"…{digits[-4:]}" if len(digits) >= 4 else "an entry with no phone number"
+            if not digits:
+                problems.append(f"Ignored “{part.strip()[:20]}”: it has no phone number in it")
+            elif (role or "viewer") not in ROLES:
+                problems.append(f"Ignored {who}: the role “{role[:20]}” is not viewer, bidder or admin")
+            else:
                 allowed[digits] = role or "viewer"
+                if len(digits) == 10 and digits[0] in "6789":
+                    problems.append(f"{who} has 10 digits: WhatsApp sends the country code too (for India, 91 first), so this number will probably never match")
+                elif not 8 <= len(digits) <= 15:
+                    problems.append(f"{who} does not look like a full phone number (8 to 15 digits with the country code)")
         version = e.get("WHATSAPP_API_VERSION", "").strip() or "v21.0"
         return cls(e.get("WHATSAPP_VERIFY_TOKEN", "").strip(), e.get("WHATSAPP_APP_SECRET", "").strip(), e.get("WHATSAPP_ACCESS_TOKEN", "").strip(),
-                   re.sub(r"\D", "", e.get("WHATSAPP_PHONE_NUMBER_ID", "")), allowed, version if re.fullmatch(r"v\d+\.\d+", version) else "v21.0")
+                   re.sub(r"\D", "", e.get("WHATSAPP_PHONE_NUMBER_ID", "")), allowed, version if re.fullmatch(r"v\d+\.\d+", version) else "v21.0", problems)
 
     def missing(self) -> list[str]:
         need = {"WHATSAPP_VERIFY_TOKEN": self.verify_token, "WHATSAPP_APP_SECRET": self.app_secret, "WHATSAPP_ACCESS_TOKEN": self.access_token,

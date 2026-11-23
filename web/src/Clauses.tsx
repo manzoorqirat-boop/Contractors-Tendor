@@ -1,10 +1,11 @@
+import { tr } from './i18n';
 import type { Clause, DocFacts, Evidence } from './types';
 
 /** How far a quoted piece of evidence can be trusted: found word for word in the document, not found, or nothing to check against. */
 export function EvidenceBadge({ verified }: { verified: boolean | null }) {
-  if (verified === true) return <span className="badge ok">Found in the document</span>;
-  if (verified === false) return <span className="badge warn">Not found word for word: check the document</span>;
-  return <span className="badge plain">Not checked (no text to compare)</span>;
+  if (verified === true) return <span className="badge ok">{tr('Found in the document')}</span>;
+  if (verified === false) return <span className="badge warn">{tr('Not found word for word: check the document')}</span>;
+  return <span className="badge plain">{tr('Not checked (no text to compare)')}</span>;
 }
 
 /** The conditions the fixed rules found, each with the sentence it came from. No AI involved. */
@@ -51,15 +52,15 @@ export function DocumentEvidence({ doc, found }: { doc: DocFacts | null; found: 
     <div style={{ marginTop: 12 }}>
       {clauses.length > 0 && (
         <>
-          <h3 style={{ margin: '0 0 4px' }}>Conditions found in the text</h3>
-          <p className="sub">Found by fixed rules, each with the sentence it came from. Nothing is guessed: a condition the text does not state is not listed.</p>
+          <h3 style={{ margin: '0 0 4px' }}>{tr('Conditions found in the text')}</h3>
+          <p className="sub">{tr('Found by fixed rules, each with the sentence it came from. Nothing is guessed: a condition the text does not state is not listed.')}</p>
           <ClauseList clauses={clauses} />
         </>
       )}
       {evidence.length > 0 && (
         <>
-          <h3 style={{ margin: '14px 0 4px' }}>What the AI said, and where</h3>
-          {bad > 0 && <div className="alert warn" role="status">{bad === 1 ? 'One quote' : `${bad} quotes`} could not be found in the document. The AI may have misread or paraphrased: check {bad === 1 ? 'it' : 'them'} before relying on {bad === 1 ? 'it' : 'them'}.</div>}
+          <h3 style={{ margin: '14px 0 4px' }}>{tr('What the AI said, and where')}</h3>
+          {bad > 0 && <div className="alert warn" role="status">{bad === 1 ? tr('One quote could not be found in the document. The AI may have misread or paraphrased: check it before relying on it.') : tr('{n} quotes could not be found in the document. The AI may have misread or paraphrased: check them before relying on them.', { n: bad })}</div>}
           <EvidenceList evidence={evidence} />
         </>
       )}

@@ -4,6 +4,7 @@ Keep this file on a persistent volume (see the README), or every restart begins 
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import sqlite3
@@ -186,6 +187,8 @@ class SeenStore:
         self.db.row_factory = sqlite3.Row
         self.db.create_function("tsmatch", 2, smartsearch.match, deterministic=True)  # the search in the tender list
         self.lock = threading.RLock()
+        self._memo_at = -1                    # `db.total_changes` when the remembered answers below were worked out
+        self._memo_vals: dict[Any, Any] = {}
         with self.lock:
             self.db.executescript(
                 """
@@ -489,17 +492,20 @@ class SeenStore:
         """Works out the recommended-order priority (and its note) of every open tender. Cheap enough to run after every choice and once an hour,
         because the urgency part changes as time passes. Returns how many tenders were scored."""
         model = self.learning_model() if learning else None
-        cols = "key, closing, value, fit, portal, organisation, category, location, work_type, title, description"
+        cols = "key, closing, value, fit, portal, organisation, category, location, work_type, title, description, priority, priority_note"
         with self.lock:
             starred = {r[0] for r in self.db.execute("SELECT key FROM starred")}
             rows = [dict(r) for r in self.db.execute(f"SELECT {cols} FROM seen WHERE civil = 1 AND (closing IS NULL OR closing >= ?)", (now.isoformat(),))]
-            updates = []
-            for r in rows:
-                score, note = learn.priority(r, now, model, size_min, size_max, r["key"] in starred)
-                updates.append((score, note, r["key"]))
-            self.db.executemany("UPDATE seen SET priority = ?, priority_note = ? WHERE key = ?", updates)
-            self.db.commit()
-        return len(updates)
+        updates = []
+        for r in rows:                       # the scoring is the slow part and needs no database, so it runs without holding the lock that every request shares
+            score, note = learn.priority(r, now, model, size_min, size_max, r["key"] in starred)
+            if score != r["priority"] or note != r["priority_note"]:
+                updates.append((score, note, r["key"]))      # only what changed is written: most tenders keep their score from one run to the next
+        if updates:
+            with self.lock:
+                self.db.executemany("UPDATE seen SET priority = ?, priority_note = ? WHERE key = ?", updates)
+                self.db.commit()
+        return len(rows)
 
     def priorities_missing(self, now: datetime) -> bool:
         with self.lock:
@@ -718,12 +724,31 @@ class SeenStore:
         self._vocab = (n, t, vocab)
         return vocab
 
-    def categories(self) -> list[str]:
+    def _remembered(self, key: Any, compute: Any) -> Any:
+        """Answers that only change when the data does (the dashboard figures, the filter lists) are worked out once and handed out until anything is written.
+        Every write goes through this one connection, so its change counter is a complete signal. Callers get their own copy: they are free to add to it."""
         with self.lock:
-            return [r[0] for r in self.db.execute("SELECT DISTINCT category FROM seen WHERE civil=1 AND category <> '' ORDER BY category")]
+            changes = self.db.total_changes
+            if changes != self._memo_at:
+                self._memo_vals.clear()
+                self._memo_at = changes
+            if key not in self._memo_vals:
+                if len(self._memo_vals) >= 32:
+                    self._memo_vals.pop(next(iter(self._memo_vals)))
+                self._memo_vals[key] = compute()
+            return copy.deepcopy(self._memo_vals[key])
+
+    def categories(self) -> list[str]:
+        def compute() -> list[str]:
+            with self.lock:
+                return [r[0] for r in self.db.execute("SELECT DISTINCT category FROM seen WHERE civil=1 AND category <> '' ORDER BY category")]
+        return self._remembered(("categories",), compute)
 
     def facets(self, now: datetime, limit: int = 60) -> dict[str, list[dict]]:
         """Values to offer in filters, with how many open tenders each has."""
+        return self._remembered(("facets", now.replace(second=0, microsecond=0), limit), lambda: self._facets(now, limit))
+
+    def _facets(self, now: datetime, limit: int) -> dict[str, list[dict]]:
         where, args = self._where(now, {"status": "open"})
         out: dict[str, list[dict]] = {}
         with self.lock:
@@ -841,6 +866,10 @@ class SeenStore:
 
     def stats(self, now: datetime, soon_days: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         """Everything the dashboard shows. `filters` narrows all of it; status is decided per figure, so it is ignored."""
+        key = ("stats", now.replace(second=0, microsecond=0), soon_days, json.dumps(filters or {}, sort_keys=True, default=str))
+        return self._remembered(key, lambda: self._stats(now, soon_days, filters))
+
+    def _stats(self, now: datetime, soon_days: int, filters: dict[str, Any] | None) -> dict[str, Any]:
         base = {k: v for k, v in (filters or {}).items() if k not in ("status", "since_days", "closing_within")}
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -853,17 +882,25 @@ class SeenStore:
         ow, oa = W(status="open")
         aw, aa = W(status="all")
         with self.lock:
-            kpi = {
-                "open": one(f"SELECT COUNT(*) FROM seen WHERE {ow}", oa),
-                "new_today": one(f"SELECT COUNT(*) FROM seen WHERE {aw} AND first_seen >= ?", [*aa, _iso(day_start)]),
-                "new_yesterday": one(f"SELECT COUNT(*) FROM seen WHERE {aw} AND first_seen >= ? AND first_seen < ?", [*aa, _iso(day_start - timedelta(days=1)), _iso(day_start)]),
-                "closing_soon": one(f"SELECT COUNT(*) FROM seen WHERE {W(status='closing_soon')[0]}", W(status="closing_soon")[1]),
-                "closing_week": one(f"SELECT COUNT(*) FROM seen WHERE {W(closing_within=7)[0]}", W(closing_within=7)[1]),
-                "open_value": one(f"SELECT COALESCE(SUM(value),0) FROM seen WHERE {ow}", oa),
-                "avg_value": one(f"SELECT COALESCE(AVG(value),0) FROM seen WHERE {ow}", oa),
-                "starred": one(f"SELECT COUNT(*) FROM seen WHERE {ow} AND key IN (SELECT key FROM starred)", oa),
-                "total_kept": one(f"SELECT COUNT(*) FROM seen WHERE {aw}", aa),
+            # The nine headline figures in one pass over the table instead of nine passes. Each is "count (or sum) the rows that match this condition".
+            conds = {
+                "open": (ow, oa, "1"),
+                "new_today": (f"({aw}) AND first_seen >= ?", [*aa, _iso(day_start)], "1"),
+                "new_yesterday": (f"({aw}) AND first_seen >= ? AND first_seen < ?", [*aa, _iso(day_start - timedelta(days=1)), _iso(day_start)], "1"),
+                "closing_soon": (W(status="closing_soon")[0], W(status="closing_soon")[1], "1"),
+                "closing_week": (W(closing_within=7)[0], W(closing_within=7)[1], "1"),
+                "open_value": (ow, oa, "value"),
+                "starred": (f"({ow}) AND key IN (SELECT key FROM starred)", oa, "1"),
+                "total_kept": (aw, aa, "1"),
             }
+            cols, params = [], []
+            for name, (cond, cargs, what) in conds.items():
+                cols.append(f"COALESCE(SUM(CASE WHEN {cond} THEN {what} ELSE 0 END), 0) AS {name}")
+                params += cargs
+            cols.append(f"COALESCE(AVG(CASE WHEN {ow} THEN value END), 0) AS avg_value")
+            params += oa
+            kpi = dict(self.db.execute(f"SELECT {', '.join(cols)} FROM seen", params).fetchone())
+            kpi = {k: kpi[k] for k in ("open", "new_today", "new_yesterday", "closing_soon", "closing_week", "open_value", "avg_value", "starred", "total_kept")}
             by_portal = [dict(r) for r in self.db.execute(
                 f"SELECT portal, COUNT(*) AS count, COALESCE(SUM(value),0) AS value FROM seen WHERE {ow} GROUP BY portal ORDER BY count DESC", oa)]
             by_category = [dict(r) for r in self.db.execute(

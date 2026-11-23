@@ -112,16 +112,47 @@ def predict(model: dict[str, Any], feats: dict[str, str]) -> dict[str, Any]:
     return {"p": p, "base": base, "parts": parts}
 
 
+_BACKTESTS: dict[Any, dict[str, Any]] = {}     # the last few tests, by the history they were run on: the same bids give the same answer, so it is not worked out again
+_BACKTESTS_KEPT = 8
+
+
 def backtest(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Each bid, in date order, predicted from the bids before it. Compared with guessing your overall win rate so far."""
     dated = sorted((r for r in rows if r["when"]), key=lambda r: r["when"])
     if len(dated) < MIN_TRAIN + MIN_TESTED:
         return {"tested": 0, "reliable": False, "have": len(dated), "needed": MIN_TRAIN + MIN_TESTED}
+    key = tuple((r["won"], r["when"], tuple(sorted(r["feats"].items()))) for r in dated)
+    hit = _BACKTESTS.get(key)
+    if hit is not None:
+        return hit
+    result = _backtest(dated)
+    if len(_BACKTESTS) >= _BACKTESTS_KEPT:
+        _BACKTESTS.pop(next(iter(_BACKTESTS)))
+    _BACKTESTS[key] = result
+    return result
+
+
+def _backtest(dated: list[dict[str, Any]]) -> dict[str, Any]:
     se_model = se_base = 0.0
     tested = 0
     bands: dict[str, list[float]] = {"low": [0, 0, 0.0], "mid": [0, 0, 0.0], "high": [0, 0, 0.0]}   # [n, wins, sum of predicted]
+    # The model for bid i is fitted on bids 0..i-1. Adding one bid to the counts each step gives exactly what fitting from scratch would, in one pass instead of one per bid.
+    table: dict[tuple[str, str], list[int]] = {}
+    seen = wins = 0
+
+    def add(r: dict[str, Any]) -> None:
+        nonlocal seen, wins
+        seen += 1
+        wins += 1 if r["won"] else 0
+        for k, v in r["feats"].items():
+            cell = table.setdefault((k, v), [0, 0])
+            cell[0] += 1 if r["won"] else 0
+            cell[1] += 1
+
+    for r in dated[:MIN_TRAIN]:
+        add(r)
     for i in range(MIN_TRAIN, len(dated)):
-        model = fit(dated[:i])
+        model: dict[str, Any] = {"n": seen, "wins": wins, "base": (wins + 1) / (seen + 2), "table": table}
         p = predict(model, dated[i]["feats"])["p"]
         y = 1.0 if dated[i]["won"] else 0.0
         se_model += (p - y) ** 2
@@ -131,6 +162,7 @@ def backtest(rows: list[dict[str, Any]]) -> dict[str, Any]:
         cell[0] += 1
         cell[1] += y
         cell[2] += p
+        add(dated[i])
     brier_model, brier_base = se_model / tested, se_base / tested
     return {"tested": tested, "brier_model": round(brier_model, 3), "brier_baseline": round(brier_base, 3), "reliable": tested >= MIN_TESTED and brier_model <= brier_base * BEATS_BY,
             "calibration": [{"band": k, "n": int(c[0]), "predicted_pct": round(100 * c[2] / c[0]), "actual_pct": round(100 * c[1] / c[0])} for k, c in bands.items() if c[0]]}

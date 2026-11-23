@@ -113,8 +113,18 @@ def all_portals(env: Settings, saved: dict[str, Any]) -> list[Portal]:
     return list(env.portals) + extra
 
 
+# Every setting the page can change. A name that is not here is refused, so a misspelt setting is an error and not a silent "saved".
+CHANGEABLE = frozenset({
+    "recipients", "send_time", "schedule_enabled", "send_empty", "reminders_on", "require_signoff", "audit_days", "tender_days", "webhook_url", "portals", "min_value",
+    "ai_digest_intro", "ai_hide_noncivil", "learning", "accent", "logo_text", "company_profile", "extra_keywords", "exclude_words",
+})
+
+
 def clean(payload: dict[str, Any], known_portals: list[str]) -> dict[str, Any]:
     """Validates a settings update and returns only the fields it contains, cleaned. Raises SettingsError."""
+    unknown = sorted(str(k) for k in payload if k not in CHANGEABLE)
+    if unknown:
+        raise SettingsError(f"Not a setting that can be changed here: {', '.join(unknown[:5])}")
     out: dict[str, Any] = {}
     if "recipients" in payload:
         emails = _words(payload["recipients"], "Recipients")
