@@ -107,7 +107,13 @@ def test_tokens_cannot_be_forged_or_reused_after_expiry():
     good = web.make_token("k")
     assert web.valid_token("k", good)
     assert not web.valid_token("other", good)
-    assert not web.valid_token("k", good[:-2] + "00")
+    # A forged signature must differ from the real one. Swapping the last two characters for "00" is not a forgery when the real signature ends in "00"
+    # (1 time in 256), so change the last character to something it is not.
+    forged = good[:-1] + ("1" if good[-1] == "0" else "0")
+    assert forged != good and not web.valid_token("k", forged)
+    for last in "0123456789abcdef":                                       # whatever the last character, any other one is refused
+        if last != good[-1]:
+            assert not web.valid_token("k", good[:-1] + last)
     assert not web.valid_token("k", None) and not web.valid_token("k", "x.y") and not web.valid_token("k", "garbage")
     assert not web.valid_token("k", good, now=10**11)  # far future: expired
 
