@@ -3,6 +3,6 @@ pytest==9.2.0
 httpx==0.28.1
 reportlab==5.1.0
 # code checks, run by CI (settings in pyproject.toml); pinned so a new release cannot turn CI red on its own
-ruff==0.17.5
+ruff==0.17.6
 mypy==2.4.1
 types-requests==2.33.0.20261030
