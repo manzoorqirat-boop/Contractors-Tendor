@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import requests
 
 from .gepnic import is_public_host
+from .publicnet import public_session
 from .reminders import check_webhook_url
 from .sealing import Sealer
 
@@ -178,13 +179,18 @@ class Events:
         except Exception:
             return 0
 
-    def deliver(self, now: datetime, session: Any = None, limit: int = 20, timeout: int = 10) -> int:
-        """Sends what is due. Returns how many were delivered. A failure is recorded on the webhook and retried later."""
+    def deliver(self, now: datetime, session: Any = None, limit: int = 20, timeout: int = 10, budget: float = 30.0) -> int:
+        """Sends what is due. Returns how many were delivered. A failure is recorded on the webhook and retried later.
+        It stops starting new sends once `budget` seconds have passed, so a receiver that never answers cannot hold up the other scheduled jobs (reminders, backups):
+        what is left is still queued and goes out on the next pass."""
         t = time.time()
+        started = time.monotonic()
         with self.lock:
             due = self.db.execute("SELECT q.*, h.url, h.secret, h.active FROM webhook_queue q LEFT JOIN webhooks h ON h.id = q.hook_id WHERE q.next_try <= ? ORDER BY q.id LIMIT ?", (t, limit)).fetchall()
         sent = 0
         for q in due:
+            if time.monotonic() - started > budget:
+                break
             if q["url"] is None or not q["active"]:
                 self._drop(q["id"])
                 continue
@@ -193,7 +199,7 @@ class Events:
                 if not is_public_host(urlparse(q["url"]).hostname or ""):
                     raise OSError("that address points to a private network")
                 ts = str(int(t))
-                r = (session or requests).post(q["url"], data=q["body"].encode(), timeout=timeout, allow_redirects=False,
+                r = (session or public_session()).post(q["url"], data=q["body"].encode(), timeout=timeout, allow_redirects=False,
                                                headers={"Content-Type": "application/json", "User-Agent": "TendAI-Webhook/1", "X-TendAI-Event": q["event"], "X-TendAI-Delivery": q["delivery"],
                                                         "X-TendAI-Timestamp": ts, "X-TendAI-Signature": sign(self.sealer.open_text(q["secret"]), ts, q["body"])})
                 if r.status_code >= 300:

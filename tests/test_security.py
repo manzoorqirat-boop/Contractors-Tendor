@@ -265,6 +265,17 @@ def test_events_are_queued_signed_and_delivered(sec):
     assert "secret" not in str(sec.owner.get("/api/webhooks").json()["webhooks"][0]).replace("secret_hint", "")
 
 
+def test_sending_stops_when_the_time_budget_is_used_and_the_rest_goes_out_next_time(sec):
+    from datetime import datetime
+    hook(sec, ("bid.stage_changed", "bid.created"))
+    bid = sec.owner.post("/api/bids", json={"key": sec.tender.key}).json()["id"]
+    sec.owner.patch(f"/api/bids/{bid}", json={"stage": "preparing"})
+    book, rx = book_of(sec), Receiver()
+    assert book.deliver(datetime.now(), session=rx, budget=-1) == 0 and rx.got == []           # a receiver that is slow cannot hold the scheduler: nothing new is started
+    assert book.list()[0]["waiting"] == 2                                                        # and nothing is lost
+    assert book.deliver(datetime.now(), session=rx) == 2 and book.list()[0]["waiting"] == 0
+
+
 def test_a_webhook_only_gets_the_events_it_asked_for_and_not_when_off(sec):
     from datetime import datetime
     made = hook(sec, ("bid.result",))
@@ -325,7 +336,7 @@ def test_webhook_management_and_test_button(sec, monkeypatch):
     made = hook(sec)
     hid = made["webhook"]["id"]
     rx = Receiver()
-    monkeypatch.setattr(ev.requests, "post", rx.post)
+    monkeypatch.setattr(ev, "public_session", lambda: rx)         # the test button sends through the public-only session; here the receiver stands in for it
     ok = sec.owner.post(f"/api/webhooks/{hid}/test")
     assert ok.status_code == 200 and rx.got[0][2]["X-TendAI-Event"] == "test"
     rx.status = 503

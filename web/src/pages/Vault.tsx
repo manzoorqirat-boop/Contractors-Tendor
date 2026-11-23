@@ -203,33 +203,38 @@ function QuickAdd({ kinds, onAdded }: { kinds: { key: string; label: string }[];
   );
 }
 
+let nextFactId = 1;   // a fact row keeps its identity when another row above it is removed, so the cursor stays where the person was typing
+type FactRow = CompanyFact & { uid: number };
+const withIds = (xs: CompanyFact[]): FactRow[] => xs.map((x) => ({ ...x, uid: nextFactId++ }));
+const plain = (xs: FactRow[]): CompanyFact[] => xs.map(({ label, value }) => ({ label, value }));
+
 function Facts({ facts }: { facts: CompanyFact[] }) {
   const toast = useToast();
-  const [rows, setRows] = useState<CompanyFact[]>(facts);
+  const [rows, setRows] = useState<FactRow[]>(() => withIds(facts));
   const [busy, setBusy] = useState(false);
-  useEffect(() => setRows(facts), [facts]);
-  const dirty = JSON.stringify(rows.filter((r) => r.label.trim() && r.value.trim())) !== JSON.stringify(facts);
+  useEffect(() => setRows(withIds(facts)), [facts]);
+  const dirty = JSON.stringify(plain(rows).filter((r) => r.label.trim() && r.value.trim())) !== JSON.stringify(facts);
   const set = (i: number, patch: Partial<CompanyFact>) => setRows((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const missing = SUGGESTED_FACTS.filter((s) => !rows.some((r) => r.label.toLowerCase() === s.toLowerCase()));
 
   async function save() {
     setBusy(true);
-    try { const r = await api.saveFacts(rows); setRows(r.facts); toast(tr('Company facts saved')); } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
+    try { const r = await api.saveFacts(plain(rows)); setRows(withIds(r.facts)); toast(tr('Company facts saved')); } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
   }
   return (
     <section className="card">
       <h2>{tr('Company facts')}</h2>
       <p className="sub">Used by the eligibility check and the draft letters. Only what you type here is used; nothing is guessed.</p>
       {rows.map((r, i) => (
-        <div className="fact-row" key={i}>
+        <div className="fact-row" key={r.uid}>
           <input value={r.label} maxLength={60} placeholder="What" aria-label={tr('Fact name')} onChange={(e) => set(i, { label: e.target.value })} />
           <input value={r.value} maxLength={160} placeholder={tr('Value')} aria-label="Fact value" onChange={(e) => set(i, { value: e.target.value })} />
           <button type="button" className="link-btn" aria-label="Remove fact" onClick={() => setRows((xs) => xs.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
       <div className="chips" style={{ margin: '8px 0' }}>
-        {missing.slice(0, 5).map((s) => <button key={s} type="button" className="chip" onClick={() => setRows((xs) => [...xs, { label: s, value: '' }])}>+ {s}</button>)}
-        <button type="button" className="chip" onClick={() => setRows((xs) => [...xs, { label: '', value: '' }])}>+ Other</button>
+        {missing.slice(0, 5).map((s) => <button key={s} type="button" className="chip" onClick={() => setRows((xs) => [...xs, { uid: nextFactId++, label: s, value: '' }])}>+ {s}</button>)}
+        <button type="button" className="chip" onClick={() => setRows((xs) => [...xs, { uid: nextFactId++, label: '', value: '' }])}>+ Other</button>
       </div>
       <button className="btn primary" onClick={save} disabled={busy || !dirty}>{busy ? tr('Saving…') : tr('Save facts')}</button>
     </section>

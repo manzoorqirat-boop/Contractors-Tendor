@@ -99,19 +99,35 @@ def test_when_nothing_in_your_history_predicts_a_win_it_says_so_and_shows_no_sco
 
 
 def test_the_model_is_tested_on_each_bid_using_only_the_bids_before_it(monkeypatch):
-    seen = []
-    real = w.fit
+    models = []
+    real = w.predict
 
-    def spy(rows):
-        seen.append(max(r["when"] for r in rows))
-        return real(rows)
+    def spy(model, feats):
+        models.append((model["n"], model["wins"], model["base"], {k: tuple(v) for k, v in model["table"].items()}))
+        return real(model, feats)
 
-    monkeypatch.setattr(w, "fit", spy)
+    monkeypatch.setattr(w, "predict", spy)
     rows = w.rows_from(make(60))
     w.backtest(rows)
-    dates = sorted(r["when"] for r in rows)
-    assert len(seen) == 60 - w.MIN_TRAIN and all(s <= dates[w.MIN_TRAIN + i] for i, s in enumerate(seen))
+    dated = sorted(rows, key=lambda r: r["when"])
+    assert len(models) == 60 - w.MIN_TRAIN
+    for i, (n, wins, base, table) in enumerate(models):
+        earlier = w.fit(dated[: w.MIN_TRAIN + i])                   # fitted from scratch on only the bids before this one
+        assert (n, wins) == (earlier["n"], earlier["wins"]) and base == earlier["base"]
+        assert table == {k: tuple(v) for k, v in earlier["table"].items()}
 
+
+def test_the_same_history_is_tested_once_and_a_changed_history_is_tested_again(monkeypatch):
+    calls = []
+    real = w._backtest
+    monkeypatch.setattr(w, "_backtest", lambda dated: (calls.append(1), real(dated))[1])
+    w._BACKTESTS.clear()
+    rows = w.rows_from(make(60))
+    first = w.backtest(rows)
+    assert w.backtest(list(reversed(rows))) == first and len(calls) == 1          # same bids, any order: answered from memory
+    rows[-1]["won"] = not rows[-1]["won"]
+    w.backtest(rows)
+    assert len(calls) == 2                                                          # one outcome changed: worked out again
 
 def test_the_backtest_reports_calibration_bands():
     t = w.backtest(w.rows_from(make(120)))

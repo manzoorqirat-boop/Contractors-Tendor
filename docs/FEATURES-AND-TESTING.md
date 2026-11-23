@@ -232,3 +232,19 @@ To try these quickly, run both seed scripts (section 0).
 | Reading a changed portal page | Tested on the real saved page and altered copies, not live portals. | Use **Diagnose** on a portal that stopped working. |
 | Single sign-on | Needs your identity provider. | Follow README, "Single sign-on". |
 | Win chance, price advisor, forecast on real data | The models are tested on simulated history. | Judge them by the test line each screen shows on your own data. |
+
+## 11. Things added after the code review (how to see each one)
+
+| What | Where | How to see it | What you should see |
+|---|---|---|---|
+| A page that fails to draw shows a way out | Any page | Hard to cause by hand. In a developer console, an API answer that is the wrong shape for a card does it. | "Something went wrong on this page" with Reload and Go to the Dashboard buttons, not a blank page |
+| Offline bar | Any page | Turn the computer's Wi-Fi off while the page is open | A bar across the top says "You are offline" and goes away when the connection returns |
+| Unsaved Settings | Settings | Change the recipients, then click Dashboard in the menu | "Leave Settings without saving?" with Stay here / Leave without saving |
+| Which field is wrong | Any form | Add a bid checklist line of more than 300 characters | The message gives the limit and your length |
+| Too-long text refused | Bid notes, checklist lines, Add a tender by hand | Type more than 4,000 characters of notes | A message naming the limit, and nothing cut |
+| Believable dates | A bid's dates | Enter a closing date in the year 1900 | "That date does not look right. Check the year" |
+| Won/lost price reminder | Bids | Move a bid with no quoted price to Won | A message asking you to add the quoted price on the Result tab |
+| Misspelt settings refused | API only | `PUT /api/settings` with `{"send_hour": 7}` | 422 "Not a setting that can be changed here" |
+| WhatsApp number list problems | Settings > Integrations > WhatsApp | Set `WHATSAPP_ALLOWED=9876543210:viewer,919822222222:boss` | A yellow "Check the list of allowed numbers" box naming `…3210` (10 digits) and the ignored `boss` role |
+| Hindi / Marathi on the newer screens | Choose a language under the menu | Open a bid's Decide and Result tabs, the Dashboard, Settings > Integrations | Win chance, Who usually wins here, Who bid, Price advisor, What to expect, Which bids to submit and the Integrations cards are in that language |
+| Faster Dashboard and bid pages | Dashboard, a bid | Open them repeatedly | Repeat loads are instant until something changes; the win model no longer slows down as bids pile up |

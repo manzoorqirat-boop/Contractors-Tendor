@@ -198,10 +198,19 @@ class BidError(ValueError):
     pass
 
 
+def fit_text(value: Any, limit: int, what: str) -> str:
+    """What a person typed, trimmed of stray spaces. If it is longer than the field holds they are told, rather than having the end quietly cut off."""
+    text = str(value if value is not None else "").strip()
+    if len(text) > limit:
+        raise BidError(f"{what} can be at most {limit} characters, and this is {len(text)}. Shorten it and try again")
+    return text
+
+
 EDITABLE: dict[str, str | int] = {
     "stage": "stage", "owner": 60, "notes": 4000, "emd_due": "date", "prebid_date": "date", "query_deadline": "date", "portal_checked": "date", "closing": "date", "opening": "date",
     "my_value": "money", "l1_value": "money", "l1_bidder": 120, "result_note": 1000,
 }
+LABELS = {"notes": "Notes", "owner": "The owner's name", "l1_bidder": "The lowest bidder's name", "result_note": "The result note"}
 _BID_LIST_COLUMNS = ("id, key, tender_id, portal, title, description, organisation, category, location, work_type, value, emd, closing, opening, stage, owner, "
                      "emd_due, prebid_date, query_deadline, portal_checked, my_value, l1_value, created, updated, stage_changed, (doc IS NOT NULL AND doc <> '') AS has_doc")
 
@@ -223,6 +232,8 @@ def clean_patch(raw: Any) -> dict[str, Any]:
             v = (str(v).strip() if v is not None else "")
             if v and (not _DATE.match(v) or _when(v) is None):
                 raise BidError("Dates look like 2026-11-20, and must be real dates")
+            if v and not 2000 <= int(v[:4]) <= 2100:
+                raise BidError("That date does not look right. Check the year")
             out[k] = v or None
         elif rule == "money":
             if v in (None, ""):
@@ -236,7 +247,7 @@ def clean_patch(raw: Any) -> dict[str, Any]:
                     raise BidError("Amounts must be numbers")
                 out[k] = n
         else:
-            out[k] = str(v if v is not None else "").strip()[: int(rule)]
+            out[k] = fit_text(v, int(rule), LABELS.get(k, k.replace("_", " ").capitalize()))
     return out
 
 
@@ -480,7 +491,7 @@ class BidBook:
         return [{**dict(r), "done": bool(r["done"])} for r in rows]
 
     def add_item(self, bid_id: int, text: str, kind: str, now: datetime, source: str = "manual") -> dict:
-        text = (text or "").strip()[:300]
+        text = fit_text(text, 300, "A checklist item") if source == "manual" else (text or "").strip()[:300]    # generated lines are trimmed; what a person typed is never cut quietly
         if not text:
             raise BidError("Type the item first")
         if kind not in ("document", "condition", "task"):
@@ -499,13 +510,13 @@ class BidBook:
         if "done" in raw:
             sets["done"] = 1 if raw["done"] else 0
         if "text" in raw:
-            t = str(raw["text"]).strip()[:300]
+            t = fit_text(raw["text"], 300, "A checklist item")
             if not t:
                 raise BidError("An item needs some text")
             sets["text"] = t
         for f in ("owner", "note"):
             if f in raw:
-                sets[f] = str(raw[f] or "").strip()[:200]
+                sets[f] = fit_text(raw[f], 200, "The " + f)
         if "vault_id" in raw:
             v = raw["vault_id"]
             if v in (None, ""):

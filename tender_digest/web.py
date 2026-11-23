@@ -147,6 +147,29 @@ class LoginLimiter:
             self.store.login_fails_clear(client)
 
 
+class Background:
+    """Runs `job` on its own thread whenever asked. Asking again while it runs folds into one more pass afterwards, so a burst of clicks costs one or two runs, not one each."""
+
+    def __init__(self, job: Callable[[], None]):
+        self.job = job
+        self.wake = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.start_lock = threading.Lock()
+
+    def ask(self) -> None:
+        with self.start_lock:
+            if self.thread is None:
+                self.thread = threading.Thread(target=self._loop, name="background-job", daemon=True)
+                self.thread.start()
+        self.wake.set()
+
+    def _loop(self) -> None:
+        while True:
+            self.wake.wait()
+            self.wake.clear()
+            self.job()
+
+
 class AiBudget:
     """Caps the AI requests people start from the page, per day and per minute, so a stolen session or a stuck button cannot run up the bill."""
 
@@ -649,12 +672,22 @@ def create_app(config: AppConfig, env: Settings, store: SeenStore, manager: RunM
 
     # ---- the routes, one module per area; the order is the order the routes were always added in ----------------------------
 
-    def refresh_priorities() -> None:
-        """Re-scores the recommended order. Run after anything that changes what the company likes (a star, a hidden tender, a bid), and every hour."""
+    def rescore_now() -> None:
         try:
             appsettings.rescore(store, now())
         except Exception:  # the order is a convenience: a failure here must never undo the action that caused it
             log.exception("recomputing the recommended order failed")
+
+    rescorer = Background(rescore_now) if config.run_scheduler else None
+
+    def refresh_priorities() -> None:
+        """Re-scores the recommended order. Run after anything that changes what the company likes (a star, a hidden tender, a bid), and every hour.
+        In the running server it happens in the background, so the click that asked for it is answered at once; the order catches up within a moment.
+        Without the scheduler (tests, one-off scripts) it is done before returning."""
+        if rescorer is None:
+            rescore_now()
+        else:
+            rescorer.ask()
 
     def size_limits() -> dict:
         """The size of work this company takes, as filter values: nothing when no range has been set."""

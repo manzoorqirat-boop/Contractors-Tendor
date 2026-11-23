@@ -8,12 +8,31 @@ export class ApiError extends Error {
 let onUnauthorised: () => void = () => {};
 export function setUnauthorisedHandler(fn: () => void) { onUnauthorised = fn; }
 
+/** How long a request may take before the page gives up on it. Long jobs (AI reading, collection runs) are polled, so a single request that takes this long has hung. */
+const REQUEST_TIMEOUT_MS = 180_000;
+
+/** What the server meant by "422 and a list of problems": which field, and what is wrong with it, in words a person can act on. */
+export function fieldProblems(detail: unknown[]): string {
+  const out: string[] = [];
+  for (const d of detail.slice(0, 3)) {
+    const item = (d && typeof d === 'object' ? d : {}) as { loc?: unknown[]; msg?: unknown };
+    const name = [...(Array.isArray(item.loc) ? item.loc : [])].reverse().find((p) => typeof p === 'string' && p !== 'body' && p !== 'query');
+    const what = typeof item.msg === 'string' ? item.msg.replace(/^Value error, /, '') : 'is not valid';
+    out.push(typeof name === 'string' ? `${name.replace(/_/g, ' ')}: ${what}` : what);
+  }
+  return `Please check: ${out.join('; ')}${detail.length > 3 ? `; and ${detail.length - 3} more` : ''}`;
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
+  const timer = new AbortController();
+  const stop = setTimeout(() => timer.abort(), REQUEST_TIMEOUT_MS);
   try {
-    res = await fetch(path, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
+    res = await fetch(path, { credentials: 'same-origin', signal: timer.signal, ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
   } catch {
-    throw new ApiError(0, 'Cannot reach the server. Check your connection and try again.');
+    throw new ApiError(0, timer.signal.aborted ? 'The server is taking too long to answer. Check your connection and try again.' : 'Cannot reach the server. Check your connection and try again.');
+  } finally {
+    clearTimeout(stop);
   }
   if (res.status === 401 && path !== '/api/login') onUnauthorised();
   if (!res.ok) {
@@ -23,7 +42,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
       const body = await res.json();
       needCode = body.need_code === true;
       if (typeof body.detail === 'string') message = body.detail;
-      else if (Array.isArray(body.detail)) message = 'Some of the values are not valid.';
+      else if (Array.isArray(body.detail)) message = fieldProblems(body.detail);
     } catch { /* not JSON: keep the generic message */ }
     throw new ApiError(res.status, message, needCode);
   }

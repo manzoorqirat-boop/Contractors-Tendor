@@ -21,9 +21,9 @@ export const lang: Lang = readLang();
 if (typeof document !== 'undefined') document.documentElement.lang = lang;
 
 /** The text in the chosen language, with {name} placeholders filled from `vars`. */
-export function tr(text: string, vars?: Record<string, string | number>): string {
+export function tr(text: string, vars?: Record<string, string | number | null | undefined>): string {
   const out = TABLES[lang][text] ?? text;
-  return vars ? out.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : out;
+  return vars ? out.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k] ?? '') : m)) : out;
 }
 
 export function setLang(next: Lang) {
