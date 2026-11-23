@@ -513,7 +513,6 @@ export const HI: Record<string, string> = {
   "Based on {basis}: {confidence}.": "आधार: {basis}: {confidence}।",
   "Lowest bidders on similar tenders usually priced between {low} and {high} against the estimate (the middle half; the middle is {mid}).": "समान निविदाओं पर सबसे कम बोली वालों ने आमतौर पर अनुमान के मुकाबले {low} से {high} के बीच कीमत रखी (बीच का आधा हिस्सा; मध्य {mid} है)।",
   "Win chance is the share of those where the lowest bidder priced at or above this quote; groups with few results borrow from wider ones. Add more results on the Bids page, Results view, under Price history.": "जीतने की संभावना उन मामलों का हिस्सा है जिनमें सबसे कम बोली वाले ने इस कोट के बराबर या ऊपर कीमत रखी; कम नतीजों वाले समूह बड़े समूहों से उधार लेते हैं। बोलियाँ पृष्ठ, नतीजे का दृश्य, कीमत का इतिहास में और नतीजे जोड़ें।",
-  "No win chance yet: there are fewer than 3 recorded results. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.": "अभी जीतने की संभावना नहीं: 3 से कम नतीजे दर्ज हैं। बोलियाँ पृष्ठ, नतीजे का दृश्य, कीमत के इतिहास में आवंटन परिणाम आयात करें, या अपनी बोलियों पर जीत की कीमत दर्ज करें।",
   "Not an amount": "यह राशि नहीं है",
   "Rank is a whole number": "रैंक पूर्ण संख्या होती है",
   "Saved. Winning and your prices were filled in from the list.": "सहेजा गया। जीत और आपकी कीमतें सूची से भर दी गईं।",
@@ -777,4 +776,6 @@ export const HI: Record<string, string> = {
   "You have changes that are not saved. If you leave now they will be lost.": "आपके कुछ बदलाव सहेजे नहीं गए हैं। अभी छोड़ने पर वे खो जाएँगे।",
   "Leave without saving": "बिना सहेजे छोड़ें",
   "Stay here": "यहीं रहें",
+  "No win chance yet: you have {n} recorded result and 3 are needed. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.": "अभी जीतने की संभावना नहीं: आपके पास {n} दर्ज नतीजा है और 3 चाहिए। बोलियाँ पृष्ठ, नतीजे का दृश्य, कीमत के इतिहास में आवंटन परिणाम आयात करें, या अपनी बोलियों पर जीत की कीमत दर्ज करें।",
+  "No win chance yet: you have {n} recorded results and 3 are needed. Import award results on the Bids page, Results view, under Price history, or record the winning price on your own bids.": "अभी जीतने की संभावना नहीं: आपके पास {n} दर्ज नतीजे हैं और 3 चाहिए। बोलियाँ पृष्ठ, नतीजे का दृश्य, कीमत के इतिहास में आवंटन परिणाम आयात करें, या अपनी बोलियों पर जीत की कीमत दर्ज करें।",
 };

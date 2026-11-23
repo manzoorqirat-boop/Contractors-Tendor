@@ -103,3 +103,56 @@ def test_the_status_page_lists_the_problems(monkeypatch):
     s = c.get("/api/whatsapp/status").json()
     assert len(s["problems"]) == 2 and any("boss" in p for p in s["problems"]) and any("10 digits" in p for p in s["problems"])
     assert [n["ending"] for n in s["numbers"]] == ["3210", "1111"]
+
+
+def test_a_refusal_names_the_box_it_is_about_so_the_page_can_show_it_there(app_):
+    c = app_.c
+    r = c.patch(app_.bid, json={"notes": "n" * 4001})
+    assert r.status_code == 422 and r.json()["field"] == "notes" and "at most 4000" in r.json()["detail"]
+    assert c.patch(app_.bid, json={"closing": "1900-01-01"}).json()["field"] == "closing"
+    assert c.patch(app_.bid, json={"my_value": "abc"}).json()["field"] == "my_value"
+    assert c.patch(app_.bid, json={"stage": "bogus"}).json()["field"] == "stage"
+    assert c.post(app_.bid + "/items", json={"text": "x" * 301}).json()["field"] == "text"
+    assert c.post(app_.bid + "/items", json={"text": "   "}).json()["field"] == "text"
+    assert c.post(app_.bid + "/money", json={"kind": "emd", "amount": -5}).json()["field"] == "amount"
+    assert c.post(app_.bid + "/money", json={"kind": "emd", "amount": 5, "paid_on": "yesterday"}).json()["field"] == "paid_on"
+    base = {"tender_id": "M9", "title": "t", "description": "d", "closing": (datetime.now() + timedelta(days=9)).strftime("%Y-%m-%d")}
+    assert c.post("/api/tenders/manual", json={**base, "title": "t" * 301}).json()["field"] == "title"
+    assert c.post("/api/tenders/manual", json={**base, "tender_id": "<b>"}).json()["field"] == "tender_id"
+    assert c.post("/api/tenders/manual", json={**base, "closing": "2001-01-01"}).json()["field"] == "closing"
+    assert c.post("/api/tenders/manual", json={**base, "value": 100, "emd": 500}).json()["field"] == "emd"
+
+
+def test_a_refusal_that_is_not_about_one_box_has_no_field_and_keeps_its_old_shape(app_):
+    r = app_.c.get("/api/bids/999999")
+    assert r.status_code == 404 and r.json() == {"detail": "No such bid"}
+    r = app_.c.put("/api/settings", json={"zzz": 1})
+    assert r.status_code == 422 and "field" not in r.json() and isinstance(r.json()["detail"], str)
+
+
+def test_more_typed_text_is_refused_not_cut_and_says_which_box(app_):
+    c = app_.c
+    base = {"name": "GST certificate", "kind": "other"}
+    r = c.post("/api/vault", json={**base, "name": "n" * 121})
+    assert r.status_code == 422 and r.json()["field"] == "name" and "at most 120" in r.json()["detail"]
+    doc = c.post("/api/vault", json=base).json()
+    did = doc["id"]
+    assert c.patch(f"/api/vault/{did}", json={"notes": "x" * 501}).json()["field"] == "notes"
+    assert c.patch(f"/api/vault/{did}", json={"colour": "red"}).json()["field"] == "colour"          # a name the form does not have is refused
+    assert c.patch(f"/api/vault/{did}", json={"notes": "ok"}).status_code == 200
+    r = c.put("/api/company-facts", json={"facts": [{"label": "Turnover", "value": "v" * 161}]})
+    assert r.status_code == 422 and "at most 60" in r.json()["detail"]
+    r = c.post("/api/market-results", json={"department": "d" * 301, "estimate": 1e6, "price": 9e5})
+    assert r.status_code == 422 and r.json()["field"] == "department"
+    r = c.post(app_.bid + "/corrigenda", json={"note": "n" * 501})
+    assert r.status_code == 422 and r.json()["field"] == "note"
+
+
+def test_other_forms_refuse_names_they_do_not_have(app_):
+    c = app_.c
+    r = c.put("/api/company-profile", json={"company_profile": "We build roads.", "oops": 1})
+    assert r.status_code == 422 and r.json()["field"] == "oops"
+    assert c.put("/api/company-profile", json={"company_profile": "We build roads."}).status_code == 200
+    r = c.post("/api/portals", json={"name": "X", "state": "Y", "base_url": "https://x.nic.in/nicgep", "colour": "red"})
+    assert r.status_code == 422 and r.json()["field"] == "colour"
+    assert c.post("/api/portals/bulk", json={"ids": ["x"], "extra": 1}).status_code == 422

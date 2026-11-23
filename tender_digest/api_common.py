@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from . import letters
@@ -117,6 +118,22 @@ def storage_ok(store: SeenStore, state_path: str) -> bool:
     except Exception:
         return False
     return state_path == ":memory:" or os.access(Path(state_path).expanduser().resolve().parent, os.W_OK)
+
+
+def reject_unknown(body: Any, allowed: set[str] | frozenset[str]) -> None:
+    """A request that names something this form does not have is refused, not quietly ignored: a misspelt name must not look like success."""
+    if isinstance(body, dict):
+        unknown = sorted(str(k) for k in body if k not in allowed)
+        if unknown:
+            raise FieldHTTPException(422, f"Not something that can be set here: {', '.join(unknown[:5])}", unknown[0])
+
+
+class FieldHTTPException(HTTPException):
+    """A refusal that names the box it is about. The answer is the usual {"detail": message} plus {"field": name}, so the page can show it beside that box."""
+
+    def __init__(self, status_code: int, detail: str, field: str | None = None):
+        super().__init__(status_code, detail)
+        self.field = field
 
 
 class NewUser(BaseModel):

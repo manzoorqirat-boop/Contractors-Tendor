@@ -5,7 +5,7 @@ import { mergeDrill } from '../filters';
 import { chain, fmtDate, fmtDay, headline, inr, plural, relative } from '../format';
 import { useLoad } from '../hooks';
 import type { Nav } from '../App';
-import { ChartSkeleton, Skeleton, useToast } from '../ui';
+import { ChartSkeleton, ErrorNote, Skeleton, useToast } from '../ui';
 import { useConfirm } from '../confirm';
 import { HealthBanner, ManualBanner } from '../ManualPortals';
 import { MoneyCard } from '../Money';
@@ -144,7 +144,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
 
       <FilterBar filters={filters} display={display} config={config} facets={nav.facets} onChange={nav.setFilters} onApplyView={(f, d) => go('dashboard', f, d)} hideStatus />
 
-      {stats.error && <div className="alert bad">{stats.error}</div>}
+      <ErrorNote error={stats.error} onRetry={stats.reload} />
       {empty ? (
         <div className="card empty" style={{ padding: 40 }}>
           <svg className="empty-ico" viewBox="0 0 24 24" aria-hidden><path d="M11 4a7 7 0 105.2 11.7l3.5 3.5 1.4-1.4-3.5-3.5A7 7 0 0011 4zm0 2a5 5 0 110 10 5 5 0 010-10z" /></svg><h2 style={{ marginBottom: 6 }}>{tr('No tenders match')}</h2>

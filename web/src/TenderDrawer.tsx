@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 import { chain, fmtDate, headline, inr, relative } from './format';
 import { AiSections, FitBadge, RelatedNote } from './ai';
-import { Drawer, Skeleton, useToast } from './ui';
+import { Drawer, ErrorNote, Skeleton, useToast } from './ui';
 import { useSession } from './session';
 import type { Tender, TenderDetail } from './types';
 import { tr } from './i18n';
@@ -28,12 +28,13 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
   const { can } = useSession();
   const [t, setT] = useState<TenderDetail | null>(null);
   const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let stop = false;
     setT(null); setError('');
     api.tender(tenderKey).then((r) => { if (!stop) setT(r); }, (e: Error) => { if (!stop) setError(e.message); });
     return () => { stop = true; };
-  }, [tenderKey]);
+  }, [tenderKey, attempt]);
 
   async function startBid() {
     if (!t) return;
@@ -59,7 +60,7 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
   const rel = t ? relative(t.closing, now) : null;
   return (
     <Drawer title={tr('Tender details')} onClose={onClose}>
-      {error && <div className="alert bad">{error}</div>}
+      <ErrorNote error={error} onRetry={() => setAttempt((n) => n + 1)} />
       {!t && !error && <><Skeleton h={22} style={{ marginBottom: 10 }} /><Skeleton h={14} w="70%" style={{ marginBottom: 20 }} /><Skeleton h={160} /></>}
       {t && (
         <>

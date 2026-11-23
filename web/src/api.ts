@@ -2,7 +2,7 @@ import { toParams } from './filters';
 import type { PortalDiagnosis, WhatsAppStatus, Forecast, Plan, Rivals, WinChance, Clause, CorrigendumRead, Backtest, MarketImport, MarketSummary, CoverageReport, BidMoney, MoneySummary, PortalChoice, Learning, MutedDepartment, CleanupPreview, SsoInfo, SetupStatus, Device, ApiToken, Webhook, EraseResult, LetterTemplate, TemplateField, TemplateVersion, FilledLetter, CompareTender, Bidder, Competitor, BidComment, Person, Signoff, BackupStatus, AuditEntry, Me, UserRow, UsersData, Advice, AiStatus, BoqView, CatalogueData, CatalogueImport, RiskData, SimInput, Simulation, AppConfig, AskResult, BidAlert, BidDetail, BidItem, BidList, BidStats, ManualFields, ManualListing, FetchResult, Brief, CompanyFact, DocFacts, Eligibility, VaultData, VaultDoc, Facets, Filters, NewPortal, Pivot, PortalHealth, PortalStatus, Run, SavedView, Settings, Stats, TenderDetail, TenderPage } from './types';
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public needCode = false) { super(message); }
+  constructor(public status: number, message: string, public needCode = false, public field = '') { super(message); }
 }
 
 let onUnauthorised: () => void = () => {};
@@ -23,6 +23,14 @@ export function fieldProblems(detail: unknown[]): string {
   return `Please check: ${out.join('; ')}${detail.length > 3 ? `; and ${detail.length - 3} more` : ''}`;
 }
 
+/** The name of the box the first problem in a validation list is about, or ''. */
+export function firstField(detail: unknown[]): string {
+  const d = detail[0];
+  const loc = d && typeof d === 'object' && Array.isArray((d as { loc?: unknown[] }).loc) ? (d as { loc: unknown[] }).loc : [];
+  const name = [...loc].reverse().find((p) => typeof p === 'string' && p !== 'body' && p !== 'query');
+  return typeof name === 'string' ? name : '';
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   const timer = new AbortController();
@@ -38,13 +46,15 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     let needCode = false;
+    let field = '';
     try {
       const body = await res.json();
       needCode = body.need_code === true;
+      if (typeof body.field === 'string') field = body.field;                       // the server says which box the message is about
       if (typeof body.detail === 'string') message = body.detail;
-      else if (Array.isArray(body.detail)) message = fieldProblems(body.detail);
+      else if (Array.isArray(body.detail)) { message = fieldProblems(body.detail); field = firstField(body.detail); }
     } catch { /* not JSON: keep the generic message */ }
-    throw new ApiError(res.status, message, needCode);
+    throw new ApiError(res.status, message, needCode, field);
   }
   return res.json() as Promise<T>;
 }

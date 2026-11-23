@@ -5,7 +5,7 @@ import { FilterBar } from '../FilterBar';
 import { mergeDrill } from '../filters';
 import { inr, plural } from '../format';
 import { useLoad } from '../hooks';
-import { ChartSkeleton, useToast } from '../ui';
+import { ChartSkeleton, ErrorNote, useToast } from '../ui';
 import type { AppConfig, ChartKind, Drill, Measure } from '../types';
 import { MEASURES, PivotChart, PivotTable, labelFor, pivotToCsv } from './Charts';
 
@@ -115,7 +115,7 @@ export function Explore({ config, nav }: { config: AppConfig; nav: Nav }) {
           </div>
         </div>
 
-        {pivot.error && <div className="alert bad">{pivot.error}</div>}
+        <ErrorNote error={pivot.error} onRetry={pivot.reload} />
         {!p && !pivot.error && <ChartSkeleton height={380} />}
         {p && p.rows.length === 0 && <div className="empty">No tenders match these filters.</div>}
         {p && p.rows.length > 0 && (

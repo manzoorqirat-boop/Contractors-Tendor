@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { fmtDate, inr } from './format';
-import { Drawer, Skeleton } from './ui';
+import { Drawer, ErrorNote, Skeleton } from './ui';
 import type { CompareTender } from './types';
 
 type Row = { label: string; cell: (t: CompareTender) => React.ReactNode; best?: (ts: CompareTender[]) => number | null };
@@ -36,14 +36,16 @@ const ROWS: Row[] = [
 export function CompareDrawer({ keys, onClose, onOpenBid }: { keys: string[]; onClose: () => void; onOpenBid: (id: number) => void }) {
   const [rows, setRows] = useState<CompareTender[] | null>(null);
   const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let stop = false;
+    setError('');
     api.compareTenders(keys).then((r) => { if (!stop) setRows(r.tenders); }, (e: Error) => { if (!stop) setError(e.message); });
     return () => { stop = true; };
-  }, [keys.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [keys.join('|'), attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Drawer title={`Compare ${keys.length} tenders`} onClose={onClose} wide>
-      {error && <div className="alert bad">{error}</div>}
+      <ErrorNote error={error} onRetry={() => setAttempt((n) => n + 1)} />
       {!rows && !error && <Skeleton h={200} />}
       {rows && (
         <div style={{ overflowX: 'auto' }} tabIndex={0} role="region" aria-label="Comparison table">

@@ -6,7 +6,7 @@ import { readBase64, resetAiStatus } from '../ai';
 import { PortalsManager } from '../ManualPortals';
 import { setLogoImage, setLogoText, useLogoImage } from '../Brand';
 import { Tabs } from '../Tabs';
-import { useToast } from '../ui';
+import { ErrorNote, useToast } from '../ui';
 import { useConfirm } from '../confirm';
 import { ActivityPanel, UsersPanel } from '../Account';
 import { CleanupCard, DataPrivacyCard, IntegrationsPanel } from '../Integrations';
@@ -293,7 +293,7 @@ function RemindersTab({ form, patch }: { form: Settings; patch: (p: Partial<Sett
       <section className="card">
         <h2>Calendar {cal.data && <span className={`badge ${cal.data.enabled ? 'ok' : 'plain'}`} style={{ marginLeft: 6 }}>{cal.data.enabled ? 'On' : 'Off'}</span>}</h2>
         <p className="sub">Subscribe in Google Calendar, Outlook or an iPhone and every bid deadline and expiring Vault paper appears in your own calendar, with a reminder a day before. It updates by itself.</p>
-        {cal.error && <div className="alert bad">{cal.error}</div>}
+        <ErrorNote error={cal.error} onRetry={cal.reload} />
         {cal.data?.enabled ? (
           <>
             <label className="field">Your private calendar address<span className="hint">Anyone with this address can see the deadlines, so share it only with your team.</span>

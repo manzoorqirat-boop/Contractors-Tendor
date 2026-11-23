@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Response
 from .. import appsettings, catalogue, coverage, health, reminders
 from ..api_common import (
     WebhookTest,
+    reject_unknown,
 )
 from ..config import Portal
 from ..gepnic import PortalError
@@ -49,6 +50,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
 
     @app.post("/api/portals", dependencies=auth)
     def add_portal(body: dict[str, Any]) -> dict:
+        reject_unknown(body, {"name", "state", "base_url"})
         saved = store.get_settings()
         existing = appsettings.all_portals(env, saved)
         try:
@@ -76,6 +78,7 @@ def register(app: FastAPI, ctx: Ctx) -> None:
     def add_portals_bulk(body: dict[str, Any]) -> dict:
         """Adds several catalogue portals at once. They are saved but not yet switched on: each one is then checked (POST .../check?enable=true),
         so a portal that cannot be read never makes a daily run slower or fail."""
+        reject_unknown(body, {"ids"})
         ids = body.get("ids")
         if not isinstance(ids, list) or not ids or len(ids) > 40 or not all(isinstance(i, str) for i in ids):
             raise HTTPException(422, "Choose between 1 and 40 portals")

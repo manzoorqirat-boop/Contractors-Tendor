@@ -195,14 +195,18 @@ def locate_on_portal(client: Any, portal_key: str, organisation: str, tender_id:
 
 
 class BidError(ValueError):
-    pass
+    """Something a person typed that cannot be accepted. `field` names the box it belongs to, so the page can show the message next to it."""
+
+    def __init__(self, message: str, field: str | None = None):
+        super().__init__(message)
+        self.field = field
 
 
-def fit_text(value: Any, limit: int, what: str) -> str:
+def fit_text(value: Any, limit: int, what: str, field: str | None = None) -> str:
     """What a person typed, trimmed of stray spaces. If it is longer than the field holds they are told, rather than having the end quietly cut off."""
     text = str(value if value is not None else "").strip()
     if len(text) > limit:
-        raise BidError(f"{what} can be at most {limit} characters, and this is {len(text)}. Shorten it and try again")
+        raise BidError(f"{what} can be at most {limit} characters, and this is {len(text)}. Shorten it and try again", field)
     return text
 
 
@@ -223,17 +227,17 @@ def clean_patch(raw: Any) -> dict[str, Any]:
     for k, v in raw.items():
         rule = EDITABLE.get(k)
         if rule is None:
-            raise BidError(f"'{k}' cannot be changed")
+            raise BidError(f"'{k}' cannot be changed", str(k))
         if rule == "stage":
             if v not in STAGES:
-                raise BidError("Unknown stage")
+                raise BidError("Unknown stage", k)
             out[k] = v
         elif rule == "date":
             v = (str(v).strip() if v is not None else "")
             if v and (not _DATE.match(v) or _when(v) is None):
-                raise BidError("Dates look like 2026-11-20, and must be real dates")
+                raise BidError("Dates look like 2026-11-20, and must be real dates", k)
             if v and not 2000 <= int(v[:4]) <= 2100:
-                raise BidError("That date does not look right. Check the year")
+                raise BidError("That date does not look right. Check the year", k)
             out[k] = v or None
         elif rule == "money":
             if v in (None, ""):
@@ -242,12 +246,12 @@ def clean_patch(raw: Any) -> dict[str, Any]:
                 try:
                     n = float(v)
                 except (TypeError, ValueError):
-                    raise BidError("Amounts must be numbers") from None
+                    raise BidError("Amounts must be numbers", k) from None
                 if isinstance(v, bool) or not 0 <= n < 1e13:
-                    raise BidError("Amounts must be numbers")
+                    raise BidError("Amounts must be numbers", k)
                 out[k] = n
         else:
-            out[k] = fit_text(v, int(rule), LABELS.get(k, k.replace("_", " ").capitalize()))
+            out[k] = fit_text(v, int(rule), LABELS.get(k, k.replace("_", " ").capitalize()), k)
     return out
 
 
@@ -491,9 +495,9 @@ class BidBook:
         return [{**dict(r), "done": bool(r["done"])} for r in rows]
 
     def add_item(self, bid_id: int, text: str, kind: str, now: datetime, source: str = "manual") -> dict:
-        text = fit_text(text, 300, "A checklist item") if source == "manual" else (text or "").strip()[:300]    # generated lines are trimmed; what a person typed is never cut quietly
+        text = fit_text(text, 300, "A checklist item", "text") if source == "manual" else (text or "").strip()[:300]    # generated lines are trimmed; what a person typed is never cut quietly
         if not text:
-            raise BidError("Type the item first")
+            raise BidError("Type the item first", "text")
         if kind not in ("document", "condition", "task"):
             kind = "task"
         with self.lock:
@@ -510,9 +514,9 @@ class BidBook:
         if "done" in raw:
             sets["done"] = 1 if raw["done"] else 0
         if "text" in raw:
-            t = fit_text(raw["text"], 300, "A checklist item")
+            t = fit_text(raw["text"], 300, "A checklist item", "text")
             if not t:
-                raise BidError("An item needs some text")
+                raise BidError("An item needs some text", "text")
             sets["text"] = t
         for f in ("owner", "note"):
             if f in raw:
@@ -781,9 +785,9 @@ class BidBook:
         bid = self.get(bid_id)
         if not bid:
             raise BidError("No such bid")
-        note = re.sub(r"[ \t]+", " ", str(note or "")).strip()[:500]
+        note = fit_text(re.sub(r"[ \t]+", " ", str(note or "")), 500, "The note", "note")
         if not note:
-            raise BidError("Say what the corrigendum changed")
+            raise BidError("Say what the corrigendum changed", "note")
         closing_iso = None
         if new_closing:
             when = _when(str(new_closing).strip())
@@ -1013,10 +1017,14 @@ class BidBook:
     @staticmethod
     def _vault_fields(raw: dict[str, Any], partial: bool) -> dict[str, Any]:
         out: dict[str, Any] = {}
+        if partial:
+            for k in raw:
+                if k not in ("name", "kind", "issued", "expiry", "notes"):
+                    raise BidError(f"'{k}' cannot be changed", str(k))
         if "name" in raw or not partial:
-            name = str(raw.get("name") or "").strip()[:120]
+            name = fit_text(raw.get("name"), 120, "The name", "name")
             if not name:
-                raise BidError("Give the document a name")
+                raise BidError("Give the document a name", "name")
             out["name"] = name
         if "kind" in raw or not partial:
             kind = raw.get("kind") or "other"
@@ -1030,7 +1038,7 @@ class BidBook:
                     raise BidError("Dates look like 2026-11-20")
                 out[f] = v or None
         if "notes" in raw:
-            out["notes"] = str(raw["notes"] or "").strip()[:500]
+            out["notes"] = fit_text(raw["notes"], 500, "The notes", "notes")
         return out
 
     def vault_add(self, raw: dict[str, Any], data: bytes | None, filename: str, now: datetime) -> dict:

@@ -1,6 +1,6 @@
 import { ScrollX } from '../ScrollX';
 import { Fragment, useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import { BriefView, readBase64, useAiStatus } from '../ai';
 import { BoqCard, RiskCard } from '../Boq';
 import { PriceAdvisor } from '../PriceAdvisor';
@@ -17,7 +17,7 @@ import { PlanCard } from '../Plan';
 import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
 import { useKeepActiveVisible } from '../Tabs';
-import { Skeleton, useToast } from '../ui';
+import { ErrorNote, FieldIssueCtx, FieldMsg, Skeleton, useToast, type FieldIssue } from '../ui';
 import { Only, ReadOnly, useSession } from '../session';
 import { MoneyTab } from '../Money';
 import { useConfirm } from '../confirm';
@@ -102,7 +102,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
             <button type="button" className={`chip pick${view === 'all' ? ' on' : ''}`} onClick={() => setView('all')}>{tr('All')}</button>
           </div>
 
-          {list.error && <div className="alert bad">{list.error} <button className="link-btn" onClick={list.reload}>{tr('Try again')}</button></div>}
+          <ErrorNote error={list.error} onRetry={list.reload} />
           {list.loading && !data && <Skeleton h={120} />}
           {data && shown.length === 0 && (
             <div className="card empty">{data.bids.length === 0 ? <>No bids yet. Open a tender on the Tenders page and press <strong>{tr('Start a bid')}</strong>.</> : tr('Nothing at this stage.')}</div>
@@ -181,7 +181,7 @@ function Results() {
 
 // ---- one bid -----------------------------------------------------------------------------------------------------
 
-function DateField({ label, value, time, onSave }: { label: string; value: string | null; time?: boolean; onSave: (v: string | null) => void }) {
+function DateField({ label, name, value, time, onSave }: { label: string; name: string; value: string | null; time?: boolean; onSave: (v: string | null) => void }) {
   const shown = value ? value.slice(0, time ? 16 : 10) : '';
   const [v, setV] = useState(shown);
   useEffect(() => setV(shown), [shown]);
@@ -190,11 +190,12 @@ function DateField({ label, value, time, onSave }: { label: string; value: strin
     <label className="field-inline">{label}
       <input type={time ? 'datetime-local' : 'date'} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => commit(v)} onKeyDown={(e) => { if (e.key === 'Enter') commit(v); }} />
       {dateSay(v, !!time) && <span className="date-say" aria-hidden>{dateSay(v, !!time)}</span>}
+      <FieldMsg name={name} />
     </label>
   );
 }
 
-function MoneyField({ label, value, onSave }: { label: string; value: number | null; onSave: (v: number | null) => void }) {
+function MoneyField({ label, name, value, onSave }: { label: string; name: string; value: number | null; onSave: (v: number | null) => void }) {
   const [v, setV] = useState(value === null ? '' : String(value));
   useEffect(() => setV(value === null ? '' : String(value)), [value]);
   const parsed = num(v);
@@ -203,6 +204,7 @@ function MoneyField({ label, value, onSave }: { label: string; value: number | n
     <label className="field-inline">{label}
       <input inputMode="decimal" value={v} placeholder="₹" aria-invalid={bad || undefined} aria-describedby={bad ? `money-err-${label}` : undefined} onChange={(e) => setV(e.target.value)} onBlur={() => { if (!bad && parsed !== value) onSave(parsed); }} />
       {bad ? <span className="field-err" id={`money-err-${label}`}>Not an amount. Try 12500000, 125 lakh or 1.25 crore.</span> : parsed ? <span className="date-say">{inr(parsed)}</span> : null}
+      <FieldMsg name={name} />
     </label>
   );
 }
@@ -218,6 +220,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const [bid, setBid] = useState<BidDetail | null>(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const [issue, setIssue] = useState<FieldIssue>(null);   // what the server refused, shown beside the box it is about
   const [tabSel, setTabSel] = useState<WsTab | null>(null);
   const tabsRef = useKeepActiveVisible(tabSel);  // a hook, so it stays above the early returns below
   const vault = useLoad(() => api.vault(), []);
@@ -227,9 +230,12 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   async function save(patch: Record<string, unknown>) {
     try {
       const next = await api.patchBid(id, patch);
+      setIssue(null);
       setBid(next); setSaved(true); setTimeout(() => setSaved(false), 2000);
       if ((patch.stage === 'won' || patch.stage === 'lost') && !next.my_value) toast(tr('Saved. Add the price you quoted on the bid\'s Result tab, so the price and win-chance history can learn from it.'));
-    } catch (e) { toast((e as Error).message, 'bad'); }
+    } catch (e) {
+      if (e instanceof ApiError && e.field) setIssue({ field: e.field, message: e.message }); else toast((e as Error).message, 'bad');
+    }
   }
   async function remove() {
     if (!(await confirm({ title: tr('Remove this bid?'), body: 'Its checklist, notes, drafts and results are deleted and this cannot be undone. The tender itself stays in the list.', confirmLabel: tr('Remove bid'), danger: true }))) return;
@@ -254,7 +260,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
   const stages: { key: Stage; label: string }[] = [['interested', tr('Interested')], ['preparing', tr('Preparing')], ['submitted', tr('Submitted')], ['opened', tr('Bid opened')], ['won', tr('Won')], ['lost', tr('Lost')], ['dropped', tr('Dropped')]].map(([key, label]) => ({ key: key as Stage, label }));
 
   return (
-    <>
+    <FieldIssueCtx.Provider value={issue}>
       <button className="link-btn" onClick={onBack}>{tr('← All bids')}</button>
       <div className="page-head" style={{ marginTop: 6 }}>
         <div style={{ minWidth: 0 }}>
@@ -296,12 +302,12 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
         {open && rel.text && <div className={`when-banner ${rel.tone}`} style={{ marginTop: 12 }}>{rel.text}</div>}
         <h2 className="h3-like" style={{ margin: '14px 0 6px' }}>{tr('Dates')}</h2>
         <div className="ws-grid">
-          <DateField label={tr('Bid closes')} value={bid.closing} time onSave={(v) => save({ closing: v })} />
-          <DateField label={tr('Bids open')} value={bid.opening} time onSave={(v) => save({ opening: v })} />
-          <DateField label={tr('Pre-bid meeting')} value={bid.prebid_date} time onSave={(v) => save({ prebid_date: v })} />
-          <DateField label={tr('Last date for queries')} value={bid.query_deadline} onSave={(v) => save({ query_deadline: v })} />
-          <DateField label={tr('EMD due')} value={bid.emd_due} onSave={(v) => save({ emd_due: v })} />
-          {bid.manual && <DateField label={tr('Last checked on the portal')} value={bid.portal_checked ?? null} onSave={(v) => save({ portal_checked: v })} />}
+          <DateField label={tr('Bid closes')} name="closing" value={bid.closing} time onSave={(v) => save({ closing: v })} />
+          <DateField label={tr('Bids open')} name="opening" value={bid.opening} time onSave={(v) => save({ opening: v })} />
+          <DateField label={tr('Pre-bid meeting')} name="prebid_date" value={bid.prebid_date} time onSave={(v) => save({ prebid_date: v })} />
+          <DateField label={tr('Last date for queries')} name="query_deadline" value={bid.query_deadline} onSave={(v) => save({ query_deadline: v })} />
+          <DateField label={tr('EMD due')} name="emd_due" value={bid.emd_due} onSave={(v) => save({ emd_due: v })} />
+          {bid.manual && <DateField label={tr('Last checked on the portal')} name="portal_checked" value={bid.portal_checked ?? null} onSave={(v) => save({ portal_checked: v })} />}
         </div>
         {bid.manual
           ? <p className="muted small" style={{ marginTop: 8 }}>This tender was added by hand, so the app cannot watch it for corrigenda or moved dates. Look at the portal yourself and record the day here: the bid reminds you in the last days before closing.{' '}
@@ -349,12 +355,12 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           <h2>{tr('Result')}</h2>
           <p className="sub">Recording prices and the outcome builds your record, which shows on similar tenders.</p>
           <div className="ws-grid">
-            <MoneyField label={tr('Your quoted price (₹)')} value={bid.my_value} onSave={(v) => save({ my_value: v })} />
-            <MoneyField label={tr('Winning (L1) price (₹)')} value={bid.l1_value} onSave={(v) => save({ l1_value: v })} />
-            <TextField label={tr('Winner')} value={bid.l1_bidder ?? ''} max={120} onSave={(v) => save({ l1_bidder: v })} />
+            <MoneyField label={tr('Your quoted price (₹)')} name="my_value" value={bid.my_value} onSave={(v) => save({ my_value: v })} />
+            <MoneyField label={tr('Winning (L1) price (₹)')} name="l1_value" value={bid.l1_value} onSave={(v) => save({ l1_value: v })} />
+            <TextField label={tr('Winner')} name="l1_bidder" value={bid.l1_bidder ?? ''} max={120} onSave={(v) => save({ l1_bidder: v })} />
           </div>
           {bid.my_value && bid.l1_value ? <p className="muted small" style={{ marginTop: 8 }}>Your price was {Math.abs(((bid.my_value - bid.l1_value) / bid.l1_value) * 100).toFixed(1)}% {bid.my_value >= bid.l1_value ? 'above' : 'below'} the winning price.</p> : null}
-          <label className="field" style={{ marginTop: 10 }}>{tr('What happened')}<textarea key={`r-${bid.result_note ?? ''}`} defaultValue={bid.result_note ?? ''} maxLength={1000} onBlur={(e) => e.target.value !== (bid.result_note ?? '') && save({ result_note: e.target.value })} /></label>
+          <label className="field" style={{ marginTop: 10 }}>{tr('What happened')}<textarea key={`r-${bid.result_note ?? ''}`} defaultValue={bid.result_note ?? ''} maxLength={1000} onBlur={(e) => e.target.value !== (bid.result_note ?? '') && save({ result_note: e.target.value })} /><FieldMsg name="result_note" /></label>
           <div className="d-actions">
             {bid.stage !== 'won' && <button className="btn" onClick={() => save({ stage: 'won' })}>{tr('Mark won')}</button>}
             {bid.stage !== 'lost' && <button className="btn" onClick={() => save({ stage: 'lost' })}>{tr('Mark lost')}</button>}
@@ -364,7 +370,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
 
       {tab === 'result' && (['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && <BiddersCard bid={bid} aiOn={!!ai?.configured} onChange={(patch) => setBid({ ...bid, ...patch })} />}
       {tab === 'result' && <section id="sec-notes" className="card" style={{ marginBottom: 14 }}>
-        <label className="field">{tr('Notes')}<textarea key={`n-${bid.notes ?? ''}`} defaultValue={bid.notes ?? ''} maxLength={4000} placeholder="Site visit, rates, who to call…" onBlur={(e) => e.target.value !== (bid.notes ?? '') && save({ notes: e.target.value })} /></label>
+        <label className="field">{tr('Notes')}<textarea key={`n-${bid.notes ?? ''}`} defaultValue={bid.notes ?? ''} maxLength={4000} placeholder="Site visit, rates, who to call…" onBlur={(e) => e.target.value !== (bid.notes ?? '') && save({ notes: e.target.value })} /><FieldMsg name="notes" /></label>
         {bid.changes.length > 0 && (
           <details><summary className="muted small">Change history ({bid.changes.length})</summary>
             <ul style={{ margin: '6px 0 0 18px', padding: 0 }} className="small">{bid.changes.map((c) => <li key={c.id}>{fmtDate(c.at, true)} · {CHANGE_TEXT[c.what] ?? c.what}: {c.what === 'closing' || c.what === 'opening' ? `${fmtDate(c.old, true)} → ${fmtDate(c.new, true)}` : c.new}</li>)}</ul>
@@ -374,7 +380,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
       {tab === 'result' && !(['submitted', 'opened', 'won', 'lost'] as Stage[]).includes(bid.stage) && <p className="muted small">The result form appears once the bid is Submitted.</p>}
       <button className="link-btn" style={{ color: 'var(--bad)' }} onClick={remove}>{tr('Remove this bid')}</button>
       </ReadOnly>
-    </>
+    </FieldIssueCtx.Provider>
   );
 }
 
@@ -391,13 +397,13 @@ function NextStep({ bid }: { bid: BidDetail }) {
 }
 
 function OwnerField({ value, onSave }: { value: string; onSave: (v: string) => void }) {
-  return <label className="field-inline">{tr('Owner')}<AssigneeSelect value={value || null} label="Owner of this bid" className="" onChange={onSave} /></label>;
+  return <label className="field-inline">{tr('Owner')}<AssigneeSelect value={value || null} label="Owner of this bid" className="" onChange={onSave} /><FieldMsg name="owner" /></label>;
 }
 
-function TextField({ label, value, max, placeholder, onSave }: { label: string; value: string; max: number; placeholder?: string; onSave: (v: string) => void }) {
+function TextField({ label, name, value, max, placeholder, onSave }: { label: string; name: string; value: string; max: number; placeholder?: string; onSave: (v: string) => void }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
-  return <label className="field-inline">{label}<input value={v} maxLength={max} placeholder={placeholder} onChange={(e) => setV(e.target.value)} onBlur={() => v.trim() !== value && onSave(v.trim())} /></label>;
+  return <label className="field-inline">{label}<input value={v} maxLength={max} placeholder={placeholder} onChange={(e) => setV(e.target.value)} onBlur={() => v.trim() !== value && onSave(v.trim())} /><FieldMsg name={name} /></label>;
 }
 
 // ---- checklist ---------------------------------------------------------------------------------------------------
@@ -406,6 +412,7 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
   const toast = useToast();
   const [items, setItems] = useState<BidItem[]>(bid.items);
   const [text, setText] = useState('');
+  const [itemIssue, setItemIssue] = useState<FieldIssue>(null);
   const [kind, setKind] = useState('task');
   const [showDoc, setShowDoc] = useState(false);
   const [found, setFound] = useState<Clause[] | null>(null);
@@ -438,7 +445,8 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
   async function add(e: React.FormEvent) {
     e.preventDefault();
     if (!text.trim()) return;
-    try { await api.addItem(bid.id, text.trim(), kind); setText(''); onChange(); } catch (err) { toast((err as Error).message, 'bad'); }
+    try { await api.addItem(bid.id, text.trim(), kind); setText(''); setItemIssue(null); onChange(); }
+    catch (err) { if (err instanceof ApiError && err.field) setItemIssue({ field: err.field, message: err.message }); else toast((err as Error).message, 'bad'); }
   }
   async function fromDoc() {
     try { const r = await api.generateItems(bid.id); toast(r.added ? `Added ${plural(r.added, 'item')}` : 'Nothing new to add'); onChange(); } catch (e) { toast((e as Error).message, 'bad'); }
@@ -532,9 +540,10 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
         );
       })}
       <form className="add-item" onSubmit={add}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Add an item" maxLength={300} aria-label="New checklist item" />
+        <input value={text} onChange={(e) => { setText(e.target.value); setItemIssue(null); }} placeholder="Add an item" maxLength={300} aria-label="New checklist item" aria-invalid={itemIssue ? true : undefined} />
         <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label={tr('Kind')}><option value="task">{tr('Step')}</option><option value="document">{tr('Document')}</option><option value="condition">{tr('Condition')}</option></select>
         <button className="btn" disabled={!text.trim()}>{tr('Add')}</button>
+        <FieldMsg name="text" issue={itemIssue} />
       </form>
     </section>
   );

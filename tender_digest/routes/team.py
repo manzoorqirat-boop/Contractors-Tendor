@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from ..accounts import AccountError, Principal
 from ..api_common import (
     CommentBody,
+    FieldHTTPException,
     OwnEmail,
     SignoffBody,
 )
@@ -83,7 +84,9 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         bid = bid_or_404(bid_id)
         user: Principal = request.state.user
         cur = bid.get("signoff") or {}
-        note = body.note.strip()[:500]
+        note = body.note.strip()
+        if len(note) > 500:
+            raise FieldHTTPException(422, f"The note can be at most 500 characters, and this is {len(note)}. Shorten it and try again", "note")
         title = (bid["description"] or bid["title"])[:100]
         stamp = now().isoformat(timespec="seconds")
         if body.action == "request":

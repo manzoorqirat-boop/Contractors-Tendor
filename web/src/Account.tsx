@@ -4,7 +4,7 @@ import { api } from './api';
 import { Logo } from './Brand';
 import { useConfirm } from './confirm';
 import { useLoad } from './hooks';
-import { useToast } from './ui';
+import { ErrorNote, useToast } from './ui';
 import { resetPeople } from './Team';
 import type { AuditEntry, Me, Role, UserRow } from './types';
 
@@ -130,7 +130,7 @@ function DevicesSection({ busy, onSignOutOthers, owner }: { busy: boolean; onSig
     <section>
       <h3>Devices</h3>
       <p className="sub">Where you are signed in. Spot one you do not recognise, or one on a shared computer you no longer use? Sign it out.</p>
-      {list.error && <div className="alert bad">{list.error}</div>}
+      <ErrorNote error={list.error} onRetry={list.reload} />
       {sessions.length > 0 && (
         <ul className="plain" style={{ margin: '0 0 10px', padding: 0, listStyle: 'none' }}>
           {sessions.map((d) => (
