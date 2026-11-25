@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { api } from '../api';
 import { inr } from '../format';
@@ -146,7 +147,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
         {tab === 'email' && (
           <section className="card">
             <h2>Daily email</h2>
-            <p className="sub">{form.mail_configured ? <>Sent from <strong>{form.mail_from}</strong> through Brevo.</> : 'Email is not set up on the server: BREVO_API_KEY and MAIL_FROM are missing.'}</p>
+            <p className="sub">{form.mail_configured ? <>Sent from <strong>{form.mail_from}</strong> through Brevo.</> : <>{tr('Daily emails are not switched on yet, so nothing can be sent. Whoever installed TendAI needs to connect an email service (the README explains how).')} <span className="muted">{tr('Technical: BREVO_API_KEY and MAIL_FROM are missing on the server.')}</span></>}</p>
             <div className="set-grid">
               <label className="field">
                 Recipients

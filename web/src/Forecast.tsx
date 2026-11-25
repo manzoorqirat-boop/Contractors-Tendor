@@ -10,6 +10,8 @@ export function ForecastCard() {
   const { data: f, error } = useLoad<ForecastData>(() => api.forecast(), []);
   if (error || !f) return null;
   const t = f.total;
+  // Until the app has about six weeks of its own collecting there is nothing to forecast: one quiet line, not a card taking the top of the page.
+  if (!t && f.coming_round.length === 0) return <p className="muted small" style={{ margin: '0 0 12px' }}>{tr('A forecast of upcoming tenders appears after about 6 weeks of daily collection ({days} days so far).', { days: f.history_days })}</p>;
   return (
     <section className="card" style={{ marginBottom: 14 }}>
       <h2>{tr('What to expect')}</h2>

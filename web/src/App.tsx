@@ -16,6 +16,7 @@ import { unsaved } from './unsaved';
 import { SessionProvider, useSession } from './session';
 import { AccountPanel, ChangePassword } from './Account';
 import { ShortcutsHelp, useShortcuts } from './Shortcuts';
+import { HelpDrawer, useHelp } from './Help';
 import type { Display, Facets, Filters, Me } from './types';
 import { tr } from './i18n';
 
@@ -198,6 +199,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
   const nav: Nav = { filters, display, facets: facets.data, setFilters, setDisplay, go };
   const tabAllowed = useCallback((t: Tab) => t !== 'settings' || can('admin'), [can]);
   const [help, setHelp] = useShortcuts(useCallback((t: Tab) => go(t), [go]), tabAllowed);
+  const [guide, setGuide] = useHelp();
   const themeLabel = theme === 'dark' ? tr('Theme: Dark') : theme === 'light' ? tr('Theme: Light') : tr('Theme: Auto');
   const cycleTheme = () => { const next = THEMES[(THEMES.indexOf(theme) + 1) % 3]; setTheme(next); applyTheme(next); try { localStorage.setItem('theme', next); } catch { /* ignore */ } };
 
@@ -205,6 +207,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
     <div className="app">
       <AddTenderHost />
       {help && <ShortcutsHelp onClose={() => setHelp(false)} allowed={tabAllowed} />}
+      {guide && <HelpDrawer onClose={() => setGuide(false)} />}
       {changingPassword && user && <Drawer title={tr('Account & security')} onClose={() => setChangingPassword(false)}><AccountPanel user={user} onClose={() => setChangingPassword(false)} onChanged={refreshMe} /></Drawer>}
       <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>{tr('Skip to content')}</a>
       <aside className="sidebar">
@@ -232,6 +235,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
             <div className="link-btn" style={{ padding: '4px 10px' }}><LanguageSwitch /></div>
             <div className="link-btn" style={{ padding: '4px 10px' }}><AccentPicker /></div>
           </details>
+          <button className="link-btn" onClick={() => setGuide(true)}><span className="nav-label">{tr('Help')}</span></button>
           <button className="link-btn" onClick={() => setHelp(true)}><span className="nav-label">{tr('Keyboard shortcuts')}</span></button>
           <button className="link-btn" onClick={onLogout}><span className="nav-label">{tr('Log out')}</span></button>
           </div>

@@ -17,6 +17,7 @@ import { PlanCard } from '../Plan';
 import { UseTemplate } from '../LetterTemplates';
 import { CorrigendumForm } from '../Corrigenda';
 import { useKeepActiveVisible } from '../Tabs';
+import { Term } from '../Help';
 import { ErrorNote, FieldIssueCtx, FieldMsg, Skeleton, useToast, type FieldIssue } from '../ui';
 import { Only, ReadOnly, useSession } from '../session';
 import { MoneyTab } from '../Money';
@@ -79,7 +80,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
       {mode === 'results' ? <Results /> : (
         <>
           <MyWork onOpen={onOpen} />
-          <PlanCard />
+          {activeCount > 0 && <PlanCard />}
           {(alerts.data?.alerts.length ?? 0) > 0 && (
             <section className="card" style={{ marginBottom: 14 }}>
               <h2>{tr('Coming up')}</h2>
@@ -105,7 +106,7 @@ function Pipeline({ config, onOpen }: { config: AppConfig; onOpen: (id: number) 
           <ErrorNote error={list.error} onRetry={list.reload} />
           {list.loading && !data && <Skeleton h={120} />}
           {data && shown.length === 0 && (
-            <div className="card empty">{data.bids.length === 0 ? <>No bids yet. Open a tender on the Tenders page and press <strong>{tr('Start a bid')}</strong>.</> : tr('Nothing at this stage.')}</div>
+            <div className="card empty">{data.bids.length === 0 ? <><h2>{tr('No bids yet')}</h2><p className="sub">{tr('A bid is a tender you have decided to work on. Open a tender and press Start a bid to get its checklist, price tools and deadlines in one place.')}</p><a className="btn primary" href="#/tenders">{tr('Browse tenders')}</a></> : tr('Nothing at this stage.')}</div>
           )}
           <div className="bid-list">
             {shown.map((b) => {
@@ -297,7 +298,7 @@ function Workspace({ id, config, onBack }: { id: number; config: AppConfig; onBa
           </label>
           <OwnerField value={bid.owner ?? ''} onSave={(v) => save({ owner: v })} />
           <div className="field-inline">{tr('Value')}<span className="static">{bid.value_text}</span></div>
-          <div className="field-inline">{tr('EMD')}<span className="static">{bid.emd ? inr(bid.emd, false) : '-'}</span></div>
+          <div className="field-inline"><Term k="EMD">{tr('EMD')}</Term><span className="static">{bid.emd ? inr(bid.emd, false) : '-'}</span></div>
         </div>
         {open && rel.text && <div className={`when-banner ${rel.tone}`} style={{ marginTop: 12 }}>{rel.text}</div>}
         <h2 className="h3-like" style={{ margin: '14px 0 6px' }}>{tr('Dates')}</h2>

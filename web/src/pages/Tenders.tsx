@@ -4,7 +4,8 @@ import { api } from '../api';
 import type { Nav } from '../App';
 import { FitBadge } from '../ai';
 import { FilterBar } from '../FilterBar';
-import { EMPTY } from '../filters';
+import { EMPTY, isFiltered } from '../filters';
+import { NothingCollected } from '../Collect';
 import { CompareDrawer } from '../Compare';
 import { NotInterestedMenu } from '../Ignore';
 import { StarButton, TenderDrawer } from '../TenderDrawer';
@@ -33,6 +34,10 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [comparing, setComparing] = useState(false);
   const MAX_PICK = 100;
+  async function loadSample() {
+    try { const r = await api.loadSample(); toast(tr('{n} sample tenders added. They are marked "Sample data" and never emailed.', { n: r.added })); reload(); window.dispatchEvent(new CustomEvent('tenders-changed')); }
+    catch (e) { toast((e as Error).message, 'bad'); }
+  }
   const isPicked = (k: string) => picked.includes(k);
   const togglePick = (k: string) => {
     if (!isPicked(k) && picked.length >= MAX_PICK) { toast(`You can select up to ${MAX_PICK} tenders at a time.`, 'bad'); return; }
@@ -110,7 +115,11 @@ export function TendersPage({ config, nav }: { config: AppConfig; nav: Nav }) {
         {error && <div className="alert bad">{error} <button className="link-btn" onClick={reload}>{tr('Try again')}</button></div>}
         {!data && !error && Array.from({ length: 5 }, (_, i) => <div key={i} className="tender"><div><Skeleton h={16} w="80%" style={{ marginBottom: 8 }} /><Skeleton h={12} w="55%" /></div><Skeleton h={30} w={110} /></div>)}
         {data?.understood && <p className="muted small" role="status" style={{ margin: '0 0 8px' }}>{data.understood}.</p>}
-        {data && items.length === 0 && <div className="empty"><h2>{tr('No tenders match these filters')}</h2>{data.suggest && <p className="sub">{tr('Did you mean')} <button type="button" className="link-btn" onClick={() => nav.setFilters({ ...filters, q: data.suggest! })}>{data.suggest}</button>?</p>}<p className="sub">{tr('Widen the closing window or remove a filter to see more.')}</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>{tr('Clear all filters')}</button></div>}
+        {data && items.length === 0 && data.kept === 0 && <NothingCollected portals={config.portals.map((p) => p.key)} go={nav.go} onSample={loadSample} />}
+        {data && items.length === 0 && data.kept !== 0 && !isFiltered(filters) && (
+          <div className="empty"><h2>{tr('No open tenders right now')}</h2><p className="sub">{tr('{n} closed tenders are kept. Closed ones are hidden unless you ask for them.', { n: data.kept ?? 0 })}</p><button className="btn primary" onClick={() => nav.setFilters({ ...filters, status: 'all' })}>{tr('Show closed tenders too')}</button></div>
+        )}
+        {data && items.length === 0 && data.kept !== 0 && isFiltered(filters) && <div className="empty"><h2>{tr('No tenders match these filters')}</h2>{data.suggest && <p className="sub">{tr('Did you mean')} <button type="button" className="link-btn" onClick={() => nav.setFilters({ ...filters, q: data.suggest! })}>{data.suggest}</button>?</p>}<p className="sub">{tr('Widen the closing window or remove a filter to see more.')}</p><button className="btn primary" onClick={() => nav.setFilters(EMPTY)}>{tr('Clear all filters')}</button></div>}
 
         <div style={{ opacity: loading && data ? 0.55 : 1 }} aria-busy={loading}>
           {layout === 'cards' && items.map((t) => <Card key={t.key} picked={isPicked(t.key)} onPick={() => togglePick(t.key)} t={t} now={config.now} why={display.sort === 'smart' ? t.priority_note : null} onOpen={() => setSelected(t.key)} onStar={(s) => setStar(t.key, s)} onCopy={() => copyId(t.tender_id)} onStart={() => startBid(t.key)} />)}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 import { chain, fmtDate, headline, inr, relative } from './format';
 import { AiSections, FitBadge, RelatedNote } from './ai';
+import { Term } from './Help';
 import { Drawer, ErrorNote, Skeleton, useToast } from './ui';
 import { useSession } from './session';
 import type { Tender, TenderDetail } from './types';
@@ -48,7 +49,12 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
 
   async function notInterested() {
     if (!t) return;
-    try { await api.hideTenders([t.key], true); toast(tr('Hidden. Choose "Show ignored" in the list to bring it back.')); onClose(); window.dispatchEvent(new CustomEvent('tenders-changed')); }
+    const key = t.key;
+    try {
+      await api.hideTenders([key], true);
+      toast(tr('Hidden. Choose "Show ignored" in the list to bring it back.'), 'ok', { label: tr('Undo'), run: () => { api.hideTenders([key], false).then(() => { toast(tr('Brought back.')); window.dispatchEvent(new CustomEvent('tenders-changed')); }, (e: Error) => toast(e.message, 'bad')); } });
+      onClose(); window.dispatchEvent(new CustomEvent('tenders-changed'));
+    }
     catch (err) { toast((err as Error).message, 'bad'); }
   }
 
@@ -81,7 +87,7 @@ export function TenderDrawer({ tenderKey, now, onClose, onStar }: { tenderKey: s
           <RelatedNote t={t} />
           <dl className="facts">
             <dt>{tr('Estimated value')}</dt><dd><strong>{t.value === null ? tr('Not stated') : inr(t.value, false)}</strong>{t.value !== null && t.value >= 1e5 && <span className="muted"> ({inr(t.value)})</span>}</dd>
-            <dt>{tr('EMD')}</dt><dd>{t.emd ? inr(t.emd, false) : '-'}</dd>
+            <dt><Term k="EMD">{tr('EMD')}</Term></dt><dd>{t.emd ? inr(t.emd, false) : '-'}</dd>
             <dt>{tr('Closes')}</dt><dd>{fmtDate(t.closing, true)}</dd>
             <dt>{tr('Bid opening')}</dt><dd>{fmtDate(t.opening, true)}</dd>
             <dt>{tr('Published')}</dt><dd>{fmtDate(t.published, true)}</dd>

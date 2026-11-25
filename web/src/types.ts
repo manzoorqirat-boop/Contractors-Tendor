@@ -35,7 +35,7 @@ export interface Related { key: string; tender_id: string; title: string; closin
 export interface TenderDetail extends Tender { summary: string | null; brief: Brief | null; doc: DocFacts | null; related: Related[]; bid_id?: number | null; history?: string[]; manual?: boolean; has_source?: boolean }
 export interface AiStatus { configured: boolean; model: string; fast_model: string; profile_set: boolean; labelled: number; unlabelled: number; calls_today?: number; daily_limit?: number }
 export interface AskResult { filters: Record<string, unknown>; sort: string | null; explanation: string }
-export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[]; understood?: string; suggest?: string | null }
+export interface TenderPage { items: Tender[]; total: number; page: number; page_size: number; categories: string[]; understood?: string; suggest?: string | null; kept?: number }
 
 export interface Stats {
   kpi: {
