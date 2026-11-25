@@ -255,4 +255,8 @@ To try these quickly, run both seed scripts (section 0).
 | Honest empty pages | Tenders, Dashboard, Bids | Open them on a fresh install; then on a database where every tender has closed | "No tenders collected yet" (with the button); "No open tenders right now" with *Show closed tenders too*; "No bids yet" with *Browse tenders* |
 | Help and glossary | Menu > Help | Open it, then hover EMD on a tender or a bid | A five-step guide, a "where do I find" list, the glossary; EMD shows its meaning on hover |
 | Undo after hiding a tender | Tender panel or the Not interested menu | Hide a tender | A message with **Undo** for ten seconds; Undo brings it back |
+| Guided tour | First sign-in on a browser; Help > Take the tour again | Open the app in a new private window and sign in | A six-step tour over the menu; Esc or "Skip the tour" ends it and it does not return after a reload |
+| Folded filters | Tenders, Dashboard | Open Tenders; press **Filters**; then open a link with a category filter | Work type, Category, Department, Location, Value, Starred, Fits my size and Show ignored appear only after **Filters** (or when one is in use) |
+| Settings sections | Settings | Open Settings on a phone | A "Settings section" picker instead of tabs; each section has a one-line description under the title |
+| Quieter checklist | A bid > Checklist | Open a bid's checklist with one user, then add a second user | No "Unassigned" pickers with one user; they appear with two. A paper matched from the Vault shows **Change** |
 

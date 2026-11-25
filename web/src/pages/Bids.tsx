@@ -414,6 +414,7 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
   const [items, setItems] = useState<BidItem[]>(bid.items);
   const [text, setText] = useState('');
   const [itemIssue, setItemIssue] = useState<FieldIssue>(null);
+  const [changing, setChanging] = useState<number | null>(null);   // the checklist line whose vault paper is being changed
   const [kind, setKind] = useState('task');
   const [showDoc, setShowDoc] = useState(false);
   const [found, setFound] = useState<Clause[] | null>(null);
@@ -524,13 +525,14 @@ function Checklist({ bid, vault, aiOn, onChange }: { bid: BidDetail; vault: Vaul
                     <label className="check"><input type="checkbox" checked={i.done} onChange={() => toggle(i)} /><span>{i.text}</span></label>
                     <div className="check-tools">
                       {i.match && label && <span className={`badge ${tone}`} title={i.match.name}>{i.match.status === 'ok' ? `In vault: ${i.match.name}` : label}</span>}
-                      {i.kind === 'document' && docs.length > 0 && (
+                      {i.kind === 'document' && docs.length > 0 && i.match?.status === 'ok' && changing !== i.id && <button type="button" className="link-btn small" onClick={() => setChanging(i.id)}>{tr('Change')}</button>}
+                      {i.kind === 'document' && docs.length > 0 && (i.match?.status !== 'ok' || changing === i.id) && (
                         <select className="mini-select" value={i.vault_id ?? ''} aria-label="Paper from the vault" onChange={(e) => link(i, e.target.value)}>
                           <option value="">{i.match && i.match.status !== 'unknown' && i.match.status !== 'missing' ? tr('Automatic') : tr('Pick from vault')}</option>
                           {docs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                         </select>
                       )}
-                      <AssigneeSelect value={i.owner} label={`Who is responsible for: ${i.text.slice(0, 60)}`} onChange={(v) => assign(i, v)} />
+                      <AssigneeSelect hideIfAlone value={i.owner} label={`Who is responsible for: ${i.text.slice(0, 60)}`} onChange={(v) => assign(i, v)} />
                       <button type="button" className="link-btn" aria-label="Remove item" onClick={() => remove(i)}>✕</button>
                     </div>
                   </li>

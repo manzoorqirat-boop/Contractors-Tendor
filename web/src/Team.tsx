@@ -17,8 +17,9 @@ export function usePeople(): Person[] {
 export const resetPeople = () => { cached = null; };
 
 /** A dropdown of people. A name typed before accounts existed is kept and shown as it was. */
-export function AssigneeSelect({ value, onChange, label, className = 'mini-select' }: { value: string | null; onChange: (v: string) => void; label: string; className?: string }) {
+export function AssigneeSelect({ value, onChange, label, className = 'mini-select', hideIfAlone = false }: { value: string | null; onChange: (v: string) => void; label: string; className?: string; hideIfAlone?: boolean }) {
   const people = usePeople();
+  if (hideIfAlone && people.length <= 1 && !value) return null;   // with one person on the account there is nobody to hand an item to: no picker on every line
   const known = people.some((p) => p.username.toLowerCase() === (value ?? '').toLowerCase());
   return (
     <select className={className} value={value ?? ''} aria-label={label} onChange={(e) => onChange(e.target.value)}>

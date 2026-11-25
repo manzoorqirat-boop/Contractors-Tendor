@@ -63,7 +63,7 @@ export function HelpDrawer({ onClose }: { onClose: () => void }) {
       <dl className="facts help-glossary">
         {GLOSSARY.map((g) => <div key={g.term} style={{ display: 'contents' }}><dt>{g.term}</dt><dd>{g.meaning}</dd></div>)}
       </dl>
-      <p className="muted small" style={{ marginTop: 14 }}>{tr('Press ? any time for the keyboard shortcuts.')}</p>
+      <p className="muted small" style={{ marginTop: 14 }}>{tr('Press ? any time for the keyboard shortcuts.')} <button type="button" className="link-btn" onClick={() => { onClose(); window.dispatchEvent(new Event('open-tour')); }}>{tr('Take the tour again')}</button></p>
     </Drawer>
   );
 }

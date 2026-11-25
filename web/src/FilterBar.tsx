@@ -16,6 +16,11 @@ interface Props {
   hideStatus?: boolean;
 }
 
+/** Whether any of the folded-away filters is in use. */
+function extraActive(f: Filters): boolean {
+  return f.work_type.length + f.category.length + f.department.length + f.location.length > 0 || !!(f.min_value || f.max_value || f.value_lt || f.no_value || f.starred || f.fits_me || f.hidden);
+}
+
 const SAVED_KEYS: (keyof Display)[] = ['sort', 'group_by', 'split_by', 'measure', 'chart'];
 
 export function FilterBar({ filters, display, config, facets, onChange, onApplyView, hideStatus }: Props) {
@@ -23,7 +28,8 @@ export function FilterBar({ filters, display, config, facets, onChange, onApplyV
   const [q, setQ] = useState(filters.q);
   const debounced = useDebounced(q, 350);
   const input = useRef<HTMLInputElement>(null);
-  const [more, setMore] = useState(false); // phones start with the extra filters folded away
+  // The extra filters (work type, category, department, location, value, starred, fits my size, ignored) are folded away until one is in use or the person opens them.
+  const [more, setMore] = useState(() => extraActive(filters));
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch });
 
   useEffect(() => { setQ(filters.q); }, [filters.q]);
@@ -49,7 +55,7 @@ export function FilterBar({ filters, display, config, facets, onChange, onApplyV
     <section className="card filterbar" aria-label={tr('Filters')}>
       <div className="fb-row">
         <input ref={input} type="text" className="fb-search" placeholder="Search: road nashik, drain -paver, bridge above 2 crore   ( / )" title="Every word must match. Drain also finds nala and sewer. Use quotes for a phrase, a minus to leave a word out, and above / under with an amount." aria-label={tr('Search')} value={q} onChange={(e) => setQ(e.target.value)} maxLength={100} />
-        <button type="button" className={`btn fb-toggle${more ? ' active' : ''}`} aria-expanded={more} onClick={() => setMore((m) => !m)}>Filters{chips.length ? ` (${chips.length})` : ''}</button>
+        <button type="button" className={`btn fb-toggle${more ? ' active' : ''}`} aria-expanded={more} onClick={() => setMore((m) => !m)}>{tr('Filters')}{chips.length ? ` (${chips.length})` : ''}</button>
         <div className={`fb-selects${more ? ' open' : ''}`}>
         {!hideStatus && (
           <select aria-label={tr('Status')} value={filters.status} onChange={(e) => set({ status: e.target.value as Filters['status'], closing_within: undefined })} className="fb-select">
@@ -62,13 +68,19 @@ export function FilterBar({ filters, display, config, facets, onChange, onApplyV
         </div>
       </div>
 
-      <div className={`fb-row fb-more${more ? ' open' : ''}`}>
+      <div className={`fb-row fb-primary${more ? ' open' : ''}`}>
         <div className="seg" role="group" aria-label={tr('Portal')}>
           {config.portals.map((p) => {
             const on = filters.portal.includes(p.key);
             return <button key={p.key} type="button" aria-pressed={on} className={on ? 'on' : ''} onClick={() => set({ portal: on ? filters.portal.filter((x) => x !== p.key) : [...filters.portal, p.key] })}>{p.state}</button>;
           })}
         </div>
+        <span className="spacer" />
+        <ViewsMenu filters={filters} display={display} onApply={onApplyView} />
+        <button type="button" className="btn" onClick={copyLink} title="Copy a link to exactly this view">{tr('Share')}</button>
+      </div>
+
+      <div className={`fb-row fb-extra${more ? ' open' : ''}`}>
         {(facets?.work_type?.length ?? 0) > 0 && <MultiSelect title={tr('Work type')} options={facets?.work_type ?? []} selected={filters.work_type} onChange={(v) => set({ work_type: v })} allowNone={false} />}
         <MultiSelect title={tr('Category')} options={facets?.category ?? []} selected={filters.category} onChange={(v) => set({ category: v })} />
         <MultiSelect title={tr('Department')} options={facets?.department ?? []} selected={filters.department} onChange={(v) => set({ department: v })} />
@@ -88,9 +100,6 @@ export function FilterBar({ filters, display, config, facets, onChange, onApplyV
         <button type="button" className={`btn${filters.starred ? ' active' : ''}`} aria-pressed={!!filters.starred} onClick={() => set({ starred: !filters.starred })}>{filters.starred ? '★' : '☆'} Starred</button>
         <button type="button" className={`btn${filters.fits_me ? ' active' : ''}`} aria-pressed={!!filters.fits_me} onClick={() => set({ fits_me: !filters.fits_me })} title={tr('Hide tenders outside the size range you take (Vault > Company)')}>{tr('Fits my size')}</button>
         <button type="button" className={`btn${filters.hidden === 'only' ? ' active' : ''}`} aria-pressed={filters.hidden === 'only'} onClick={() => set({ hidden: filters.hidden === 'only' ? undefined : 'only' })} title={tr('Tenders you said you are not interested in')}>{tr('Show ignored')}</button>
-        <span className="spacer" />
-        <ViewsMenu filters={filters} display={display} onApply={onApplyView} />
-        <button type="button" className="btn" onClick={copyLink} title="Copy a link to exactly this view">{tr('Share')}</button>
       </div>
 
       {chips.length > 0 && (

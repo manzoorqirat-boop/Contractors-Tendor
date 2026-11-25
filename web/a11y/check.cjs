@@ -57,6 +57,9 @@ async function scan(page, name) {
       } catch (e) { problems.push(`${mode} ${name}: could not be reached for the check (${String(e.message).split('\n')[0].slice(0, 100)})`); }
     };
     await visit('dashboard', '#/dashboard');
+    await visit('help panel', '#/dashboard', () => page.evaluate(() => window.dispatchEvent(new Event('open-help'))));
+    await visit('guided tour', '#/dashboard', () => page.evaluate(() => window.dispatchEvent(new Event('open-tour'))));
+    await visit('tenders filters opened', '#/tenders', () => page.click('.fb-toggle'));
     await visit('explore', '#/explore');
     await visit('tenders', '#/tenders');
     await visit('tenders table', '#/tenders', () => page.click(reduced ? '.seg button >> nth=-1' : 'button:has-text("Table")'));
