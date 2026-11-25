@@ -793,6 +793,13 @@ class SeenStore:
                 self._memo_vals[key] = value
         return copy.deepcopy(value)
 
+    def kept_count(self) -> int:
+        """How many civil tenders are kept at all, closed ones included. It tells "nothing has been collected yet" from "everything has closed"."""
+        def compute() -> int:
+            with self.reading() as db:
+                return int(db.execute("SELECT COUNT(*) FROM seen WHERE civil = 1").fetchone()[0])
+        return int(self._remembered(("kept",), compute))
+
     def categories(self) -> list[str]:
         def compute() -> list[str]:
             with self.reading() as db:

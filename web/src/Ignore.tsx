@@ -19,7 +19,9 @@ export function NotInterestedMenu({ tenders, onDone }: { tenders: Tender[]; onDo
     setBusy(true);
     try {
       const r = await api.hideTenders(tenders.map((t) => t.key), true, withDepartments);
-      toast(r.muted.length ? `Hid ${plural(r.changed, 'tender')} and everything from ${r.muted.join(', ')}. Bring them back in Vault > Company.` : `Hid ${plural(r.changed, 'tender')}. Choose "Show ignored" to bring them back.`);
+      const keys = tenders.map((t) => t.key);
+      toast(r.muted.length ? `Hid ${plural(r.changed, 'tender')} and everything from ${r.muted.join(', ')}. Bring them back in Vault > Company.` : `Hid ${plural(r.changed, 'tender')}. Choose "Show ignored" to bring them back.`,
+        'ok', r.muted.length ? undefined : { label: tr('Undo'), run: () => { api.hideTenders(keys, false).then(() => { toast(tr('Brought back.')); window.dispatchEvent(new CustomEvent('tenders-changed')); }, (e: Error) => toast(e.message, 'bad')); } });
       onDone();
     } catch (e) { toast((e as Error).message, 'bad'); } finally { setBusy(false); }
   }

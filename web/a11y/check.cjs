@@ -57,6 +57,9 @@ async function scan(page, name) {
       } catch (e) { problems.push(`${mode} ${name}: could not be reached for the check (${String(e.message).split('\n')[0].slice(0, 100)})`); }
     };
     await visit('dashboard', '#/dashboard');
+    await visit('help panel', '#/dashboard', () => page.evaluate(() => window.dispatchEvent(new Event('open-help'))));
+    await visit('guided tour', '#/dashboard', () => page.evaluate(() => window.dispatchEvent(new Event('open-tour'))));
+    await visit('tenders filters opened', '#/tenders', () => page.click('.fb-toggle'));
     await visit('explore', '#/explore');
     await visit('tenders', '#/tenders');
     await visit('tenders table', '#/tenders', () => page.click(reduced ? '.seg button >> nth=-1' : 'button:has-text("Table")'));
@@ -85,7 +88,7 @@ async function scan(page, name) {
     }
     await visit('runs', '#/runs');
     if (!reduced) {
-      for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Integrations', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => page.click(`[role=tab]:has-text("${t}")`));
+      for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Integrations', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => (mobile ? page.selectOption('.set-picker', { label: t }) : page.click(`[role=tab]:has-text("${t}")`)));
       await visit('account', '#/dashboard', async () => { if (mobile) await page.click('.more-toggle'); await page.click('text=Account & security'); });
       await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?'));
       await visit('add a tender', '#/tenders', async () => { await page.click('text=Add a tender'); await page.click('button:has-text("Continue"), button:has-text("Type the details myself")'); });

@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 import { ScrollX } from '../ScrollX';
 import { ErrorNote } from '../ui';
 import { useEffect, useState } from 'react';
@@ -37,12 +38,12 @@ export function RunsPage({ config }: { config: AppConfig }) {
 
   return (
     <>
-      <div className="page-head"><div><h1>Runs</h1><p className="sub">Collect the latest tenders now, or see what the daily run did.</p></div></div>
+      <div className="page-head"><div><h1>{tr('Runs')}</h1><p className="sub">{tr('Collect the latest tenders now, or see what the daily run did.')}</p></div></div>
 
       <ReadOnly>
       <section className="card" style={{ marginBottom: 14 }}>
-        <h2>Run now</h2>
-        <p className="sub">Reads the portals for tenders you have not seen yet. The first run can take 20 to 40 minutes; later ones are shorter.</p>
+        <h2>{tr('Collect tenders now')}</h2>
+        <p className="sub">{tr('Reads the portals for tenders you have not seen yet. The first run can take 20 to 40 minutes; later ones are shorter.')}</p>
         {error && <div className="alert bad" role="alert">{error}</div>}
         <fieldset style={{ border: 0, padding: 0, margin: '0 0 8px' }}>
           <legend style={{ fontWeight: 600, marginBottom: 4 }}>Portals</legend>
@@ -54,10 +55,10 @@ export function RunsPage({ config }: { config: AppConfig }) {
           <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} disabled={!config.mail_configured} />
           Also email the digest to the {config.recipient_count} recipient{config.recipient_count === 1 ? '' : 's'}
         </label>
-        {!config.mail_configured && <p className="sub" style={{ marginTop: 0 }}>Email is not set up on the server (BREVO_API_KEY and MAIL_FROM).</p>}
+        {!config.mail_configured && <p className="sub" style={{ marginTop: 0 }}>{tr('Emailing is not switched on yet. Ask whoever installed TendAI to set it up (the README explains how).')}</p>}
         <div style={{ marginTop: 12 }}>
           <button className="btn primary" onClick={start} disabled={starting || busy || portals.length === 0}>
-            {busy ? <><span className="spinner" /> A run is in progress</> : starting ? 'Starting…' : 'Run now'}
+            {busy ? <><span className="spinner" /> {tr('A run is in progress')}</> : starting ? tr('Starting…') : tr('Collect tenders now')}
           </button>
         </div>
       </section>

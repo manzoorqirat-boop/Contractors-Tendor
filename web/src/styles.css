@@ -291,9 +291,9 @@ main:focus { outline: none; }
   .facts { grid-template-columns: 105px 1fr; } .pop-panel { position: fixed; left: 8px; right: 8px; top: auto; bottom: 8px; max-width: none; }
 }
 .fb-row .btn { padding: 7px 11px; }
-.fb-toggle { display: none; }
 .fb-selects { display: contents; }
-@media (max-width: 640px) { .fb-toggle { display: inline-flex; } .fb-more:not(.open), .fb-selects:not(.open) { display: none; } .fb-selects.open { display: grid; gap: 8px; width: 100%; } }
+.fb-extra:not(.open) { display: none; }
+@media (max-width: 640px) { .fb-primary:not(.open), .fb-selects:not(.open) { display: none; } .fb-selects.open { display: grid; gap: 8px; width: 100%; } }
 .ai-text { margin-top: 10px; padding: 12px; background: var(--accent-soft); border-radius: 8px; white-space: pre-wrap; line-height: 1.5; }
 .ai-text .small { margin-top: 8px; }
 /* ---- AI ------------------------------------------------------------------------------------------------------- */
@@ -790,3 +790,30 @@ code { overflow-wrap: anywhere; }                 /* a long setting name or web 
 
 /* Shown across the top while the browser has no connection */
 .offline-bar { position: sticky; top: 0; z-index: 60; padding: 8px 16px; text-align: center; font-size: var(--fs-sm); font-weight: 600; background: var(--warn-soft); color: var(--text); border-bottom: 1px solid var(--warn); }
+
+/* Help panel and word explanations */
+abbr.term { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.help-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 10px; }
+.help-steps li { counter-increment: step; display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: start; }
+.help-steps li::before { content: counter(step); width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--text); display: grid; place-items: center; font-weight: 700; font-size: var(--fs-sm); }
+.help-where { margin: 0; padding-left: 18px; }
+.help-where li { margin-bottom: 4px; }
+.help-glossary dt { font-weight: 700; }
+@media (max-width: 640px) { .help-steps li { grid-template-columns: 28px 1fr; } .help-steps li .btn { grid-column: 2; justify-self: start; } }
+.toast-action { margin-left: 10px; border: 0; background: none; color: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; padding: 2px 4px; }
+
+/* Settings: on a phone the nine sections are a picker, not a half-hidden row of tabs */
+.set-picker { display: none; }
+@media (max-width: 640px) {
+  .set-picker { display: block; width: 100%; margin-bottom: 8px; }
+  .set-bar.has-picker [role='tablist'] { display: none; }
+}
+
+/* Guided tour */
+.tour { position: fixed; inset: 0; z-index: 200; }
+.tour-shade { position: absolute; inset: 0; background: rgba(8, 12, 20, .45); }
+.tour-ring { position: absolute; border-radius: 10px; box-shadow: 0 0 0 3px var(--accent), 0 0 0 9999px rgba(8, 12, 20, .45); pointer-events: none; }
+.tour-card { position: absolute; width: min(320px, calc(100vw - 24px)); background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 16px; outline: none; }
+.tour-actions { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 700px) { .tour-card { width: auto; } }
+.tour-shade.clear { background: transparent; }

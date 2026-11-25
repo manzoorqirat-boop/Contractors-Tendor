@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { api } from '../api';
 import { inr } from '../format';
@@ -15,6 +16,21 @@ import { ACCENTS, setCompanyAccent } from '../theme';
 import type { AiStatus, AppConfig, Settings } from '../types';
 
 type Tab = 'email' | 'reminders' | 'portals' | 'filters' | 'ai' | 'people' | 'integrations' | 'activity' | 'backup';
+
+// What each section is for, said under the page title; and the section names for the phone picker (a half-hidden row of nine tabs is hard to discover there).
+const SECTION_ORDER: Tab[] = ['email', 'reminders', 'portals', 'filters', 'ai', 'people', 'integrations', 'activity', 'backup'];
+const SECTION_NAME: Record<Tab, string> = { email: tr('Daily email'), reminders: tr('Reminders'), portals: tr('Portals'), filters: tr('Civil filter'), ai: tr('AI & logo'), people: tr('People'), integrations: tr('Integrations'), activity: tr('Activity'), backup: tr('Backup') };
+const SECTION_HELP: Record<Tab, string> = {
+  email: tr('Who gets the daily email of new tenders, and when.'),
+  reminders: tr('Reminders before a bid\'s deadlines: by email, to a chat tool, or in your calendar.'),
+  portals: tr('Which government portals TendAI reads, and whether each one is working.'),
+  filters: tr('What counts as a civil tender: words to include or leave out, and the smallest value to keep.'),
+  ai: tr('The AI assistant, your company logo and how the app looks.'),
+  people: tr('Who can sign in and what each person may do.'),
+  integrations: tr('Connect other systems: single sign-on, API tokens, webhooks and the WhatsApp assistant.'),
+  activity: tr('A log of who changed what, and when.'),
+  backup: tr('Download a copy of your data, restore it, and clear out old closed tenders.'),
+};
 let lastTab: Tab = 'email';
 const norm = (v: { recipients: string; extra: string; exclude: string; minValue: string; logoText: string; f: Settings }) => JSON.stringify([
   lines(v.recipients), lines(v.extra), lines(v.exclude), Number(v.minValue) || 0, v.logoText, v.f.send_time, v.f.schedule_enabled, v.f.send_empty,
@@ -133,12 +149,15 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
 
   return (
     <>
-      <div className="page-head"><div><h1>Settings</h1><p className="sub">Who gets the digest, when, and what counts as a civil tender.</p></div></div>
+      <div className="page-head"><div><h1>{tr('Settings')}</h1><p className="sub">{SECTION_HELP[tab]}</p></div></div>
       <form onSubmit={save}>
-        <div className="set-bar">
+        <div className="set-bar has-picker">
+          <select className="set-picker" aria-label={tr('Settings section')} value={tab} onChange={(e) => setTab(e.target.value as Tab)}>
+            {SECTION_ORDER.map((k) => <option key={k} value={k}>{SECTION_NAME[k]}</option>)}
+          </select>
           <Tabs<Tab> label="Settings sections" value={tab} onChange={setTab} tabs={[
-            { key: 'email', label: 'Daily email' }, { key: 'reminders', label: 'Reminders' }, { key: 'portals', label: <>Portals<span className="tab-dot">{form.portals.length}</span></> },
-            { key: 'filters', label: 'Civil filter' }, { key: 'ai', label: 'AI & logo' }, { key: 'people', label: 'People' }, { key: 'integrations', label: 'Integrations' }, { key: 'activity', label: 'Activity' }, { key: 'backup', label: 'Backup' }]} />
+            { key: 'email', label: SECTION_NAME.email }, { key: 'reminders', label: SECTION_NAME.reminders }, { key: 'portals', label: <>{SECTION_NAME.portals}<span className="tab-dot">{form.portals.length}</span></> },
+            { key: 'filters', label: SECTION_NAME.filters }, { key: 'ai', label: SECTION_NAME.ai }, { key: 'people', label: SECTION_NAME.people }, { key: 'integrations', label: SECTION_NAME.integrations }, { key: 'activity', label: SECTION_NAME.activity }, { key: 'backup', label: SECTION_NAME.backup }]} />
           {['email', 'reminders', 'portals', 'filters', 'ai'].includes(tab) && SaveBar}
         </div>
         {msg && <div className={`alert ${msg.tone}`} role="status">{msg.text}</div>}
@@ -146,7 +165,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
         {tab === 'email' && (
           <section className="card">
             <h2>Daily email</h2>
-            <p className="sub">{form.mail_configured ? <>Sent from <strong>{form.mail_from}</strong> through Brevo.</> : 'Email is not set up on the server: BREVO_API_KEY and MAIL_FROM are missing.'}</p>
+            <p className="sub">{form.mail_configured ? <>Sent from <strong>{form.mail_from}</strong> through Brevo.</> : <>{tr('Daily emails are not switched on yet, so nothing can be sent. Whoever installed TendAI needs to connect an email service (the README explains how).')} <span className="muted">{tr('Technical: BREVO_API_KEY and MAIL_FROM are missing on the server.')}</span></>}</p>
             <div className="set-grid">
               <label className="field">
                 Recipients

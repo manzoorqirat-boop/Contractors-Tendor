@@ -33,7 +33,8 @@ def test_the_notice_is_read_into_a_listing_for_checking_and_nothing_is_saved(app
     got = c.post("/api/tenders/manual/read", json={"text": "NOTICE INVITING TENDER ..."}).json()["listing"]
     assert got["tender_id"] == "NIT/PWD/2026/17" and got["value"] is None and got["closing"] == "" and "extra" not in got and got["emd"] == 250000
     assert c.post("/api/tenders/manual/read", json={}).status_code == 502  # nothing to read
-    assert c.get("/api/tenders", params={"page_size": 50}).json()["total"] == 1
+    # status=all: the fixture's tender closes ten days after the test's fixed date, which the real clock passes; "listed" must not depend on today's date
+    assert c.get("/api/tenders", params={"page_size": 50, "status": "all"}).json()["total"] == 1
 
 
 def test_saving_needs_the_essentials_and_refuses_duplicates(app_ctx):
@@ -60,7 +61,7 @@ def test_a_saved_tender_is_listed_quietly_kept_with_its_notice_and_read(app_ctx,
     assert r["key"] == "manual:NIT/PWD/2026/17" and r["doc_read"] and r["source_kept"] and r["doc_error"] == ""
     d = c.get("/api/tenders/detail", params={"key": r["key"]}).json()
     assert d["portal_name"] == "Added by hand" and d["manual"] is True and d["has_source"] and d["search_url"] == "" and d["doc"]["requirements"] == ["Class A"]
-    rows = c.get("/api/tenders", params={"page_size": 50}).json()["items"]
+    rows = c.get("/api/tenders", params={"page_size": 50, "status": "all"}).json()["items"]
     assert {x["tender_id"] for x in rows} == {"T1", "NIT/PWD/2026/17"}
     assert [t.tender_id for t in store.pending(NOW)] == ["T1"]  # not in 'new since the last digest': you added it yourself
 

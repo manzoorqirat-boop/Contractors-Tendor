@@ -3,15 +3,17 @@ import { useOnline } from './hooks';
 import { tr } from './i18n';
 
 // ---- toasts ----------------------------------------------------------------------------------------------------
-type Toast = { id: number; text: string; tone: 'ok' | 'bad' };
-const ToastCtx = createContext<(text: string, tone?: 'ok' | 'bad') => void>(() => {});
+/** A button in a toast, for the one thing that is useful right after an action (usually "Undo"). */
+export type ToastAction = { label: string; run: () => void };
+type Toast = { id: number; text: string; tone: 'ok' | 'bad'; action?: ToastAction };
+const ToastCtx = createContext<(text: string, tone?: 'ok' | 'bad', action?: ToastAction) => void>(() => {});
 export const useToast = () => useContext(ToastCtx);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((text: string, tone: 'ok' | 'bad' = 'ok') => {
+  const push = useCallback((text: string, tone: 'ok' | 'bad' = 'ok', action?: ToastAction) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t.slice(-2), { id, text, tone }]);
+    setToasts((t) => [...t.slice(-2), { id, text, tone, action }]);
   }, []);
   const drop = useCallback((id: number) => setToasts((xs) => xs.filter((x) => x.id !== id)), []);
   return (
@@ -29,13 +31,14 @@ function ToastItem({ toast, onDone }: { toast: Toast; onDone: (id: number) => vo
   const [held, setHeld] = useState(false);
   useEffect(() => {
     if (held) return;
-    const timer = setTimeout(() => onDone(toast.id), toast.tone === 'bad' ? 12000 : 5000);
+    const timer = setTimeout(() => onDone(toast.id), toast.tone === 'bad' ? 12000 : toast.action ? 10000 : 5000);   // a toast with an Undo stays longer
     return () => clearTimeout(timer);
-  }, [held, toast.id, toast.tone, onDone]);
+  }, [held, toast.id, toast.tone, toast.action, onDone]);
   return (
     <div className={`toast ${toast.tone}`} role={toast.tone === 'bad' ? 'alert' : undefined}
       onMouseEnter={() => setHeld(true)} onMouseLeave={() => setHeld(false)} onFocus={() => setHeld(true)} onBlur={() => setHeld(false)}>
       <span>{toast.text}</span>
+      {toast.action && <button type="button" className="toast-action" onClick={() => { toast.action?.run(); onDone(toast.id); }}>{toast.action.label}</button>}
       <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => onDone(toast.id)}>✕</button>
     </div>
   );

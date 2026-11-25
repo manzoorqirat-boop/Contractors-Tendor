@@ -16,6 +16,8 @@ import { unsaved } from './unsaved';
 import { SessionProvider, useSession } from './session';
 import { AccountPanel, ChangePassword } from './Account';
 import { ShortcutsHelp, useShortcuts } from './Shortcuts';
+import { HelpDrawer, useHelp } from './Help';
+import { Tour, useTour } from './Tour';
 import type { Display, Facets, Filters, Me } from './types';
 import { tr } from './i18n';
 
@@ -198,22 +200,26 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
   const nav: Nav = { filters, display, facets: facets.data, setFilters, setDisplay, go };
   const tabAllowed = useCallback((t: Tab) => t !== 'settings' || can('admin'), [can]);
   const [help, setHelp] = useShortcuts(useCallback((t: Tab) => go(t), [go]), tabAllowed);
+  const [guide, setGuide] = useHelp();
+  const [touring, setTouring] = useTour(!!user && !changingPassword);
   const themeLabel = theme === 'dark' ? tr('Theme: Dark') : theme === 'light' ? tr('Theme: Light') : tr('Theme: Auto');
   const cycleTheme = () => { const next = THEMES[(THEMES.indexOf(theme) + 1) % 3]; setTheme(next); applyTheme(next); try { localStorage.setItem('theme', next); } catch { /* ignore */ } };
 
   return (
     <div className="app">
+      <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>{tr('Skip to content')}</a>
       <AddTenderHost />
       {help && <ShortcutsHelp onClose={() => setHelp(false)} allowed={tabAllowed} />}
+      {guide && <HelpDrawer onClose={() => setGuide(false)} />}
+      {touring && <Tour onClose={() => setTouring(false)} />}
       {changingPassword && user && <Drawer title={tr('Account & security')} onClose={() => setChangingPassword(false)}><AccountPanel user={user} onClose={() => setChangingPassword(false)} onChanged={refreshMe} /></Drawer>}
-      <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>{tr('Skip to content')}</a>
       <aside className="sidebar">
         <div className="brand" aria-label="TendAI by QMSofts">
           <Logo />
           <span className="brand-name"><span className="brand-word">Tend<span className="brand-ai">AI</span></span><span className="brand-by">by QMSofts</span></span>
         </div>
         <nav className="nav" aria-label={tr('Main')}>
-          {MAIN_TABS.map((t) => <a key={t.id} className="nav-link" href={hrefFor(t.id)} aria-current={tab === t.id ? 'page' : undefined} onClick={(e) => go1(e, t.id, t.id === 'explore' || t.id === 'tenders')}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span>{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title={tr('Changes on tenders you are bidding for')}>{alerts.data!.unseen}</span>}</a>)}
+          {MAIN_TABS.map((t) => <a key={t.id} data-tour={t.id} className="nav-link" href={hrefFor(t.id)} aria-current={tab === t.id ? 'page' : undefined} onClick={(e) => go1(e, t.id, t.id === 'explore' || t.id === 'tenders')}><NavIcon id={t.id} /><span className="nav-label">{t.label}</span>{t.id === 'bids' && (alerts.data?.unseen ?? 0) > 0 && <span className="count-pill alert-pill" title={tr('Changes on tenders you are bidding for')}>{alerts.data!.unseen}</span>}</a>)}
         </nav>
         <div className={`side-foot${moreOpen ? ' open' : ''}`}>
           <button type="button" className="more-toggle" aria-expanded={moreOpen} aria-controls="side-more" onClick={() => setMoreOpen((o) => !o)}>{user?.name || tr('Menu')} <span aria-hidden>▾</span></button>
@@ -232,6 +238,7 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
             <div className="link-btn" style={{ padding: '4px 10px' }}><LanguageSwitch /></div>
             <div className="link-btn" style={{ padding: '4px 10px' }}><AccentPicker /></div>
           </details>
+          <button className="link-btn" data-tour="help" onClick={() => setGuide(true)}><span className="nav-label">{tr('Help')}</span></button>
           <button className="link-btn" onClick={() => setHelp(true)}><span className="nav-label">{tr('Keyboard shortcuts')}</span></button>
           <button className="link-btn" onClick={onLogout}><span className="nav-label">{tr('Log out')}</span></button>
           </div>

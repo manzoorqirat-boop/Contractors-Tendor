@@ -114,6 +114,8 @@ def register(app: FastAPI, ctx: Ctx) -> None:
             raise HTTPException(422, "Unknown sort")
         rows, total = store.search(now(), f, sort, page_size, (page - 1) * page_size)
         out = {"items": [shape(r) for r in rows], "total": total, "page": page, "page_size": page_size, "categories": store.categories()}
+        if total == 0:
+            out["kept"] = store.kept_count()          # 0: nothing has been collected yet; more than 0: there are tenders, just none that match (or all have closed)
         if f.get("q"):
             parsed = smartsearch.parse(str(f["q"]))
             out["understood"] = parsed.describe() if (parsed.has_text or parsed.min_value is not None or parsed.max_value is not None) else ""

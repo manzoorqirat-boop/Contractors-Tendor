@@ -11,6 +11,7 @@ import { HealthBanner, ManualBanner } from '../ManualPortals';
 import { MoneyCard } from '../Money';
 import { ForecastCard } from '../Forecast';
 import { Only, useSession } from '../session';
+import { CollectButton, NothingCollected } from '../Collect';
 import type { AppConfig, Drill, Filters, Measure, Pivot } from '../types';
 import { labelFor, metricOf, MEASURES } from './chartdata';
 import { BarBlock } from './LazyCharts';
@@ -42,6 +43,7 @@ function usePivot(f: Filters, groupBy: string, top = 12) {
 
 export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
   const { filters, display, go } = nav;
+  const toast = useToast();
   const measure: Measure = display.measure === 'value' ? 'value' : 'count';
   const today = config.now.slice(0, 10);
   const stats = useLoad(() => api.stats(filters), [JSON.stringify(filters)]);
@@ -59,6 +61,10 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
   const k = stats.data?.kpi;
   const delta = k ? k.new_today - k.new_yesterday : 0;
   const empty = k && k.total_kept === 0 && !stats.loading;
+  async function loadSample() {
+    try { const r = await api.loadSample(); toast(tr('{n} sample tenders added. They are marked "Sample data" and never emailed.', { n: r.added })); stats.reload(); window.dispatchEvent(new CustomEvent('tenders-changed')); }
+    catch (e) { toast((e as Error).message, 'bad'); }
+  }
 
   const kpiGo = (patch: Partial<Filters>) => go('tenders', { ...filters, ...patch }, undefined);
 
@@ -130,11 +136,11 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
           <div className="seg" role="group" aria-label={tr('Chart measure')}>
             {(['count', 'value'] as Measure[]).map((m) => <button key={m} type="button" aria-pressed={measure === m} className={measure === m ? 'on' : ''} onClick={() => nav.setDisplay({ measure: m })}>{m === 'count' ? tr('Tenders') : tr('Value')}</button>)}
           </div>
-          <Only role="bidder"><button className="btn primary" onClick={() => go('runs')}>{tr('Run now')}</button></Only>
+          <Only role="bidder"><CollectButton portals={config.portals.map((p) => p.key)} go={go} /></Only>
         </div>
       </div>
 
-      <SetupCard onChanged={() => stats.reload()} />
+      <SetupCard onChanged={() => stats.reload()} portals={config.portals.map((p) => p.key)} go={go} />
 
       <HealthBanner onOpen={() => go('settings')} />
       <ManualBanner onOpen={() => go('settings')} />
@@ -146,11 +152,7 @@ export function Dashboard({ config, nav }: { config: AppConfig; nav: Nav }) {
 
       <ErrorNote error={stats.error} onRetry={stats.reload} />
       {empty ? (
-        <div className="card empty" style={{ padding: 40 }}>
-          <svg className="empty-ico" viewBox="0 0 24 24" aria-hidden><path d="M11 4a7 7 0 105.2 11.7l3.5 3.5 1.4-1.4-3.5-3.5A7 7 0 0011 4zm0 2a5 5 0 110 10 5 5 0 010-10z" /></svg><h2 style={{ marginBottom: 6 }}>{tr('No tenders match')}</h2>
-          <p className="sub" style={{ marginBottom: 16 }}>{Object.keys(filters).length && (filters.portal.length || filters.category.length || filters.q) ? tr('Try clearing a filter above.') : 'Nothing has been collected yet. Go to Runs and press Run now; the first run takes 20 to 40 minutes.'}</p>
-          <button className="btn primary" onClick={() => go('runs')}>{tr('Go to Runs')}</button>
-        </div>
+        <NothingCollected portals={config.portals.map((p) => p.key)} go={go} onSample={loadSample} />
       ) : (
         <>
           <div className="grid kpis">
@@ -190,7 +192,7 @@ function withUnit(value?: string) {
 }
 
 /** What a new installation still needs, worked out by the server from what is stored. Disappears when everything is done, or when hidden. Administrators can also try the app with sample tenders. */
-function SetupCard({ onChanged }: { onChanged: () => void }) {
+function SetupCard({ onChanged, portals, go }: { onChanged: () => void; portals: string[]; go: (tab: 'runs') => void }) {
   const { can } = useSession();
   const toast = useToast();
   const confirm = useConfirm();
@@ -220,7 +222,7 @@ function SetupCard({ onChanged }: { onChanged: () => void }) {
             <li key={s.key} className={s.done ? 'done' : ''}>
               <span className="setup-mark" aria-hidden>{s.done ? '✓' : '○'}</span>
               <div><strong>{s.title}</strong><span className="sr-only">{s.done ? ' (done)' : ' (to do)'}</span>{!s.done && <div className="muted small">{s.why}</div>}</div>
-              {!s.done && <a className="btn small" href={s.href}>{s.where}</a>}
+              {!s.done && (s.key === 'run' && can('bidder') ? <CollectButton portals={portals} go={go} primary={false} /> : <a className="btn small" href={s.href}>{s.where}</a>)}
             </li>
           ))}
         </ul>

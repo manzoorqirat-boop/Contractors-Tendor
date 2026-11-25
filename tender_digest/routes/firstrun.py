@@ -27,11 +27,11 @@ def register(app: FastAPI, ctx: Ctx) -> None:
         runs = store.list_runs(1)
         sample_rows = store.count_portal("sample")
         steps = [
+            {"key": "run", "title": "Collect tenders", "why": "Reads the portals for tenders. The first run takes 20 to 40 minutes and you can keep working while it goes.", "done": store.count() - sample_rows > 0 or bool(runs and runs[0]["status"] == "ok"), "href": "#/runs", "where": "Runs"},
             {"key": "profile", "title": "Describe your company", "why": "The AI assistant uses it to score tenders for fit and to write letters.", "done": len(profile().strip()) >= 20, "href": "#/vault", "where": "Vault > Company"},
             {"key": "facts", "title": "Add your company facts", "why": "Turnover, registration class and similar figures are checked against each tender's eligibility.", "done": len(company_facts()) >= 3, "href": "#/vault", "where": "Vault > Company"},
             {"key": "vault", "title": "Add your standard papers to the Vault", "why": "GST, PAN, registration, balance sheets: bids match their checklist to these.", "done": len(bids.vault_list()) >= 3, "href": "#/vault", "where": "Vault > Documents"},
             {"key": "email", "title": "Choose who gets the daily email", "why": "New civil tenders arrive in the inbox each morning.", "done": bool(manager.mail_configured and cur["recipients"]), "href": "#/settings", "where": "Settings > Daily email", "admin": True},
-            {"key": "run", "title": "Collect tenders", "why": "Press Run now on the Runs page, or wait for the daily run.", "done": store.count() - sample_rows > 0 or bool(runs and runs[0]["status"] == "ok"), "href": "#/runs", "where": "Runs"},
             {"key": "bid", "title": "Start your first bid", "why": "Open a tender and press Start bid to get the checklist, price tools and team tools.", "done": len([b for b in bids.list() if b["portal"] != "sample"]) > 0, "href": "#/tenders", "where": "Tenders"},
             {"key": "catalogue", "title": "Load your item catalogue (optional)", "why": "Lets a BOQ be costed from your own rates.", "done": (boq.catalogue(False)["counts"].get("item_master", 0) or 0) > 0, "href": "#/vault", "where": "Vault > Item catalogue", "optional": True},
         ]
