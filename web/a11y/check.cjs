@@ -88,7 +88,7 @@ async function scan(page, name) {
     }
     await visit('runs', '#/runs');
     if (!reduced) {
-      for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Integrations', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => page.click(`[role=tab]:has-text("${t}")`));
+      for (const t of ['Daily email', 'Portals', 'Civil filter', 'AI & logo', 'People', 'Integrations', 'Activity', 'Backup']) await visit(`settings ${t}`, '#/settings', () => (mobile ? page.selectOption('.set-picker', { label: t }) : page.click(`[role=tab]:has-text("${t}")`)));
       await visit('account', '#/dashboard', async () => { if (mobile) await page.click('.more-toggle'); await page.click('text=Account & security'); });
       await visit('shortcuts', '#/dashboard', () => page.keyboard.press('?'));
       await visit('add a tender', '#/tenders', async () => { await page.click('text=Add a tender'); await page.click('button:has-text("Continue"), button:has-text("Type the details myself")'); });

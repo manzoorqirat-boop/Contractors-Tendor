@@ -151,7 +151,7 @@ export function SettingsPage({ onSaved }: { config: AppConfig; onSaved: () => vo
     <>
       <div className="page-head"><div><h1>{tr('Settings')}</h1><p className="sub">{SECTION_HELP[tab]}</p></div></div>
       <form onSubmit={save}>
-        <div className="set-bar">
+        <div className="set-bar has-picker">
           <select className="set-picker" aria-label={tr('Settings section')} value={tab} onChange={(e) => setTab(e.target.value as Tab)}>
             {SECTION_ORDER.map((k) => <option key={k} value={k}>{SECTION_NAME[k]}</option>)}
           </select>

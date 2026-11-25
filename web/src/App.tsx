@@ -207,12 +207,12 @@ function Main({ onLogout, refreshMe }: { onLogout: () => void; refreshMe: () => 
 
   return (
     <div className="app">
+      <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>{tr('Skip to content')}</a>
       <AddTenderHost />
       {help && <ShortcutsHelp onClose={() => setHelp(false)} allowed={tabAllowed} />}
       {guide && <HelpDrawer onClose={() => setGuide(false)} />}
       {touring && <Tour onClose={() => setTouring(false)} />}
       {changingPassword && user && <Drawer title={tr('Account & security')} onClose={() => setChangingPassword(false)}><AccountPanel user={user} onClose={() => setChangingPassword(false)} onChanged={refreshMe} /></Drawer>}
-      <a href="#main" className="skip" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>{tr('Skip to content')}</a>
       <aside className="sidebar">
         <div className="brand" aria-label="TendAI by QMSofts">
           <Logo />

@@ -806,7 +806,7 @@ abbr.term { text-decoration: underline dotted; text-underline-offset: 3px; curso
 .set-picker { display: none; }
 @media (max-width: 640px) {
   .set-picker { display: block; width: 100%; margin-bottom: 8px; }
-  .set-bar [role='tablist'] { display: none; }
+  .set-bar.has-picker [role='tablist'] { display: none; }
 }
 
 /* Guided tour */
